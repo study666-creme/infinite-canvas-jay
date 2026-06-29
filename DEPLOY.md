@@ -34,8 +34,11 @@ npm run dev
 
 ```powershell
 cd D:\canvas\infinite-canvas
-git push -u origin main
+git checkout github-main
+git push -u origin github-main:main --force
 ```
+
+首次推送用 `github-main:main`（单次 root commit，避免浅克隆 `main` 缺对象）。之后可在 `github-main` 上继续开发并 `git push`。
 
 从上游同步（可选）：
 

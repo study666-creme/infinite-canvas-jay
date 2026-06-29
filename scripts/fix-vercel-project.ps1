@@ -1,19 +1,22 @@
-# 一键修复 Vercel 项目 infinite-canvas-jay：Root Directory=web、Node=20.x，并触发重新部署
-# 用法（PowerShell）：
+# Fix Vercel project infinite-canvas-jay: rootDirectory=web, node=20.x, npm build, redeploy
+# Usage:
 #   cd D:\canvas\infinite-canvas
-#   npx vercel login    # 只需做一次
-#   .\scripts\fix-vercel-project.ps1
+#   npx vercel login
+#   powershell -ExecutionPolicy Bypass -File .\scripts\fix-vercel-project.ps1
 
 $ErrorActionPreference = "Stop"
 
-$ProjectId = "prj_WFDr15QMmKCt7ENKV3u9ERVzOGA9"
+$ProjectId = "prj_WFDr15QMeKCt7ENKV3u9ERVzOGA9"
+$TeamId = "team_Yx9OAaDQjv28cShhYACANruM"
 $ProjectName = "infinite-canvas-jay"
+$RepoId = 1284099744
 
 function Get-VercelToken {
     if ($env:VERCEL_TOKEN) { return $env:VERCEL_TOKEN.Trim() }
 
     $candidates = @(
         (Join-Path $env:USERPROFILE ".vercel\auth.json"),
+        (Join-Path $env:APPDATA "xdg.data\com.vercel.cli\auth.json"),
         (Join-Path $env:LOCALAPPDATA "com.vercel.cli\auth.json"),
         (Join-Path $env:APPDATA "com.vercel.cli\auth.json")
     )
@@ -29,10 +32,7 @@ function Get-VercelToken {
 
 $token = Get-VercelToken
 if (-not $token) {
-    Write-Host ""
-    Write-Host "未找到 Vercel 登录令牌。请先执行：" -ForegroundColor Yellow
-    Write-Host "  npx vercel login" -ForegroundColor Cyan
-    Write-Host "登录完成后重新运行本脚本。" -ForegroundColor Yellow
+    Write-Host "[fix-vercel] No Vercel token. Run: npx vercel login" -ForegroundColor Yellow
     exit 1
 }
 
@@ -41,50 +41,35 @@ $headers = @{
     "Content-Type" = "application/json"
 }
 
-Write-Host "正在更新项目设置（Root Directory = web, Node.js = 20.x）..." -ForegroundColor Cyan
+Write-Host "[fix-vercel] PATCH rootDirectory=web, nodeVersion=20.x, npm build ..." -ForegroundColor Cyan
 
 $patchBody = @{
-    rootDirectory = "web"
-    nodeVersion   = "20.x"
+    rootDirectory   = "web"
+    nodeVersion     = "20.x"
+    framework       = "nextjs"
+    buildCommand    = "npm run build"
+    installCommand  = "npm ci || npm install"
+    outputDirectory = ".next"
 } | ConvertTo-Json
 
-try {
-    Invoke-RestMethod -Method PATCH `
-        -Uri "https://api.vercel.com/v9/projects/$ProjectId" `
-        -Headers $headers `
-        -Body $patchBody | Out-Null
-} catch {
-    Write-Host "PATCH 项目失败：$($_.Exception.Message)" -ForegroundColor Red
-    Write-Host "若 token 过期，请重新运行：npx vercel login" -ForegroundColor Yellow
-    exit 1
-}
+$patchUri = "https://api.vercel.com/v9/projects/$ProjectId`?teamId=$TeamId"
+Invoke-RestMethod -Method PATCH -Uri $patchUri -Headers $headers -Body $patchBody | Out-Null
 
-Write-Host "设置已保存。正在从 GitHub main 触发 production 部署..." -ForegroundColor Green
+Write-Host "[fix-vercel] Settings saved. Trigger production deploy from main ..." -ForegroundColor Green
 
-$repoMeta = Invoke-RestMethod -Uri "https://api.github.com/repos/study666-creme/infinite-canvas-jay"
-$deployBody = @{
-    name    = $ProjectName
-    project = $ProjectId
-    target  = "production"
-    gitSource = @{
-        type   = "github"
-        repoId = [int]$repoMeta.id
-        ref    = "main"
-    }
-} | ConvertTo-Json -Depth 5
+$deployBody = @"
+{"name":"$ProjectName","project":"$ProjectId","target":"production","gitSource":{"type":"github","repoId":$RepoId,"ref":"main"}}
+"@
 
 try {
-    $deployment = Invoke-RestMethod -Method POST `
-        -Uri "https://api.vercel.com/v13/deployments" `
-        -Headers $headers `
-        -Body $deployBody
-    $url = if ($deployment.url) { "https://$($deployment.url)" } else { "https://vercel.com/study666-cremes-projects/$ProjectName" }
-    Write-Host "部署已排队：$url" -ForegroundColor Green
+    $deployUri = "https://api.vercel.com/v13/deployments?teamId=$TeamId"
+    $deployment = Invoke-RestMethod -Method POST -Uri $deployUri -Headers $headers -Body $deployBody
+    $deployUrl = if ($deployment.url) { "https://$($deployment.url)" } else { "https://vercel.com/study666-cremes-projects/$ProjectName" }
+    Write-Host "[fix-vercel] Deploy queued: $deployUrl" -ForegroundColor Green
 } catch {
-    Write-Host "自动部署触发失败：$($_.Exception.Message)" -ForegroundColor Yellow
-    Write-Host "设置已改好。请到 Vercel → Deployments → 最新一条 → Redeploy。" -ForegroundColor Yellow
+    Write-Host "[fix-vercel] Auto deploy failed: $($_.Exception.Message)" -ForegroundColor Yellow
+    Write-Host "[fix-vercel] Vercel -> Deployments -> Redeploy latest." -ForegroundColor Yellow
     exit 0
 }
 
-Write-Host ""
-Write-Host "约 1～3 分钟后打开：https://infinite-canvas-jay.vercel.app/canvas" -ForegroundColor Green
+Write-Host "[fix-vercel] Done. Open: https://infinite-canvas-jay.vercel.app/canvas" -ForegroundColor Green

@@ -48,7 +48,7 @@ $patchBody = @{
     nodeVersion     = "20.x"
     framework       = "nextjs"
     buildCommand    = "npm run build"
-    installCommand  = "npm ci || npm install"
+    installCommand  = "npm ci --legacy-peer-deps || npm install --legacy-peer-deps"
     outputDirectory = ".next"
 } | ConvertTo-Json
 

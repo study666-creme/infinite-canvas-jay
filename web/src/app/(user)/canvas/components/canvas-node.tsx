@@ -12,8 +12,6 @@ import { CanvasNodeLoadingState } from "./canvas-node-loading-state";
 import { CanvasVideoPlayer } from "./canvas-video-player";
 import { CanvasNodeType, type CanvasNodeData, type ConnectionHandle, type Position } from "../types";
 import type { CanvasResourceReference } from "../utils/canvas-resource-references";
-import { resolveActiveVideoReferences, toVideoReferenceAssets } from "../utils/canvas-video-references";
-import { CanvasVideoReferenceStrip } from "./canvas-video-reference-strip";
 
 type ResizeCorner = "top-left" | "top-right" | "bottom-left" | "bottom-right";
 
@@ -516,17 +514,14 @@ function EmptyImageContent({ theme, isBatchRoot, batchCount, batchExpanded, batc
     return content;
 }
 
-function VideoNodeContent({ node, theme, mentionReferences = [], onVideoPersisted }: NodeContentRendererProps) {
-    const liveReferenceAssets = toVideoReferenceAssets(resolveActiveVideoReferences(node.metadata?.prompt || "", mentionReferences));
-    const connectedReferenceAssets = toVideoReferenceAssets(mentionReferences.filter((reference) => reference.active));
-    const referenceAssets = liveReferenceAssets.length ? liveReferenceAssets : connectedReferenceAssets.length ? connectedReferenceAssets : node.metadata?.videoReferenceAssets || [];
+function VideoNodeContent({ node, theme, onVideoPersisted }: NodeContentRendererProps) {
     const isLoading = node.metadata?.status === "loading";
 
     if (!node.metadata?.content) {
         return (
             <div className="relative h-full w-full overflow-hidden">
                 {isLoading ? (
-                    <CanvasNodeLoadingState variant="video" referencePreviews={referenceAssets.map((item) => item.previewUrl || "").filter(Boolean)} />
+                    <CanvasNodeLoadingState variant="video" />
                 ) : (
                     <div className="flex h-full w-full flex-col items-center justify-center gap-2.5" style={{ color: theme.node.placeholder }}>
                         <div className="grid size-12 place-items-center rounded-2xl" style={{ background: `${theme.toolbar.activeBg}cc`, boxShadow: "inset 0 1px 0 rgba(255,255,255,.06)" }}>
@@ -535,25 +530,11 @@ function VideoNodeContent({ node, theme, mentionReferences = [], onVideoPersiste
                         <span className="text-sm tracking-wide opacity-70">空视频节点</span>
                     </div>
                 )}
-                {!isLoading && referenceAssets.length ? (
-                    <div className="absolute inset-x-0 bottom-0 z-10 px-3 pb-3 pt-1">
-                        <div
-                            className="rounded-[18px] border px-3 py-2.5 backdrop-blur-xl"
-                            style={{
-                                borderColor: "rgba(255,255,255,.1)",
-                                background: "linear-gradient(180deg, rgba(255,255,255,.08) 0%, rgba(0,0,0,.42) 100%)",
-                                boxShadow: "0 16px 40px rgba(0,0,0,.24), inset 0 1px 0 rgba(255,255,255,.06)",
-                            }}
-                        >
-                            <CanvasVideoReferenceStrip variant="node" references={referenceAssets} activeLabels={liveReferenceAssets.map((item) => item.label)} />
-                        </div>
-                    </div>
-                ) : null}
             </div>
         );
     }
     return (
-        <div className="relative h-full w-full">
+        <div className="relative h-full w-full overflow-hidden">
             <CanvasVideoPlayer
                 content={node.metadata.content}
                 storageKey={node.metadata.storageKey}
@@ -563,11 +544,6 @@ function VideoNodeContent({ node, theme, mentionReferences = [], onVideoPersiste
                 model={node.metadata.model}
                 onPersisted={onVideoPersisted}
             />
-            {referenceAssets.length ? (
-                <div className="pointer-events-none absolute bottom-3 left-3 z-20 max-w-[calc(100%-24px)] rounded-2xl border p-2 backdrop-blur-md" style={{ borderColor: "rgba(255,255,255,.12)", background: "rgba(0,0,0,.45)", boxShadow: "0 10px 28px rgba(0,0,0,.35)" }}>
-                    <CanvasVideoReferenceStrip variant="overlay" references={referenceAssets} activeLabels={liveReferenceAssets.map((item) => item.label)} />
-                </div>
-            ) : null}
         </div>
     );
 }

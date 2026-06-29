@@ -17,7 +17,7 @@
 无限画布是一款面向图片创作的开源工作台。它把画布编排、AI 图片生成、参考图编辑、对话助手、提示词库和素材沉淀放在同一个界面里，适合用来探索视觉方案并连续迭代图片结果。
 
 > [!NOTE]
-> **本仓库**为 [study666-creme/infinite-canvas-jay](https://github.com/study666-creme/infinite-canvas-jay) fork，在 [basketikun/infinite-canvas](https://github.com/basketikun/infinite-canvas) 基础上增加 **Prompt Hub（卡藏）双向同步**、Vercel 部署说明、Seedance/即梦视频与本地媒体落盘等。上游协议仍为 **AGPL-3.0**，请保留原作者标识。
+> **本仓库**为 [study666-creme/infinite-canvas-jay](https://github.com/study666-creme/infinite-canvas-jay) fork，在 [basketikun/infinite-canvas](https://github.com/basketikun/infinite-canvas) 基础上增加 **Prompt Hub（卡藏）双向同步** 等。上游协议仍为 **AGPL-3.0**——**须保持 GitHub 公开，不可闭源收费卖画布本身**；详见 **[OPEN-SOURCE.md](OPEN-SOURCE.md)**。
 
 > [!CAUTION]
 > 项目目前处于开发阶段，不保证历史数据兼容。各种数据库结构和存储格式都可能直接调整，欢迎关注后续更新，当前更适合个人/本地部署，不建议直接公网多人共用。

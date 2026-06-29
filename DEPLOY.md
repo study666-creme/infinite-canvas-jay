@@ -61,6 +61,17 @@ git merge upstream/main
 4. 构建命令：`npm run build`；安装命令：`npm install`（`web/vercel.json` 已声明，一般无需手改）。
 5. 部署完成后访问分配的域名；首次打开在右上角配置弹窗填入 Base URL 与 API Key。
 
+若部署失败（404 / DEPLOYMENT_NOT_FOUND）：
+
+1. Vercel → 项目 → **Deployments** → 点开最新一条看 **Build Logs** 红色报错
+2. 确认 **Root Directory = `web`**（不是仓库根目录）
+3. **Node.js Version = 20.x**（Settings → General）
+4. 重新 **Redeploy**（不要用已失败的旧域名缓存）
+
+## 开源合规
+
+公网部署前请读 **[OPEN-SOURCE.md](OPEN-SOURCE.md)**：本画布 fork **必须 AGPL 公开**；Prompt Hub 可独立闭源运营。
+
 可选环境变量（构建时注入，均有默认值，通常不必配置）：
 
 | 变量 | 说明 |

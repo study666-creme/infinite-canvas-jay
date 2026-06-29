@@ -6,15 +6,38 @@ import { dirname, resolve } from "node:path";
 import { parseChangelog } from "@/lib/release";
 
 const webDir = dirname(fileURLToPath(import.meta.url));
-const localVersion = readFileSync(resolve(webDir, "../VERSION"), "utf8").trim() || "dev";
-const localChangelog = readFileSync(resolve(webDir, "../CHANGELOG.md"), "utf8");
+const repoRoot = resolve(webDir, "..");
+
+function readTextFile(candidates: string[], fallback: string): string {
+    for (const filePath of candidates) {
+        try {
+            const text = readFileSync(filePath, "utf8").trim();
+            if (text) return text;
+        } catch {
+            /* try next */
+        }
+    }
+    return fallback;
+}
+
+const localVersion = readTextFile(
+    [resolve(webDir, "VERSION"), resolve(repoRoot, "VERSION")],
+    "dev"
+);
+const localChangelog = readTextFile(
+    [resolve(webDir, "CHANGELOG.md"), resolve(repoRoot, "CHANGELOG.md")],
+    "# Changelog\n"
+);
 
 export default function nextConfig(phase: string): NextConfig {
     const isDev = phase === PHASE_DEVELOPMENT_SERVER;
     const releases = parseChangelog(localChangelog);
+    const onVercel = !!process.env.VERCEL;
 
     return {
-        output: "standalone",
+        // Vercel 自带 Next 部署；standalone 仅用于 Docker 自托管
+        ...(onVercel ? {} : { output: "standalone" as const }),
+        outputFileTracingRoot: repoRoot,
         allowedDevOrigins: isDev ? ["*.*.*.*"] : [],
         typescript: {
             ignoreBuildErrors: true,

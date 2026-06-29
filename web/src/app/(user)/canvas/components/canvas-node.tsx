@@ -52,6 +52,7 @@ type CanvasNodeProps = {
     onGenerateImage?: (node: CanvasNodeData) => void;
     onViewImage?: (node: CanvasNodeData) => void;
     onContextMenu: (event: React.MouseEvent, nodeId: string) => void;
+    onVideoPersisted?: (nodeId: string, file: { url: string; storageKey: string; bytes: number; mimeType: string; width?: number; height?: number; durationMs?: number }) => void;
 };
 
 type NodeContentRendererProps = {
@@ -72,6 +73,7 @@ type NodeContentRendererProps = {
     onGenerateImage?: (node: CanvasNodeData) => void;
     onToggleBatch?: () => void;
     onSetBatchPrimary?: () => void;
+    onVideoPersisted?: (file: { url: string; storageKey: string; bytes: number; mimeType: string; width?: number; height?: number; durationMs?: number }) => void;
 };
 
 export const CanvasNode = React.memo(function CanvasNode({
@@ -109,9 +111,11 @@ export const CanvasNode = React.memo(function CanvasNode({
     onGenerateImage,
     onViewImage,
     onContextMenu,
+    onVideoPersisted,
 }: CanvasNodeProps) {
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const [hovered, setHovered] = useState(false);
+    const [connectHover, setConnectHover] = useState<"left" | "right" | null>(null);
     const [isEditingContent, setIsEditingContent] = useState(false);
     const hasImageContent = data.type === CanvasNodeType.Image && Boolean(data.metadata?.content);
     const hasVideoContent = data.type === CanvasNodeType.Video && Boolean(data.metadata?.content);
@@ -330,6 +334,7 @@ export const CanvasNode = React.memo(function CanvasNode({
                         onGenerateImage={onGenerateImage}
                         onToggleBatch={() => onToggleBatch?.(data.id)}
                         onSetBatchPrimary={() => onSetBatchPrimary?.(data)}
+                        onVideoPersisted={onVideoPersisted ? (file) => onVideoPersisted(data.id, file) : undefined}
                     />
                 </div>
 
@@ -344,8 +349,8 @@ export const CanvasNode = React.memo(function CanvasNode({
                 <ResizeHandle corner="bottom-right" onMouseDown={handleResizeMouseDown} />
             </div>
 
-            <ConnectionHandlePlus side="left" visible={hovered || leftHandleActive} emphasized={leftHandleActive} onConnectStart={(event) => onConnectStart(event, data.id, "target")} onConnectMenu={onConnectMenu ? () => onConnectMenu(data.id, "target") : undefined} />
-            <ConnectionHandlePlus side="right" visible={data.type !== CanvasNodeType.Config && (hovered || rightHandleActive)} emphasized={rightHandleActive} onConnectStart={(event) => onConnectStart(event, data.id, "source")} onConnectMenu={onConnectMenu ? () => onConnectMenu(data.id, "source") : undefined} />
+            <ConnectionHandlePlus side="left" visible={hovered || connectHover === "left" || leftHandleActive} emphasized={leftHandleActive} onHoverChange={(active) => setConnectHover(active ? "left" : connectHover === "left" ? null : connectHover)} onConnectStart={(event) => onConnectStart(event, data.id, "target")} onConnectMenu={onConnectMenu ? () => onConnectMenu(data.id, "target") : undefined} />
+            <ConnectionHandlePlus side="right" visible={data.type !== CanvasNodeType.Config && (hovered || connectHover === "right" || rightHandleActive)} emphasized={rightHandleActive} onHoverChange={(active) => setConnectHover(active ? "right" : connectHover === "right" ? null : connectHover)} onConnectStart={(event) => onConnectStart(event, data.id, "source")} onConnectMenu={onConnectMenu ? () => onConnectMenu(data.id, "source") : undefined} />
 
             {showPanel && renderPanel ? <div className="absolute left-1/2 top-full z-[70] w-[min(640px,calc(100vw-48px))] -translate-x-1/2 pt-4">{renderPanel(data)}</div> : null}
         </div>
@@ -511,7 +516,7 @@ function EmptyImageContent({ theme, isBatchRoot, batchCount, batchExpanded, batc
     return content;
 }
 
-function VideoNodeContent({ node, theme, mentionReferences = [] }: NodeContentRendererProps) {
+function VideoNodeContent({ node, theme, mentionReferences = [], onVideoPersisted }: NodeContentRendererProps) {
     const liveReferenceAssets = toVideoReferenceAssets(resolveActiveVideoReferences(node.metadata?.prompt || "", mentionReferences));
     const connectedReferenceAssets = toVideoReferenceAssets(mentionReferences.filter((reference) => reference.active));
     const referenceAssets = liveReferenceAssets.length ? liveReferenceAssets : connectedReferenceAssets.length ? connectedReferenceAssets : node.metadata?.videoReferenceAssets || [];
@@ -556,6 +561,7 @@ function VideoNodeContent({ node, theme, mentionReferences = [] }: NodeContentRe
                 taskId={node.metadata.videoTaskId}
                 provider={node.metadata.videoProvider}
                 model={node.metadata.model}
+                onPersisted={onVideoPersisted}
             />
             {referenceAssets.length ? (
                 <div className="pointer-events-none absolute bottom-3 left-3 z-20 max-w-[calc(100%-24px)] rounded-2xl border p-2 backdrop-blur-md" style={{ borderColor: "rgba(255,255,255,.12)", background: "rgba(0,0,0,.45)", boxShadow: "0 10px 28px rgba(0,0,0,.35)" }}>
@@ -722,17 +728,20 @@ function ConnectionHandlePlus({
     side,
     visible,
     emphasized,
+    onHoverChange,
     onConnectStart,
     onConnectMenu,
 }: {
     side: "left" | "right";
     visible: boolean;
     emphasized?: boolean;
+    onHoverChange?: (active: boolean) => void;
     onConnectStart: (event: React.MouseEvent) => void;
     onConnectMenu?: () => void;
 }) {
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const pointerRef = useRef<{ x: number; y: number; dragging: boolean } | null>(null);
+    const [hot, setHot] = useState(false);
 
     const resetPointer = () => {
         pointerRef.current = null;
@@ -764,15 +773,27 @@ function ConnectionHandlePlus({
             className={`absolute top-1/2 z-30 flex size-16 -translate-y-1/2 items-center justify-center transition-opacity duration-150 ${
                 side === "left" ? "-left-8" : "-right-8"
             } ${visible ? "pointer-events-auto opacity-100" : "pointer-events-none opacity-0"}`}
+            onMouseEnter={() => {
+                setHot(true);
+                onHoverChange?.(true);
+            }}
+            onMouseLeave={() => {
+                setHot(false);
+                onHoverChange?.(false);
+            }}
         >
             <button
                 type="button"
-                className="grid size-9 place-items-center rounded-full border shadow-[0_4px_14px_rgba(0,0,0,.18)] transition duration-200 hover:scale-105 active:scale-95"
+                className="grid size-9 place-items-center rounded-full border transition duration-200 hover:scale-105 active:scale-95"
                 style={{
-                    background: emphasized ? "rgba(255,255,255,.94)" : theme.node.panel,
-                    borderColor: emphasized ? "rgba(255,255,255,.72)" : theme.node.stroke,
-                    color: emphasized ? "#1c1917" : theme.node.muted,
-                    boxShadow: emphasized ? "0 0 0 4px rgba(255,255,255,.06), 0 6px 18px rgba(0,0,0,.22)" : undefined,
+                    background: hot || emphasized ? "rgba(255,255,255,.96)" : theme.node.panel,
+                    borderColor: hot || emphasized ? "rgba(147,197,253,.85)" : theme.node.stroke,
+                    color: hot || emphasized ? "#0f172a" : theme.node.muted,
+                    boxShadow: hot
+                        ? "0 0 0 4px rgba(91,157,255,.28), 0 8px 22px rgba(0,0,0,.28)"
+                        : emphasized
+                          ? "0 0 0 4px rgba(255,255,255,.06), 0 6px 18px rgba(0,0,0,.22)"
+                          : "0 4px 14px rgba(0,0,0,.18)",
                 }}
                 title={side === "left" ? "点击添加输入 · 按住拖拽连线" : "点击添加节点 · 按住拖拽连线"}
                 onPointerDown={handlePointerDown}

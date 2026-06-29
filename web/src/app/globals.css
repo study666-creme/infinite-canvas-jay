@@ -478,257 +478,129 @@
         animation: canvas-connection-energy 2.8s linear infinite;
     }
 
-    .canvas-glass-base {
+    .canvas-black-glass {
         position: absolute;
         inset: 0;
     }
 
-    .canvas-glass-base-default {
-        background: linear-gradient(145deg, rgba(12, 18, 34, 0.92), rgba(18, 12, 28, 0.88));
+    .canvas-black-glass-default {
+        background:
+            linear-gradient(145deg, rgba(8, 9, 12, 0.96) 0%, rgba(16, 17, 22, 0.94) 48%, rgba(6, 7, 10, 0.98) 100%),
+            radial-gradient(circle at 50% 0%, rgba(255, 255, 255, 0.06), transparent 55%);
     }
 
-    .canvas-glass-base-image {
-        background: linear-gradient(145deg, rgba(10, 16, 30, 0.94), rgba(24, 18, 36, 0.9));
+    .canvas-black-glass-image {
+        background:
+            linear-gradient(145deg, rgba(10, 9, 8, 0.96) 0%, rgba(18, 16, 14, 0.94) 48%, rgba(7, 6, 5, 0.98) 100%),
+            radial-gradient(circle at 50% 0%, rgba(255, 220, 180, 0.05), transparent 55%);
     }
 
-    .canvas-glass-base-video {
-        background: linear-gradient(145deg, rgba(8, 14, 28, 0.96), rgba(14, 20, 38, 0.92));
+    .canvas-black-glass-video {
+        background:
+            linear-gradient(145deg, rgba(6, 8, 14, 0.97) 0%, rgba(12, 14, 22, 0.95) 48%, rgba(4, 6, 12, 0.99) 100%),
+            radial-gradient(circle at 50% 0%, rgba(120, 170, 255, 0.07), transparent 58%);
     }
 
-    .canvas-glass-blob {
+    .canvas-black-glass-grid {
+        background-image:
+            linear-gradient(rgba(255, 255, 255, 0.035) 1px, transparent 1px),
+            linear-gradient(90deg, rgba(255, 255, 255, 0.035) 1px, transparent 1px);
+        background-size: 24px 24px;
+        mask-image: radial-gradient(circle at center, black 35%, transparent 88%);
+    }
+
+    .canvas-black-glass-sheen {
         position: absolute;
-        border-radius: 9999px;
-        filter: blur(42px);
-        opacity: 0.72;
-        mix-blend-mode: screen;
-        will-change: transform, opacity;
-    }
-
-    .canvas-glass-blob-default {
-        background: radial-gradient(circle, rgba(120, 170, 255, 0.95) 0%, rgba(120, 170, 255, 0) 72%);
-    }
-
-    .canvas-glass-blob-image {
-        background: radial-gradient(circle, rgba(255, 196, 140, 0.88) 0%, rgba(255, 196, 140, 0) 72%);
-    }
-
-    .canvas-glass-blob-video {
-        background: radial-gradient(circle, rgba(96, 164, 255, 0.95) 0%, rgba(96, 164, 255, 0) 72%);
-    }
-
-    .canvas-glass-blob-a {
-        width: 58%;
-        height: 52%;
-        left: -8%;
-        top: 8%;
-        animation: canvas-glass-drift-a 7.5s ease-in-out infinite;
-    }
-
-    .canvas-glass-blob-b {
-        width: 54%;
-        height: 48%;
-        right: -10%;
-        top: 18%;
-        animation: canvas-glass-drift-b 8.8s ease-in-out infinite;
-    }
-
-    .canvas-glass-blob-c {
-        width: 62%;
-        height: 56%;
-        left: 18%;
-        bottom: -16%;
-        animation: canvas-glass-drift-c 9.6s ease-in-out infinite;
-    }
-
-    .canvas-glass-blob-d {
-        width: 42%;
-        height: 38%;
-        right: 16%;
-        bottom: 10%;
-        animation: canvas-glass-drift-d 6.8s ease-in-out infinite;
-    }
-
-    .canvas-glass-blob-e {
-        width: 36%;
-        height: 34%;
-        left: 34%;
-        top: 28%;
-        animation: canvas-glass-drift-e 10.4s ease-in-out infinite;
-    }
-
-    .canvas-glass-mesh {
-        position: absolute;
-        inset: -20%;
+        inset: 0;
         opacity: 0.55;
+        animation: canvas-black-glass-breathe 3.6s ease-in-out infinite;
+    }
+
+    .canvas-black-glass-sheen-default {
+        background: radial-gradient(circle at 50% 38%, rgba(255, 255, 255, 0.08), transparent 42%);
+    }
+
+    .canvas-black-glass-sheen-image {
+        background: radial-gradient(circle at 50% 38%, rgba(255, 214, 170, 0.07), transparent 42%);
+    }
+
+    .canvas-black-glass-sheen-video {
+        background: radial-gradient(circle at 50% 38%, rgba(130, 180, 255, 0.1), transparent 42%);
+    }
+
+    .canvas-black-glass-sweep {
+        background: linear-gradient(
+            115deg,
+            transparent 0%,
+            transparent 42%,
+            rgba(255, 255, 255, 0.03) 47%,
+            rgba(255, 255, 255, 0.12) 50%,
+            rgba(255, 255, 255, 0.03) 53%,
+            transparent 58%,
+            transparent 100%
+        );
+        background-size: 220% 220%;
+        animation: canvas-black-glass-sweep 2.8s linear infinite;
+        mix-blend-mode: screen;
+    }
+
+    .canvas-black-glass-beam {
+        position: absolute;
+        inset: -40% -60%;
+        opacity: 0.75;
         filter: blur(18px);
-        animation: canvas-glass-mesh 11s ease-in-out infinite alternate;
+        animation: canvas-black-glass-beam 2.8s linear infinite;
     }
 
-    .canvas-glass-mesh-default {
-        background:
-            radial-gradient(circle at 18% 28%, rgba(120, 170, 255, 0.55), transparent 42%),
-            radial-gradient(circle at 78% 24%, rgba(170, 120, 255, 0.42), transparent 40%),
-            radial-gradient(circle at 52% 82%, rgba(255, 180, 120, 0.28), transparent 46%);
+    .canvas-black-glass-beam-default {
+        background: linear-gradient(90deg, transparent 0%, rgba(255, 255, 255, 0) 42%, rgba(255, 255, 255, 0.22) 50%, rgba(255, 255, 255, 0) 58%, transparent 100%);
     }
 
-    .canvas-glass-mesh-image {
-        background:
-            radial-gradient(circle at 22% 34%, rgba(255, 196, 140, 0.58), transparent 44%),
-            radial-gradient(circle at 72% 28%, rgba(255, 140, 180, 0.34), transparent 42%),
-            radial-gradient(circle at 48% 78%, rgba(120, 170, 255, 0.24), transparent 48%);
+    .canvas-black-glass-beam-image {
+        background: linear-gradient(90deg, transparent 0%, rgba(255, 220, 180, 0) 42%, rgba(255, 220, 180, 0.18) 50%, rgba(255, 220, 180, 0) 58%, transparent 100%);
     }
 
-    .canvas-glass-mesh-video {
-        background:
-            radial-gradient(circle at 20% 30%, rgba(96, 164, 255, 0.62), transparent 44%),
-            radial-gradient(circle at 80% 36%, rgba(140, 120, 255, 0.38), transparent 42%),
-            radial-gradient(circle at 50% 84%, rgba(255, 210, 150, 0.26), transparent 48%);
+    .canvas-black-glass-beam-video {
+        background: linear-gradient(90deg, transparent 0%, rgba(120, 180, 255, 0) 42%, rgba(120, 180, 255, 0.28) 50%, rgba(120, 180, 255, 0) 58%, transparent 100%);
     }
 
-    .canvas-glass-ref {
-        position: absolute;
-        inset: -8%;
-        filter: blur(36px) saturate(1.35);
-        transform: scale(1.08);
-        opacity: 0.55;
+    .canvas-black-glass-vignette {
+        box-shadow: inset 0 0 80px rgba(0, 0, 0, 0.55), inset 0 1px 0 rgba(255, 255, 255, 0.05);
     }
 
-    .canvas-glass-ref-0 {
-        animation: canvas-glass-ref-a 9.2s ease-in-out infinite;
-    }
-
-    .canvas-glass-ref-1 {
-        animation: canvas-glass-ref-b 10.6s ease-in-out infinite;
-        mix-blend-mode: screen;
-    }
-
-    .canvas-glass-ref-2 {
-        animation: canvas-glass-ref-c 8.4s ease-in-out infinite;
-        mix-blend-mode: soft-light;
-    }
-
-    .canvas-glass-noise {
-        background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.55'/%3E%3C/svg%3E");
+    .canvas-black-glass-noise {
+        background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.45'/%3E%3C/svg%3E");
         mix-blend-mode: overlay;
     }
 
-    .canvas-glass-shimmer {
-        background: linear-gradient(115deg, transparent 35%, rgba(255, 255, 255, 0.14) 50%, transparent 65%);
-        background-size: 220% 220%;
-        animation: canvas-glass-shimmer 4.8s ease-in-out infinite;
-        mix-blend-mode: soft-light;
-        opacity: 0.55;
-    }
-
-    @keyframes canvas-glass-drift-a {
-        0%,
-        100% {
-            transform: translate3d(0, 0, 0) scale(1);
-        }
-
-        50% {
-            transform: translate3d(14%, 10%, 0) scale(1.08);
-        }
-    }
-
-    @keyframes canvas-glass-drift-b {
-        0%,
-        100% {
-            transform: translate3d(0, 0, 0) scale(1);
-        }
-
-        50% {
-            transform: translate3d(-12%, 8%, 0) scale(1.12);
-        }
-    }
-
-    @keyframes canvas-glass-drift-c {
-        0%,
-        100% {
-            transform: translate3d(0, 0, 0) scale(1);
-        }
-
-        50% {
-            transform: translate3d(8%, -12%, 0) scale(1.06);
-        }
-    }
-
-    @keyframes canvas-glass-drift-d {
-        0%,
-        100% {
-            transform: translate3d(0, 0, 0) scale(0.96);
-            opacity: 0.48;
-        }
-
-        50% {
-            transform: translate3d(-8%, -6%, 0) scale(1.04);
-            opacity: 0.82;
-        }
-    }
-
-    @keyframes canvas-glass-shimmer {
+    @keyframes canvas-black-glass-sweep {
         0% {
-            background-position: 120% 40%;
+            background-position: 130% 50%;
         }
 
         100% {
-            background-position: -20% 60%;
+            background-position: -30% 50%;
         }
     }
 
-    @keyframes canvas-glass-mesh {
+    @keyframes canvas-black-glass-beam {
         0% {
-            transform: translate3d(-3%, -2%, 0) scale(1);
+            transform: translate3d(-36%, 0, 0) rotate(18deg);
         }
 
         100% {
-            transform: translate3d(3%, 2%, 0) scale(1.06);
+            transform: translate3d(36%, 0, 0) rotate(18deg);
         }
     }
 
-    @keyframes canvas-glass-drift-e {
+    @keyframes canvas-black-glass-breathe {
         0%,
         100% {
-            transform: translate3d(0, 0, 0) scale(0.92);
             opacity: 0.42;
         }
 
         50% {
-            transform: translate3d(6%, -8%, 0) scale(1.08);
-            opacity: 0.78;
-        }
-    }
-
-    @keyframes canvas-glass-ref-a {
-        0%,
-        100% {
-            transform: scale(1.08) translate3d(0, 0, 0);
-        }
-
-        50% {
-            transform: scale(1.14) translate3d(3%, -2%, 0);
-        }
-    }
-
-    @keyframes canvas-glass-ref-b {
-        0%,
-        100% {
-            transform: scale(1.06) translate3d(0, 0, 0);
-        }
-
-        50% {
-            transform: scale(1.12) translate3d(-4%, 3%, 0);
-        }
-    }
-
-    @keyframes canvas-glass-ref-c {
-        0%,
-        100% {
-            transform: scale(1.04) translate3d(0, 0, 0);
-        }
-
-        50% {
-            transform: scale(1.1) translate3d(2%, 4%, 0);
+            opacity: 0.72;
         }
     }
 }

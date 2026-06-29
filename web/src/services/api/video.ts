@@ -1,7 +1,7 @@
 import axios from "axios";
 
 import { dataUrlToFile } from "@/lib/image-utils";
-import { getMediaBlob, uploadMediaFile, type UploadedFile } from "@/services/file-storage";
+import { deleteStoredMedia, getMediaBlob, resolveMediaUrl, uploadMediaFile, type UploadedFile } from "@/services/file-storage";
 import { imageToDataUrl } from "@/services/image-storage";
 import { boolConfig, buildSeedancePromptText, isSeedanceVideoConfig, normalizeSeedanceDuration, normalizeSeedanceRatio, normalizeSeedanceResolution, seedanceVideoReferenceError, SEEDANCE_REFERENCE_LIMITS } from "@/lib/seedance-video";
 import { buildApiUrl, modelOptionName, resolveModelRequestConfig, type AiConfig } from "@/stores/use-config-store";
@@ -68,16 +68,16 @@ export async function pollVideoGenerationTask(config: AiConfig, task: VideoGener
 }
 
 export async function storeGeneratedVideo(result: VideoGenerationResult, config?: AiConfig): Promise<UploadedFile> {
-    if (result.blob?.size) return uploadMediaFile(result.blob, "video");
+    if (result.blob?.size) return uploadMediaFile(normalizeVideoBlob(result.blob, result.mimeType), "video");
 
     if (config && result.taskId && result.provider && result.model) {
-        const blob = await downloadTaskContentBlob(config, { id: result.taskId, provider: result.provider, model: result.model });
+        const blob = normalizeVideoBlob(await downloadTaskContentBlob(config, { id: result.taskId, provider: result.provider, model: result.model }), result.mimeType);
         if (blob.size) return uploadMediaFile(blob, "video");
     }
 
     if (result.url && config) {
         try {
-            const blob = await downloadRemoteVideoBlob(config, result.url);
+            const blob = normalizeVideoBlob(await downloadRemoteVideoBlob(config, result.url), result.mimeType);
             return uploadMediaFile(blob, "video");
         } catch {
             // Continue to direct fetch fallback below.
@@ -93,6 +93,90 @@ export async function storeGeneratedVideo(result: VideoGenerationResult, config?
     }
 
     throw new Error("视频接口没有返回可播放的视频");
+}
+
+export type VideoPlaybackResult = { kind: "url"; url: string } | { kind: "file"; url: string; file: UploadedFile } | { kind: "error"; message: string };
+
+type VideoPlaybackInput = {
+    config: AiConfig;
+    content?: string;
+    storageKey?: string;
+    mimeType?: string;
+    taskId?: string;
+    provider?: "openai" | "seedance";
+    model?: string;
+    ignoreStorageKey?: boolean;
+};
+
+export async function resolveVideoPlayback(input: VideoPlaybackInput): Promise<VideoPlaybackResult> {
+    const { config, content = "", storageKey, mimeType = "video/mp4", taskId, provider, model, ignoreStorageKey = false } = input;
+    const hasApi = Boolean(config.baseUrl.trim() && config.apiKey.trim());
+
+    if (storageKey && !ignoreStorageKey) {
+        const blob = await getMediaBlob(storageKey);
+        if (blob?.size) {
+            if (await looksLikeVideoBlob(blob)) {
+                return { kind: "url", url: URL.createObjectURL(normalizeVideoBlob(blob, mimeType)) };
+            }
+            await deleteStoredMedia([storageKey]);
+        } else {
+            const resolved = await resolveMediaUrl(storageKey, "");
+            if (resolved && !/^https?:\/\//i.test(resolved)) {
+                return { kind: "url", url: resolved };
+            }
+        }
+    }
+
+    if (content.startsWith("blob:") || content.startsWith("data:")) {
+        if (hasApi && content.startsWith("data:")) {
+            try {
+                const file = await uploadMediaFile(normalizeVideoBlob(await blobFromDataUrl(content), mimeType), "video");
+                return { kind: "file", url: file.url, file };
+            } catch {
+                return { kind: "url", url: content };
+            }
+        }
+        return { kind: "url", url: content };
+    }
+
+    if (taskId && provider && model && hasApi) {
+        try {
+            const blob = normalizeVideoBlob(await downloadTaskContentBlob(config, { id: taskId, provider, model }), mimeType);
+            const file = await uploadMediaFile(blob, "video");
+            return { kind: "file", url: file.url, file };
+        } catch {
+            // Fall through to remote URL proxy.
+        }
+    }
+
+    if (/^https?:\/\//i.test(content) && hasApi) {
+        try {
+            const blob = normalizeVideoBlob(await downloadRemoteVideoBlob(config, content), mimeType);
+            const file = await uploadMediaFile(blob, "video");
+            return { kind: "file", url: file.url, file };
+        } catch (error) {
+            return { kind: "error", message: error instanceof Error ? error.message : "视频代理下载失败" };
+        }
+    }
+
+    if (content) {
+        return { kind: "error", message: "无法播放远程视频，请检查 API 配置或重启 jimeng 服务" };
+    }
+
+    return { kind: "error", message: "没有可播放的视频地址" };
+}
+
+function normalizeVideoBlob(blob: Blob, mimeType = "video/mp4") {
+    if (!blob.size) return blob;
+    if (!blob.type || blob.type === "application/octet-stream" || blob.type.includes("json")) {
+        return new Blob([blob], { type: mimeType.includes("video") ? mimeType : "video/mp4" });
+    }
+    return blob;
+}
+
+async function blobFromDataUrl(dataUrl: string) {
+    const response = await fetch(dataUrl);
+    return response.blob();
 }
 
 export async function downloadTaskContentBlob(config: AiConfig, task: VideoGenerationTask, options?: RequestOptions) {
@@ -201,7 +285,7 @@ async function pollSeedanceTask(config: AiConfig, task: VideoGenerationTask, opt
                 const blob = await downloadRemoteVideoBlob(config, url, options);
                 return { status: "completed", result: { blob, mimeType: blob.type || "video/mp4", taskId: task.id, provider: task.provider, model: task.model, url } };
             } catch {
-                return { status: "completed", result: { url, mimeType: "video/mp4", taskId: task.id, provider: task.provider, model: task.model } };
+                throw new Error("Seedance 视频已生成但无法下载，请确认 jimeng 服务已重启并支持 /v1/media/fetch");
             }
         }
         if (state.status === "failed" || state.status === "cancelled" || state.status === "expired") return { status: "failed", error: state.error?.message || `Seedance 视频生成${state.status === "expired" ? "超时" : "失败"}` };
@@ -344,15 +428,30 @@ function statusMessage(status: number | undefined, fallback: string) {
 }
 
 async function assertVideoBlob(blob: Blob) {
-    if (!blob.type.includes("json")) return;
-    let payload: { code?: number; msg?: string; error?: { message?: string } };
-    try {
-        payload = JSON.parse(await blob.text()) as { code?: number; msg?: string; error?: { message?: string } };
-    } catch {
-        return;
+    if (!(await looksLikeVideoBlob(blob))) {
+        const preview = await blob.slice(0, 120).text().catch(() => "");
+        if (preview.trim().startsWith("{") || preview.trim().startsWith("[")) {
+            try {
+                const payload = JSON.parse(preview) as { code?: number; msg?: string; error?: { message?: string } };
+                if (typeof payload.code === "number" && payload.code !== 0) throw new Error(payload.msg || "视频下载失败");
+                if (payload.error?.message) throw new Error(payload.error.message);
+            } catch (error) {
+                if (error instanceof Error && error.message !== "Unexpected token") throw error;
+            }
+        }
+        throw new Error("下载内容不是有效视频文件，请确认 jimeng 服务已重启");
     }
-    if (typeof payload.code === "number" && payload.code !== 0) throw new Error(payload.msg || "视频下载失败");
-    if (payload.error?.message) throw new Error(payload.error.message);
+}
+
+async function looksLikeVideoBlob(blob: Blob) {
+    if (!blob.size || blob.size < 256) return false;
+    const header = new Uint8Array(await blob.slice(0, 12).arrayBuffer());
+    if (header.length >= 8 && header[4] === 0x66 && header[5] === 0x74 && header[6] === 0x79 && header[7] === 0x70) return true;
+    if (header[0] === 0x1a && header[1] === 0x45 && header[2] === 0xdf && header[3] === 0xa3) return true;
+    if (header[0] === 0x47 && header[1] === 0x49 && header[2] === 0x46) return true;
+    const textStart = String.fromCharCode(header[0], header[1], header[2], header[3]).trim();
+    if (textStart.startsWith("{") || textStart.startsWith("[") || textStart.startsWith("<!")) return false;
+    return blob.size > 4096;
 }
 
 function isPublicMediaUrl(value: string) {

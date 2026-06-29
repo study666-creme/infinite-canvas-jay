@@ -10,7 +10,7 @@ description: 用最少步骤把无限画布跑起来
 ## GitHub + Vercel 部署
 
 1. 将 fork 推送到你的 GitHub 仓库（保留 LICENSE 与上游版权声明）。
-2. 在 Vercel 导入该仓库，**Root Directory** 设为 `web`（根目录 `vercel.json` 已声明相同配置）。
+2. 在 Vercel 导入该仓库，**Root Directory** 设为 `web`（仅控制台设置；勿在仓库根目录写 `rootDirectory`）。
 3. 部署完成后访问站点，在右上角配置弹窗填入 Base URL 与 API Key。
 
 当前版本的 AI 请求由浏览器前台直连用户自己的 OpenAI 兼容地址，**不需要在 Vercel 配置服务端 API Key**。

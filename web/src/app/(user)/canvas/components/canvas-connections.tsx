@@ -53,14 +53,14 @@ export const ConnectionPath = memo(function ConnectionPath({
                     onContextMenu?.(event);
                 }}
             />
-            <path d={pathD} stroke={theme.connection.base} strokeWidth={active ? 2 : 1.75} strokeOpacity={active ? 0.42 : 0.28} fill="none" strokeLinecap="round" style={{ pointerEvents: "none" }} />
+            <path d={pathD} stroke={theme.connection.base} strokeWidth={active ? 2.75 : 2.5} strokeOpacity={active ? 0.5 : 0.38} fill="none" strokeLinecap="round" style={{ pointerEvents: "none" }} />
             {active ? (
                 <>
-                    <path d={pathD} stroke={theme.connection.glow} strokeWidth={5} fill="none" strokeLinecap="round" strokeOpacity={0.55} style={{ pointerEvents: "none", filter: "blur(2px)" }} />
+                    <path d={pathD} stroke={theme.connection.glow} strokeWidth={6} fill="none" strokeLinecap="round" strokeOpacity={0.58} style={{ pointerEvents: "none", filter: "blur(2px)" }} />
                     <path
                         d={pathD}
                         stroke={theme.connection.flow}
-                        strokeWidth={2.25}
+                        strokeWidth={2.75}
                         fill="none"
                         strokeLinecap="round"
                         strokeDasharray="6 72"
@@ -90,9 +90,9 @@ export const ActiveConnectionPath = memo(function ActiveConnectionPath({ node, h
 
     return (
         <g>
-            <path d={pathD} stroke={theme.connection.base} strokeWidth={1.75} strokeOpacity={0.3} fill="none" strokeLinecap="round" />
-            <path d={pathD} stroke={theme.connection.glow} strokeWidth={5} fill="none" strokeLinecap="round" strokeOpacity={0.45} style={{ filter: "blur(2px)" }} />
-            <path d={pathD} stroke={theme.connection.flow} strokeWidth={2.25} fill="none" strokeLinecap="round" strokeDasharray="6 72" className="canvas-connection-energy" style={{ opacity: 0.7 }} />
+            <path d={pathD} stroke={theme.connection.base} strokeWidth={2.5} strokeOpacity={0.38} fill="none" strokeLinecap="round" />
+            <path d={pathD} stroke={theme.connection.glow} strokeWidth={6} fill="none" strokeLinecap="round" strokeOpacity={0.48} style={{ filter: "blur(2px)" }} />
+            <path d={pathD} stroke={theme.connection.flow} strokeWidth={2.75} fill="none" strokeLinecap="round" strokeDasharray="6 72" className="canvas-connection-energy" style={{ opacity: 0.75 }} />
         </g>
     );
 });

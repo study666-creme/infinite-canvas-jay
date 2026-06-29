@@ -48,7 +48,7 @@
 
 ## 快速开始
 
-推荐将仓库推送到 GitHub 后导入 Vercel：**Root Directory** 设为 `web`（根目录 `vercel.json` 已声明相同配置）。AI API Key、Base URL、画布、素材和生成记录默认保存在浏览器本地。
+推荐将仓库推送到 GitHub 后导入 Vercel：**Root Directory** 设为 `web`（配置在 `web/vercel.json`，勿在仓库根目录写 `rootDirectory`）。AI API Key、Base URL、画布、素材和生成记录默认保存在浏览器本地。
 
 完整部署步骤、Render / Docker、视频 API 接入与协议说明见 **[DEPLOY.md](DEPLOY.md)**。
 

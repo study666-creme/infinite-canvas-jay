@@ -55,10 +55,10 @@ git merge upstream/main
 
 ## Vercel（推荐）
 
-1. 在 [Vercel](https://vercel.com/) 导入你的 GitHub 仓库。
-2. 在项目设置中将 **Root Directory** 设为 `web`。
+1. 在 [Vercel](https://vercel.com/) 导入 GitHub 仓库 `study666-creme/infinite-canvas-jay`。
+2. 在项目设置中将 **Root Directory** 设为 `web`（**必填**；勿在仓库根目录放带 `rootDirectory` 的 `vercel.json`，否则导入会报错）。
 3. Framework Preset 选 **Next.js**（一般会自动识别）。
-4. 构建命令：`bun run build` 或 `npm run build`；安装命令对应 `bun install` / `npm install`。
+4. 构建命令：`npm run build`；安装命令：`npm install`（`web/vercel.json` 已声明，一般无需手改）。
 5. 部署完成后访问分配的域名；首次打开在右上角配置弹窗填入 Base URL 与 API Key。
 
 可选环境变量（构建时注入，均有默认值，通常不必配置）：
@@ -68,7 +68,7 @@ git merge upstream/main
 | `NEXT_PUBLIC_APP_VERSION` | 由 `next.config.ts` 从根目录 `VERSION` 读取，一般无需手动设置 |
 | `NEXT_PUBLIC_DOC_URL` | 文档站地址，默认 `https://docs.canvas.best` |
 
-根目录已提供 `vercel.json`，若 Vercel 未自动识别 `web/`，可按其中 `rootDirectory` 配置。
+根目录 **不要** 放 `vercel.json`（含 `rootDirectory` 会导致 Vercel 新建项目报错）。构建配置见 `web/vercel.json`；**Root Directory 只在 Vercel 控制台设为 `web`**。
 
 ## Render
 

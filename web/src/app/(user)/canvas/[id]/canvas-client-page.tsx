@@ -1180,7 +1180,6 @@ function InfiniteCanvasPage() {
         event.stopPropagation();
         setContextMenu(null);
         setHoveredNodeId(null);
-        setToolbarNodeId(null);
         setSelectedConnectionId(null);
 
         const currentSelected = selectedNodeIdsRef.current;
@@ -1246,6 +1245,7 @@ function InfiniteCanvasPage() {
         dragRef.current.hasMoved = false;
         dragRef.current.initialSelectedNodes = [];
         if (wasClick && clickedNodeId) {
+            setToolbarNodeId((current) => (current === clickedNodeId ? null : clickedNodeId));
             const clickedNode = nodesRef.current.find((node) => node.id === clickedNodeId);
             if (clickedNode?.type === CanvasNodeType.Text) {
                 setDialogNodeId((current) => (current === clickedNodeId ? current : null));
@@ -1983,6 +1983,22 @@ function InfiniteCanvasPage() {
     const handleUploadRequest = useCallback((nodeId?: string, position?: Position) => {
         uploadTargetRef.current = { nodeId, position };
         imageInputRef.current?.click();
+    }, []);
+
+    const handleVideoPersisted = useCallback((nodeId: string, file: UploadedFile) => {
+        setNodes((prev) =>
+            prev.map((node) =>
+                node.id === nodeId
+                    ? {
+                          ...node,
+                          metadata: {
+                              ...node.metadata,
+                              ...videoMetadata(file),
+                          },
+                      }
+                    : node,
+            ),
+        );
     }, []);
 
     const handleImageInputChange = useCallback(
@@ -2814,11 +2830,9 @@ function InfiniteCanvasPage() {
                             onHoverStart={(nodeId) => {
                                 if (nodeDraggingRef.current) return;
                                 setHoveredNodeId(nodeId);
-                                keepNodeToolbar(nodeId);
                             }}
                             onHoverEnd={(nodeId) => {
                                 setHoveredNodeId((current) => (current === nodeId ? null : current));
-                                hideNodeToolbar();
                             }}
                             onConnectStart={handleConnectStart}
                             onConnectMenu={openConnectionMenu}
@@ -2837,6 +2851,7 @@ function InfiniteCanvasPage() {
                                 setSelectedConnectionId(null);
                                 setContextMenu({ type: "node", x: event.clientX, y: event.clientY, nodeId: id, worldX: world.x, worldY: world.y });
                             }}
+                            onVideoPersisted={handleVideoPersisted}
                         />
                     ))}
 
@@ -2859,8 +2874,7 @@ function InfiniteCanvasPage() {
                 <CanvasNodeHoverToolbar
                     node={isNodeDragging || nodeImageSettingsOpen ? null : toolbarNode}
                     viewport={viewport}
-                    onKeep={keepNodeToolbar}
-                    onLeave={hideNodeToolbar}
+                    onClose={() => setToolbarNodeId(null)}
                     onInfo={(node) => setInfoNodeId(node.id)}
                     onEditText={openTextEditor}
                     onDecreaseFont={(node) => handleFontSizeChange(node.id, Math.max(10, (node.metadata?.fontSize || 14) - 2))}

@@ -1,0 +1,114 @@
+"use client";
+
+import { AtSign, Image as ImageIcon, Music2, Video, X } from "lucide-react";
+
+import type { CanvasVideoReferenceAsset } from "../utils/canvas-video-references";
+
+type Variant = "panel" | "node" | "overlay";
+
+type Props = {
+    references: CanvasVideoReferenceAsset[];
+    variant?: Variant;
+    className?: string;
+    onInsertReference?: (label: string) => void;
+    onRemoveReference?: (nodeId: string, label: string) => void;
+    activeLabels?: string[];
+};
+
+export function CanvasVideoReferenceStrip({ references, variant = "panel", className = "", onInsertReference, onRemoveReference, activeLabels = [] }: Props) {
+    if (!references.length) return null;
+
+    const activeLabelSet = new Set(activeLabels);
+    const clickable = Boolean(onInsertReference);
+    const removable = Boolean(onRemoveReference);
+    const isNode = variant === "node";
+    const isOverlay = variant === "overlay";
+
+    return (
+        <div className={`flex min-w-0 items-center ${isNode ? "justify-center gap-1.5 px-1" : "gap-2 overflow-x-auto pb-0.5"} ${className}`}>
+            {references.map((reference, index) => {
+                const isActive = !activeLabels.length || activeLabelSet.has(reference.label);
+                const tileSize = isOverlay ? "size-11" : isNode ? "size-14" : "size-[72px]";
+                return (
+                    <div
+                        key={`${reference.nodeId}-${reference.label}`}
+                        className={`group relative shrink-0 overflow-hidden rounded-2xl transition duration-200 ${tileSize} ${isNode && index > 0 ? "-ml-3" : ""}`}
+                        style={{
+                            boxShadow: isActive
+                                ? isNode
+                                    ? "0 10px 28px rgba(47,128,255,.22), 0 0 0 1.5px rgba(47,128,255,.55)"
+                                    : "0 8px 24px rgba(47,128,255,.18), 0 0 0 1.5px rgba(47,128,255,.5)"
+                                : isNode
+                                  ? "0 8px 20px rgba(0,0,0,.28), 0 0 0 1px rgba(255,255,255,.08)"
+                                  : "0 6px 18px rgba(0,0,0,.16), 0 0 0 1px rgba(255,255,255,.06)",
+                            opacity: isActive ? 1 : 0.72,
+                            zIndex: references.length - index,
+                        }}
+                    >
+                        <button
+                            type="button"
+                            className={`relative size-full overflow-hidden ${clickable ? "cursor-pointer transition hover:scale-[1.02] active:scale-[0.98]" : "cursor-default"}`}
+                            title={clickable ? `点击插入 ${reference.label}` : reference.title}
+                            onPointerDown={(event) => {
+                                event.preventDefault();
+                                event.stopPropagation();
+                            }}
+                            onMouseDown={(event) => {
+                                event.preventDefault();
+                                event.stopPropagation();
+                            }}
+                            onClick={() => onInsertReference?.(reference.label)}
+                            disabled={!clickable}
+                        >
+                            <ReferencePreview reference={reference} />
+                            <div className="pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/80 via-black/35 to-transparent px-1.5 pb-1.5 pt-5">
+                                <span className="block truncate text-[10px] font-medium tracking-wide text-white/95">{reference.label}</span>
+                            </div>
+                            {clickable && !removable ? (
+                                <span className="pointer-events-none absolute right-1 top-1 grid size-5 place-items-center rounded-full bg-[#2f80ff]/90 text-white opacity-0 shadow-lg transition group-hover:opacity-100">
+                                    <AtSign className="size-3" />
+                                </span>
+                            ) : null}
+                        </button>
+                        {removable ? (
+                            <button
+                                type="button"
+                                className="absolute right-1 top-1 z-20 grid size-5 place-items-center rounded-full bg-black/58 text-white/92 shadow-md backdrop-blur-sm transition hover:bg-black/78"
+                                title={`断开 ${reference.label}`}
+                                onPointerDown={(event) => {
+                                    event.preventDefault();
+                                    event.stopPropagation();
+                                }}
+                                onMouseDown={(event) => {
+                                    event.preventDefault();
+                                    event.stopPropagation();
+                                }}
+                                onClick={(event) => {
+                                    event.stopPropagation();
+                                    onRemoveReference?.(reference.nodeId, reference.label);
+                                }}
+                            >
+                                <X className="size-3" strokeWidth={2.5} />
+                            </button>
+                        ) : null}
+                    </div>
+                );
+            })}
+        </div>
+    );
+}
+
+function ReferencePreview({ reference }: { reference: CanvasVideoReferenceAsset }) {
+    if (reference.kind === "image" && reference.previewUrl) {
+        return <img src={reference.previewUrl} alt={reference.title} className="size-full object-cover" />;
+    }
+    if (reference.kind === "video" && reference.previewUrl) {
+        return <video src={reference.previewUrl} className="size-full bg-black object-cover" muted preload="metadata" />;
+    }
+    const Icon = reference.kind === "audio" ? Music2 : reference.kind === "video" ? Video : ImageIcon;
+    return (
+        <span className="grid size-full place-items-center bg-black/20">
+            <Icon className="size-4 opacity-70" />
+        </span>
+    );
+}

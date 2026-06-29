@@ -1,0 +1,66 @@
+---
+title: GitHub 与 Vercel 部署
+description: 将 fork 推送到 GitHub 并通过 Vercel 等平台部署
+---
+
+# GitHub 与 Vercel 部署
+
+本 fork 仓库：**https://github.com/study666-creme/infinite-canvas-jay**  
+上游：**https://github.com/basketikun/infinite-canvas**
+
+## 1. 克隆与本地开发
+
+```bash
+git clone https://github.com/study666-creme/infinite-canvas-jay.git
+cd infinite-canvas-jay/web
+npm install
+npm run dev
+```
+
+浏览器打开 `http://localhost:3000`。
+
+## 2. 推送到 GitHub（维护者）
+
+```bash
+git remote -v
+# origin    → study666-creme/infinite-canvas-jay
+# upstream  → basketikun/infinite-canvas
+
+git push -u origin main
+```
+
+Fork 时请保留 [LICENSE](https://github.com/basketikun/infinite-canvas/blob/main/LICENSE) 与 README 中的上游说明，并保留前端页面上的原作者标识。
+
+更完整的步骤、Docker / Render 与协议说明见仓库根目录 [DEPLOY.md](https://github.com/study666-creme/infinite-canvas-jay/blob/main/DEPLOY.md)。
+
+## 3. Vercel 部署（推荐）
+
+1. 打开 [Vercel](https://vercel.com/) → **Add New → Project** → 选择 `study666-creme/infinite-canvas-jay`。
+2. **Root Directory** 设为 `web`（根目录 `vercel.json` 已声明 `rootDirectory: web`）。
+3. Framework：**Next.js**；Build：`npm run build` 或 `bun run build`。
+4. 部署完成后访问 `https://<项目名>.vercel.app`。
+
+部署后无需在 Vercel 配置 AI Key：用户在浏览器右上角自行填写 Base URL 与 API Key。
+
+### Prompt Hub 联调
+
+1. 画布内 **设置 → Prompt Hub** → 用 [卡藏](https://prompt-hubs.com) 账号登录。
+2. **插入素材 → Prompt Hub 卡片库**：从云端卡片库插入图片 + 提示词。
+3. 图片节点 **右键 → 存为 Prompt Hub 卡片**。
+
+Worker 已允许 `*.vercel.app` 跨域；自定义域名需在 Prompt Hub Worker `CORS_ORIGINS` 中追加。
+
+## 4. 其它平台
+
+- [Render 部署](/docs/overview/render)
+- [Docker 部署](/docs/overview/docker)
+
+## 5. 协议与商用
+
+本项目为 **AGPL-3.0**：
+
+- **可以**：本地自用；开源 fork 后公网部署（公开源码并保留版权声明）。
+- **可以**：在遵守 AGPL 的前提下收费运营（源码仍须对用户可得）。
+- **不可以**：基于本项目修改后闭源商用、不向用户提供对应源码。
+
+闭源商业授权请查看 [商务合作](/docs/business/business) 与 [开源协议](/docs/business/license)。

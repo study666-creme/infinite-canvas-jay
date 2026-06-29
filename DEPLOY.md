@@ -55,11 +55,42 @@ git merge upstream/main
 
 ## Vercel（推荐）
 
+### 方式 A：一键脚本（推荐，不用找控制台菜单）
+
+在 **PowerShell** 执行（只需做一次登录）：
+
+```powershell
+cd D:\canvas\infinite-canvas
+npx vercel login
+.\scripts\fix-vercel-project.ps1
+```
+
+脚本会自动：把 **Root Directory** 设为 `web`、**Node.js** 设为 `20.x`，并从 GitHub `main` 触发一次 production 部署。
+
+### 方式 B：控制台手动改（注意不是 General 页）
+
+你截图里在 **Settings → General**，**Root Directory 不在这里**。
+
+正确路径：
+
+1. 打开 [infinite-canvas-jay 项目](https://vercel.com/study666-cremes-projects/infinite-canvas-jay)
+2. 顶部点 **Settings**
+3. 左侧点 **Build and Deployment**（不是 General）
+4. 往下滚找到 **Root Directory** → 填 `web` → **Save**
+5. 同页 **Node.js Version** → 选 **20.x** → **Save**
+6. 顶部 **Deployments** → 最新一条 → **Redeploy**
+
+### 首次从 GitHub 导入
+
 1. 在 [Vercel](https://vercel.com/) 导入 GitHub 仓库 `study666-creme/infinite-canvas-jay`。
-2. 在项目设置中将 **Root Directory** 设为 `web`（**必填**；勿在仓库根目录放带 `rootDirectory` 的 `vercel.json`，否则导入会报错）。
+2. 导入页点 **Root Directory** 旁的 **Edit** → 选 `web`（或在 Build and Deployment 里改）。
 3. Framework Preset 选 **Next.js**（一般会自动识别）。
-4. 构建命令：`npm run build`；安装命令：`npm install`（`web/vercel.json` 已声明，一般无需手改）。
+4. 构建命令：`npm run build`；安装命令见 `web/vercel.json`。
 5. 部署完成后访问分配的域名；首次打开在右上角配置弹窗填入 Base URL 与 API Key。
+
+也可用带参数的导入链接（自动填 Root Directory）：
+
+https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2Fstudy666-creme%2Finfinite-canvas-jay&project-name=infinite-canvas-jay&root-directory=web
 
 若部署失败（404 / DEPLOYMENT_NOT_FOUND）：
 

@@ -151,11 +151,76 @@ bun run dev   # 或 npm run dev
 
 ## 接入视频 / Seedance / 即梦风格 API
 
-本 fork 在画布中增强了即梦风格 UI、Seedance 视频参数、`@` 引用与本地媒体落盘等能力。接入方式与上游一致：
+本 fork 在画布中增强了即梦风格 UI、Seedance 视频参数、`@` 引用与本地媒体落盘等能力。接入方式与上游一致，并额外要求视频网关支持媒体代理。
+
+### 1. 画布侧配置
 
 1. 在右上角配置弹窗填写 **OpenAI 兼容 Base URL** 与 **API Key**。
-2. 视频生成：在模型名中配置 Seedance 等视频模型，Base URL 指向你的兼容网关（例如自建 [jimeng-free-api-all](https://github.com/) 或其它转发服务）。
+2. 视频生成：在模型名中配置 Seedance 等视频模型，Base URL 指向你的兼容网关（例如自建 `jimeng-free-api-all` 或其它转发服务）。
 3. **视频网关需自行部署**，与本前端分离；前端只通过浏览器请求你配置的地址，不会在仓库内附带第三方账号或密钥。
+
+### 2. 媒体代理 `/v1/media/fetch`（视频播放必需）
+
+Jimeng / 即梦等接口返回的 `https://` 视频 URL 通常 **无法** 在浏览器 `<video>` 中直接播放。前端会：
+
+1. 优先读取节点已落盘的 `storageKey`（IndexedDB）；
+2. 校验 Blob 魔数，无效缓存自动删除；
+3. 通过 **`GET /v1/media/fetch?url=<encodeURIComponent(remoteUrl)>`** 经网关下载为 Blob 再播放；
+4. 播放成功后才把 `storageKey` 写回节点，避免闪烁重载。
+
+网关需实现（示例见并列项目 `jimeng-free-api-all/src/api/routes/media.ts`）：
+
+```http
+GET /v1/media/fetch?url=https://...
+Authorization: Bearer <apiKey>
+```
+
+响应为视频二进制流（`Content-Type: video/mp4` 等），**不要** 返回 JSON 错误体冒充视频。
+
+### 3. 本地联调命令
+
+```powershell
+# 终端 1：画布前端
+cd D:\canvas\infinite-canvas\web
+npm install
+npm run dev
+
+# 终端 2：视频网关（含 /v1/media/fetch，修改后需 build + 重启）
+cd D:\canvas\jimeng-free-api-all
+npm run build
+npm start
+```
+
+画布配置 Base URL 指向网关（如 `http://127.0.0.1:8000/v1`）。若视频节点报错「请确认 jimeng 服务已重启并包含 /v1/media/fetch」，请检查网关日志与上述路由。
+
+## 视频播放：已知问题与故障排查
+
+> **当前状态**：视频 **能生成**，画布 **播放/落盘仍不稳定**（Jay fork，2026-03）。不要假设仅部署 Vercel 前端即可在节点内预览视频。
+
+### 典型报错
+
+- 生成阶段节点红字：`Seedance 视频已生成但无法下载，请确认 jimeng 服务已重启并支持 /v1/media/fetch`
+- 已有视频节点：`浏览器无法播放该视频.../v1/media/fetch`
+
+### 依赖关系
+
+| 组件 | 作用 |
+|------|------|
+| 画布前端 `web/` | 轮询任务、`storeGeneratedVideo`、`CanvasVideoPlayer`、Blob 魔数校验 |
+| 视频网关（如 `jimeng-free-api-all`） | Seedance 任务 API、`GET /v1/contents/generations/tasks/{id}/content`、`GET /v1/media/fetch` |
+| 浏览器 IndexedDB | 持久化 `storageKey`；坏数据需重试或手动清除 |
+
+### 排查步骤
+
+1. 确认网关已 **`npm run build && npm start`**，且路由含 `media.ts` 与 `seedance-tasks.ts`。
+2. 浏览器 **Network** 查看失败请求：`/media/fetch?url=...` 或 `/tasks/{id}/content` 是否 404 / 返回 JSON。
+3. 画布 Base URL 与 Key 指向网关（如 `http://127.0.0.1:8000/v1`），不是 Vercel 域名。
+4. 节点点 **重试** 或清除 IndexedDB 中无效视频 Blob（旧版可能存入 JSON 错误体）。
+5. 网关重启后 Seedance 任务缓存丢失时，仅当节点仍保存 `content` 远程 URL 时 `/media/fetch` 才有机会成功。
+
+更完整的说明、代码路径与待办见 **[docs/content/docs/overview/video-playback.mdx](docs/content/docs/overview/video-playback.mdx)**。
+
+## New API 跳转
 
 使用 New API 等系统时，可用带参数的跳转自动填配置：
 
@@ -168,6 +233,7 @@ https://你的部署域名?apiKey={key}&baseUrl={address}
 - [ ] 首页与 `/canvas` 可正常打开
 - [ ] 配置弹窗可保存 Base URL / API Key（存于浏览器 localStorage）
 - [ ] 文生图 / 视频生成请求发往预期网关（在浏览器网络面板确认）
+- [ ] **视频**：网关含 `/v1/media/fetch`；生成后节点能播放或已知失败已记录（见 [video-playback.mdx](docs/content/docs/overview/video-playback.mdx)）
 - [ ] 若启用本地文件夹保存，在 Chrome/Edge 中授权目录并可读写
 - [ ] Prompt Hub：设置里能登录；**插入素材 → Prompt Hub 卡片库** 能列出并插入
 - [ ] README 与 LICENSE 仍包含上游版权声明
@@ -193,7 +259,7 @@ https://你的部署域名?apiKey={key}&baseUrl={address}
 |------|------|
 | 部署 | 根目录 `DEPLOY.md`、`vercel.json`（Root Directory = `web`）、`docs/.../github-deploy.mdx` |
 | Prompt Hub | 设置页连接卡藏；图片节点右键存卡；**素材库 Tab 从卡片库插入图片+提示词** |
-| 视频 / 即梦 | Seedance 参数、视频参考 `@`、本地媒体落盘、即梦风格 UI |
+| 视频 / 即梦 | Seedance 参数、视频参考 `@`、本地媒体落盘、黑色玻璃动效；**播放链路未稳定**（见 video-playback 文档） |
 | 本地媒体 | `local-media-store`、可选导出到本机文件夹 |
 
 如有闭源交付、企业内网长期闭源运行等需求，请邮件联系上游维护者（见商务合作文档）。

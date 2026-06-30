@@ -1,0 +1,123 @@
+---
+title: 视频播放与故障排查
+description: Seedance / 即梦风格网关下的画布视频生成、落盘与播放说明（含已知问题）
+---
+
+# 视频播放与故障排查
+
+> **当前状态（Jay fork）**：视频 **可以生成**，但画布内 **播放仍不稳定或未修复**。常见报错：`Seedance 视频已生成但无法下载，请确认 jimeng 服务已重启并支持 /v1/media/fetch`，或节点内播放器无法解码。下文说明原理、依赖与排查步骤。
+
+## 为什么浏览器不能直接播 CDN 链接？
+
+Jimeng / Seedance 等上游返回的 `https://` 视频 URL 通常：
+
+- 带防盗链或短时效签名；
+- 不允许浏览器 `<video src="https://...">` 跨域直连；
+- 部分网关把错误 JSON 当成「视频」返回，导致 IndexedDB 里写入无效 Blob。
+
+因此本 fork 采用 **「网关代下 → Blob → IndexedDB → `<video>`」** 链路，而不是长期保留远程 URL。
+
+## 前端播放链路（已实现）
+
+1. **生成完成**：`storeGeneratedVideo()` 尝试把视频写入浏览器 IndexedDB（`storageKey`）。
+2. **节点展示**：`CanvasVideoPlayer` 调用 `resolveVideoPlayback()`，按顺序尝试：
+   - 读取并校验本地 `storageKey`（MP4/WebM 魔数）；
+   - `GET /contents/generations/tasks/{id}/content`（Seedance）或 `GET /videos/{id}/content`（OpenAI 风格）；
+   - `GET /v1/media/fetch?url=...` 代理下载远程 URL。
+3. **播放成功**后才把 `storageKey` 写回节点，减少 metadata 更新导致的闪烁重载。
+4. **生成中**展示黑色玻璃 + 雾气 + 扫光动效（无文字）。
+
+相关代码：
+
+| 模块 | 路径 |
+|------|------|
+| 下载 / 校验 / 播放解析 | `web/src/services/api/video.ts` |
+| 画布播放器 | `web/src/app/(user)/canvas/components/canvas-video-player.tsx` |
+| 加载动效 | `web/src/app/(user)/canvas/components/canvas-node-loading-state.tsx` |
+| 媒体代理（网关示例） | 并列项目 `jimeng-free-api-all/src/api/routes/media.ts` |
+| Seedance 内容下载 | `jimeng-free-api-all/src/api/routes/seedance-tasks.ts` → `GET .../tasks/:id/content` |
+
+## 网关必须提供的能力
+
+画布 **Base URL** 指向你的 OpenAI 兼容网关（例如 `http://127.0.0.1:8000/v1`）。除 Seedance 任务接口外，至少还需要：
+
+### 1. `GET /v1/media/fetch`
+
+```http
+GET /v1/media/fetch?url=https%3A%2F%2F...
+Authorization: Bearer <apiKey>
+```
+
+- 响应必须是 **视频二进制**（`Content-Type: video/mp4` 等）。
+- **禁止** 返回 JSON 错误体冒充视频（前端会校验魔数并删除坏缓存）。
+
+### 2. Seedance：`GET /v1/contents/generations/tasks/{id}/content`
+
+网关从任务缓存取出 `video_url`，在服务端下载后把字节流返回给浏览器（见 `seedance-tasks.ts`）。
+
+> 若网关进程重启，**内存中的 Seedance 任务可能丢失**，此时只能依赖 `/v1/media/fetch` 拉取节点 metadata 里保存的远程 URL。
+
+## 本地联调命令
+
+```powershell
+# 终端 1：画布
+cd D:\canvas\infinite-canvas\web
+npm install
+npm run dev
+
+# 终端 2：视频网关（改路由后必须 build + 重启）
+cd D:\canvas\jimeng-free-api-all
+npm run build
+npm start
+```
+
+画布右上角配置：
+
+- **Base URL**：`http://127.0.0.1:8000/v1`（端口以网关为准）
+- **API Key**：与网关一致
+
+## 故障排查清单
+
+按顺序检查：
+
+1. **网关是否包含 `/v1/media/fetch`**  
+   浏览器 Network 中应能看到对 `.../media/fetch?url=...` 的请求；若 404，需更新并重启 `jimeng-free-api-all`。
+
+2. **`/media/fetch` 返回是否为真视频**  
+   在 Network → Response 看大小与类型；若很小且内容为 JSON（如 `{"code":...}`），说明代理失败，播放器会报错。
+
+3. **Seedance `/tasks/{id}/content` 是否 200**  
+   任务刚成功时优先走此接口；若网关重启导致任务不在内存，会回落到 `/media/fetch`。
+
+4. **清除坏缓存**  
+   节点报错后点 **重试**；或 DevTools → Application → IndexedDB 删除对应媒体条目；旧版可能把 JSON 当视频存进 IndexedDB，新版会自动删无效 Blob。
+
+5. **Base URL 是否带 `/v1` 后缀**  
+   系统会根据是否已含 `/v1` 拼接路径；重复或缺少可能导致请求打到错误地址。
+
+6. **仅部署 Vercel 前端不够**  
+   前端不会替你跑 jimeng 网关；没有可用网关时，视频生成/播放都会失败。
+
+## 常见报错对照
+
+| 界面提示 | 含义 | 建议 |
+|----------|------|------|
+| `Seedance 视频已生成但无法下载.../v1/media/fetch` | 任务已成功，但 content 与 media/fetch 均失败 | 重启网关、`npm run build`、检查 fetch 路由与上游 URL 是否可访问 |
+| `浏览器无法播放该视频.../v1/media/fetch` | Blob 已拿到但 `<video>` 解码失败 | 确认 fetch 返回真 MP4；点重试跳过坏 storageKey |
+| `视频已生成但无法下载保存...` | 生成后落盘阶段失败 | 同上，重点查 media/fetch |
+| 生成中一直黑玻璃、无报错 | 仍在轮询或下载 | 正常；过久则查网关日志 |
+
+## 已知限制与待办
+
+- [ ] **画布内稳定播放**：Seedance + jimeng 联调路径仍常失败，属 **当前最高优先级缺陷**。
+- [ ] 网关任务仅存内存，重启后旧节点可能无法再通过 `/content` 下载。
+- [ ] 直连火山方舟 Agent Plan 时，需确认 `video_url` 是否可被你的网关或 `/media/fetch` 访问。
+- [ ] 文档与实现同步：动效、参考素材条在提示词面板内，不在视频节点角落。
+
+进度跟踪见 [TODO](/docs/progress/todo) 与 [待测试](/docs/progress/pending-test)。
+
+## 相关文档
+
+- 部署与网关说明：[DEPLOY.md](https://github.com/study666-creme/infinite-canvas-jay/blob/main/DEPLOY.md)
+- 功能总览：[功能介绍](/docs/overview/features)
+- 画布节点：[画布节点操作手册](/docs/canvas/canvas-node-manual)

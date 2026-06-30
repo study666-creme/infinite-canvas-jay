@@ -17,7 +17,10 @@
 无限画布是一款面向图片创作的开源工作台。它把画布编排、AI 图片生成、参考图编辑、对话助手、提示词库和素材沉淀放在同一个界面里，适合用来探索视觉方案并连续迭代图片结果。
 
 > [!NOTE]
-> **本仓库**为 [study666-creme/infinite-canvas-jay](https://github.com/study666-creme/infinite-canvas-jay) fork，在 [basketikun/infinite-canvas](https://github.com/basketikun/infinite-canvas) 基础上增加 **Prompt Hub（卡藏）双向同步** 等。上游协议仍为 **AGPL-3.0**——**须保持 GitHub 公开，不可闭源收费卖画布本身**；详见 **[OPEN-SOURCE.md](OPEN-SOURCE.md)**。
+> **本仓库**为 [study666-creme/infinite-canvas-jay](https://github.com/study666-creme/infinite-canvas-jay) fork，在 [basketikun/infinite-canvas](https://github.com/basketikun/infinite-canvas) 基础上增加 **Prompt Hub（卡藏）双向同步**、**即梦风格视频工作流 UI**、**黑色玻璃生成动效**、**视频本地播放与媒体代理** 等。上游协议仍为 **AGPL-3.0**——**须保持 GitHub 公开，不可闭源收费卖画布本身**；详见 **[OPEN-SOURCE.md](OPEN-SOURCE.md)**。
+
+> [!WARNING]
+> **视频播放（已知问题）**：Seedance / 即梦风格网关下，视频任务 **可以生成**，但画布内 **仍常无法下载或播放**（如 `Seedance 视频已生成但无法下载.../v1/media/fetch`）。需自建含 **`GET /v1/media/fetch`** 的兼容网关（示例：`jimeng-free-api-all`），且修改网关后须 `build` + 重启。完整排查见 **[DEPLOY.md — 视频故障排查](DEPLOY.md#视频播放已知问题与故障排查)** 与文档站 [视频播放与故障排查](docs/content/docs/overview/video-playback.mdx)。
 
 > [!CAUTION]
 > 项目目前处于开发阶段，不保证历史数据兼容。各种数据库结构和存储格式都可能直接调整，欢迎关注后续更新，当前更适合个人/本地部署，不建议直接公网多人共用。
@@ -26,8 +29,10 @@
 
 ## 核心功能
 
-- 无限画布：多画布项目、节点拖拽缩放、连线、小地图、撤销重做、导入导出。
-- AI 创作：浏览器前台直连你配置的 OpenAI 兼容接口，支持文生图、图生图、参考图编辑、文本问答、音频和视频生成；Seedance 2.0 可通过火山方舟 Agent Plan 接入。
+- 无限画布：多画布项目、节点拖拽缩放、连线、小地图、撤销重做、导入导出；**节点点击唤起工具栏**、**画布/节点右键菜单**、连接点 **+** 快捷建链、加粗能量连线动画。
+- AI 创作：浏览器前台直连你配置的 OpenAI 兼容接口，支持文生图、图生图、参考图编辑、文本问答、音频和视频生成；Seedance 2.0 可通过火山方舟 Agent Plan 接入；视频节点支持 **`@图片1` / `@视频1` 引用** 与参考素材条（提示词面板内）。
+- **生成动效**：图片/视频生成中展示 **黑色玻璃 + 银灰雾气 + 单向扫光** 加载态（无文字），替代静态占位。
+- **视频播放（实验性 / 未稳定）**：设计上经网关 **`GET /v1/media/fetch`** 代理 CDN 为 Blob 后落盘 IndexedDB 再播放；**当前 fork 仍常失败**，见 [视频播放与故障排查](docs/content/docs/overview/video-playback.mdx) 与 [DEPLOY.md](DEPLOY.md)。
 - 画布助手：围绕选中节点和上游节点对话、生图，并把结果插回画布。
 - 本地 Agent：通过本机 Canvas Agent 连接 Codex / Claude Code，让 Agent 通过 MCP 操作当前画布；
 - Codex App 插件：提供 Codex app 插件，安装后会自动注册 MCP 并尝试拉起本地 Agent。
@@ -106,6 +111,7 @@ https://canvas.best?apiKey={key}&baseUrl={address}
 ## 文档
 
 - [部署指南（GitHub / Vercel / Docker）](DEPLOY.md)
+- [视频播放与故障排查](docs/content/docs/overview/video-playback.mdx)
 - [快速开始](docs/content/docs/overview/quick-start.mdx)
 - [GitHub 与 Vercel 部署](docs/content/docs/overview/github-deploy.mdx)
 - [功能介绍](docs/content/docs/overview/features.mdx)

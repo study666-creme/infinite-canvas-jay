@@ -34,6 +34,7 @@ export type PromptHubCardListItem = {
     imageRef: string;
     thumbUrl: string;
     tags?: string[];
+    group?: string | null;
     updatedAt?: number;
 };
 
@@ -42,6 +43,15 @@ export type PromptHubCardListResult = {
     total: number;
     page: number;
     limit: number;
+};
+
+export type PromptHubCardFilters = {
+    apiBase?: string;
+    page?: number;
+    limit?: number;
+    q?: string;
+    group?: string;
+    tag?: string;
 };
 
 function normalizeApiBase(apiBase: string) {
@@ -129,13 +139,15 @@ export async function checkPromptHubStatus(session: PromptHubSession, opts: { ap
 
 export async function listPromptHubCards(
     session: PromptHubSession,
-    opts: { apiBase?: string; page?: number; limit?: number; q?: string } = {},
+    opts: PromptHubCardFilters = {},
 ): Promise<PromptHubCardListResult> {
     const apiBase = normalizeApiBase(opts.apiBase || PROMPT_HUB_DEFAULTS.apiBase);
     const params = new URLSearchParams();
     params.set("page", String(Math.max(1, opts.page || 1)));
     params.set("limit", String(Math.min(48, Math.max(1, opts.limit || 24))));
     if (opts.q?.trim()) params.set("q", opts.q.trim());
+    if (opts.group?.trim()) params.set("group", opts.group.trim());
+    if (opts.tag?.trim()) params.set("tag", opts.tag.trim());
     const res = await fetch(`${apiBase}/api/v1/extension/cards?${params.toString()}`, {
         headers: { Authorization: `Bearer ${session.access_token}` },
     });
@@ -150,6 +162,30 @@ export async function listPromptHubCards(
         page: Number(payload.page) || 1,
         limit: Number(payload.limit) || 24,
     };
+}
+
+export async function listPromptHubTags(session: PromptHubSession, opts: { apiBase?: string } = {}) {
+    const apiBase = normalizeApiBase(opts.apiBase || PROMPT_HUB_DEFAULTS.apiBase);
+    const res = await fetch(`${apiBase}/api/v1/extension/tags`, {
+        headers: { Authorization: `Bearer ${session.access_token}` },
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || data.ok === false) {
+        throw new Error(data.message || data.code || `加载标签失败 (${res.status})`);
+    }
+    return Array.isArray(data.data?.tags) ? (data.data.tags as string[]) : [];
+}
+
+export async function listPromptHubGroups(session: PromptHubSession, opts: { apiBase?: string } = {}) {
+    const apiBase = normalizeApiBase(opts.apiBase || PROMPT_HUB_DEFAULTS.apiBase);
+    const res = await fetch(`${apiBase}/api/v1/extension/groups`, {
+        headers: { Authorization: `Bearer ${session.access_token}` },
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || data.ok === false) {
+        throw new Error(data.message || data.code || `加载分组失败 (${res.status})`);
+    }
+    return Array.isArray(data.data?.groups) ? (data.data.groups as string[]) : [];
 }
 
 export async function signPromptHubImageRef(

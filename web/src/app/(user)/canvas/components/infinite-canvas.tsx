@@ -12,13 +12,14 @@ type InfiniteCanvasProps = {
     backgroundMode?: CanvasBackgroundMode;
     onViewportChange: (viewport: ViewportTransform) => void;
     onCanvasMouseDown?: (event: React.PointerEvent<HTMLDivElement>) => void;
+    onCanvasPointerMove?: (event: React.PointerEvent<HTMLDivElement>) => void;
     onCanvasDeselect?: () => void;
     onContextMenu?: (event: React.MouseEvent) => void;
     onDrop?: (event: React.DragEvent<HTMLDivElement>) => void;
     children: React.ReactNode;
 };
 
-export function InfiniteCanvas({ containerRef, viewport, backgroundMode = "lines", onViewportChange, onCanvasMouseDown, onCanvasDeselect, onContextMenu, onDrop, children }: InfiniteCanvasProps) {
+export function InfiniteCanvas({ containerRef, viewport, backgroundMode = "lines", onViewportChange, onCanvasMouseDown, onCanvasPointerMove, onCanvasDeselect, onContextMenu, onDrop, children }: InfiniteCanvasProps) {
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const panState = useRef({
         isPanning: false,
@@ -47,7 +48,9 @@ export function InfiniteCanvas({ containerRef, viewport, backgroundMode = "lines
     useEffect(() => {
         const handleKeyDown = (event: KeyboardEvent) => {
             if (event.code !== "Space") return;
-            if (event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement) return;
+            if (event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement || event.target instanceof HTMLSelectElement) return;
+            if (event.target instanceof HTMLElement && event.target.isContentEditable) return;
+            event.preventDefault();
             setIsSpacePressed(true);
         };
 
@@ -55,11 +58,15 @@ export function InfiniteCanvas({ containerRef, viewport, backgroundMode = "lines
             if (event.code === "Space") setIsSpacePressed(false);
         };
 
+        const handleBlur = () => setIsSpacePressed(false);
+
         window.addEventListener("keydown", handleKeyDown);
         window.addEventListener("keyup", handleKeyUp);
+        window.addEventListener("blur", handleBlur);
         return () => {
             window.removeEventListener("keydown", handleKeyDown);
             window.removeEventListener("keyup", handleKeyUp);
+            window.removeEventListener("blur", handleBlur);
         };
     }, []);
 
@@ -91,14 +98,14 @@ export function InfiniteCanvas({ containerRef, viewport, backgroundMode = "lines
         if (target?.closest("[data-connection-create-menu]")) return;
         const isBackgroundClick = !target?.closest("[data-node-id],[data-connection-id]");
 
-        if (event.button === 0 && (event.ctrlKey || event.metaKey) && isBackgroundClick) {
+        if (event.button === 0 && isBackgroundClick && !isSpacePressed) {
             event.preventDefault();
             event.currentTarget.setPointerCapture(event.pointerId);
             onCanvasMouseDown?.(event);
             return;
         }
 
-        if (event.button === 1 || (event.button === 0 && !isSpacePressed && isBackgroundClick)) {
+        if (event.button === 1 || (event.button === 0 && isSpacePressed && isBackgroundClick)) {
             event.preventDefault();
             event.currentTarget.setPointerCapture(event.pointerId);
             panState.current = {
@@ -110,11 +117,6 @@ export function InfiniteCanvas({ containerRef, viewport, backgroundMode = "lines
                 hasMoved: false,
             };
             document.body.style.cursor = "grabbing";
-            return;
-        }
-
-        if (event.button === 0 && isSpacePressed && isBackgroundClick) {
-            event.preventDefault();
         }
     };
 
@@ -170,9 +172,10 @@ export function InfiniteCanvas({ containerRef, viewport, backgroundMode = "lines
     return (
         <div
             ref={containerRef}
-            className="relative h-full w-full cursor-grab select-none overflow-hidden"
+            className={`relative h-full w-full select-none overflow-hidden ${isSpacePressed ? "cursor-grab" : "cursor-default"}`}
             style={{ background: theme.canvas.background }}
             onPointerDown={handlePointerDown}
+            onPointerMove={(event) => onCanvasPointerMove?.(event)}
             onWheel={handleWheel}
             onContextMenu={onContextMenu}
             onDragOver={(event) => event.preventDefault()}

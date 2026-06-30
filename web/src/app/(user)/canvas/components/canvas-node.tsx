@@ -7,9 +7,9 @@ import { ChevronRight, Image as ImageIcon, Music2, Plus, RefreshCw, Star, Video 
 import { canvasThemes } from "@/lib/canvas-theme";
 import { formatBytes } from "@/lib/image-utils";
 import { useThemeStore } from "@/stores/use-theme-store";
-import { CanvasResourceMentionTextarea } from "./canvas-resource-mention-textarea";
+import { CanvasResourceMentionTextarea, placeCaretAtEnd } from "./canvas-resource-mention-textarea";
 import { CanvasNodeLoadingState } from "./canvas-node-loading-state";
-import { CanvasVideoPlayer } from "./canvas-video-player";
+import { CanvasVideoPlayer, type CanvasVideoPlayerHandle } from "./canvas-video-player";
 import { CanvasNodeType, type CanvasNodeData, type ConnectionHandle, type Position } from "../types";
 import type { CanvasResourceReference } from "../utils/canvas-resource-references";
 
@@ -19,6 +19,7 @@ type CanvasNodeProps = {
     data: CanvasNodeData;
     scale: number;
     isSelected: boolean;
+    isGroupPackaged?: boolean;
     isRelated: boolean;
     isFocusRelated: boolean;
     isConnectionTarget: boolean;
@@ -51,11 +52,13 @@ type CanvasNodeProps = {
     onViewImage?: (node: CanvasNodeData) => void;
     onContextMenu: (event: React.MouseEvent, nodeId: string) => void;
     onVideoPersisted?: (nodeId: string, file: { url: string; storageKey: string; bytes: number; mimeType: string; width?: number; height?: number; durationMs?: number }) => void;
+    onRegisterVideoControl?: (nodeId: string, toggle: (() => void) | null) => void;
 };
 
 type NodeContentRendererProps = {
     node: CanvasNodeData;
     theme: (typeof canvasThemes)[keyof typeof canvasThemes];
+    isSelected: boolean;
     isEditingContent: boolean;
     textareaRef: React.RefObject<HTMLDivElement | null>;
     isBatchRoot: boolean;
@@ -72,12 +75,14 @@ type NodeContentRendererProps = {
     onToggleBatch?: () => void;
     onSetBatchPrimary?: () => void;
     onVideoPersisted?: (file: { url: string; storageKey: string; bytes: number; mimeType: string; width?: number; height?: number; durationMs?: number }) => void;
+    onRegisterVideoControl?: (toggle: (() => void) | null) => void;
 };
 
 export const CanvasNode = React.memo(function CanvasNode({
     data,
     scale,
     isSelected,
+    isGroupPackaged = false,
     isRelated,
     isFocusRelated,
     isConnectionTarget,
@@ -110,6 +115,7 @@ export const CanvasNode = React.memo(function CanvasNode({
     onViewImage,
     onContextMenu,
     onVideoPersisted,
+    onRegisterVideoControl,
 }: CanvasNodeProps) {
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const [hovered, setHovered] = useState(false);
@@ -147,9 +153,13 @@ export const CanvasNode = React.memo(function CanvasNode({
 
     useEffect(() => {
         if (!isEditingContent) return;
-        const textarea = textareaRef.current;
-        textarea?.focus();
-        textarea?.setSelectionRange(textarea.value.length, textarea.value.length);
+        const frame = requestAnimationFrame(() => {
+            const editor = textareaRef.current;
+            if (!editor) return;
+            editor.focus();
+            placeCaretAtEnd(editor);
+        });
+        return () => cancelAnimationFrame(frame);
     }, [isEditingContent]);
 
     useEffect(() => {
@@ -245,10 +255,24 @@ export const CanvasNode = React.memo(function CanvasNode({
         };
     }, [handleResizeMove, handleResizeUp]);
 
+    const showSelectionChrome = isSelected && !isGroupPackaged;
+
+    const borderColor = showSelectionChrome
+        ? theme.node.activeStroke
+        : hasImageContent
+          ? isRelated && !isBatchChild
+              ? theme.node.muted
+              : "transparent"
+          : isConnectionTarget
+            ? "rgba(255,255,255,.28)"
+            : isRelated
+              ? theme.node.muted
+              : theme.node.stroke;
+
     return (
         <div
             data-node-id={data.id}
-            className={`node-element absolute flex select-none flex-col transition-shadow duration-200 ${isSelected ? "z-50" : "z-10"}`}
+            className={`node-element absolute flex select-none flex-col transition-shadow duration-200 ${showSelectionChrome ? "z-50" : "z-10"}`}
             style={{
                 transform: `translate(${data.position.x}px, ${data.position.y}px)`,
                 width: data.width,
@@ -270,19 +294,18 @@ export const CanvasNode = React.memo(function CanvasNode({
                 className="relative h-full w-full overflow-visible rounded-3xl border"
                 style={{
                     background: hasImageContent || hasVideoContent ? "transparent" : theme.node.fill,
-                    borderColor: hasImageContent
-                        ? isRelated && !isBatchChild
-                            ? theme.node.muted
-                            : "transparent"
-                        : isConnectionTarget
-                          ? "rgba(255,255,255,.28)"
-                          : isRelated
-                            ? theme.node.muted
-                            : theme.node.stroke,
-                    boxShadow: isRelated && !isBatchChild ? `0 18px 48px rgba(0,0,0,.14)` : undefined,
+                    borderColor,
+                    borderWidth: showSelectionChrome ? 2 : 1,
+                    boxShadow: showSelectionChrome
+                        ? `0 0 0 1px ${theme.node.activeStroke}`
+                        : isRelated && !isBatchChild
+                          ? `0 18px 48px rgba(0,0,0,.14)`
+                          : undefined,
                 }}
                 onMouseDown={(event) => {
-                    if ((event.target as HTMLElement).closest("video,audio,button,[data-canvas-no-zoom]")) return;
+                    const target = event.target as HTMLElement;
+                    if (target.closest("button")) return;
+                    if (target.closest("[data-canvas-interactive]")) return;
                     onMouseDown(event, data.id);
                 }}
                 onDoubleClick={(event) => {
@@ -317,6 +340,7 @@ export const CanvasNode = React.memo(function CanvasNode({
                     <NodeContent
                         node={data}
                         theme={theme}
+                        isSelected={isSelected}
                         isEditingContent={isEditingContent}
                         textareaRef={textareaRef}
                         isBatchRoot={isBatchRoot}
@@ -333,6 +357,7 @@ export const CanvasNode = React.memo(function CanvasNode({
                         onToggleBatch={() => onToggleBatch?.(data.id)}
                         onSetBatchPrimary={() => onSetBatchPrimary?.(data)}
                         onVideoPersisted={onVideoPersisted ? (file) => onVideoPersisted(data.id, file) : undefined}
+                        onRegisterVideoControl={onRegisterVideoControl ? (toggle) => onRegisterVideoControl(data.id, toggle) : undefined}
                     />
                 </div>
 
@@ -514,7 +539,15 @@ function EmptyImageContent({ theme, isBatchRoot, batchCount, batchExpanded, batc
     return content;
 }
 
-function VideoNodeContent({ node, theme, onVideoPersisted }: NodeContentRendererProps) {
+function VideoNodeContent({ node, theme, onVideoPersisted, onRegisterVideoControl }: NodeContentRendererProps) {
+    const playerRef = useRef<CanvasVideoPlayerHandle>(null);
+
+    useEffect(() => {
+        if (!onRegisterVideoControl || !node.metadata?.content) return;
+        onRegisterVideoControl(() => playerRef.current?.togglePlayback());
+        return () => onRegisterVideoControl(null);
+    }, [node.id, node.metadata?.content, onRegisterVideoControl]);
+
     const isLoading = node.metadata?.status === "loading";
 
     if (!node.metadata?.content) {
@@ -536,6 +569,7 @@ function VideoNodeContent({ node, theme, onVideoPersisted }: NodeContentRenderer
     return (
         <div className="relative h-full w-full overflow-hidden">
             <CanvasVideoPlayer
+                ref={playerRef}
                 content={node.metadata.content}
                 storageKey={node.metadata.storageKey}
                 mimeType={node.metadata.mimeType}
@@ -548,7 +582,7 @@ function VideoNodeContent({ node, theme, onVideoPersisted }: NodeContentRenderer
     );
 }
 
-function AudioNodeContent({ node, theme }: NodeContentRendererProps) {
+function AudioNodeContent({ node, theme, isSelected }: NodeContentRendererProps) {
     if (!node.metadata?.content)
         return (
             <div className="flex h-full w-full flex-col items-center justify-center gap-2" style={{ color: theme.node.placeholder }}>
@@ -562,7 +596,7 @@ function AudioNodeContent({ node, theme }: NodeContentRendererProps) {
                 <Music2 className="size-4 shrink-0" />
                 <span className="truncate">{node.title || "音频"}</span>
             </div>
-            <audio src={node.metadata.content} controls className="w-full" data-canvas-no-zoom />
+            <audio src={node.metadata.content} controls className={`w-full ${isSelected ? "pointer-events-auto" : "pointer-events-none"}`} {...(isSelected ? { "data-canvas-interactive": true, "data-canvas-no-zoom": true } : {})} />
         </div>
     );
 }

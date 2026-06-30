@@ -50,6 +50,10 @@ Fork 时请保留 [LICENSE](https://github.com/basketikun/infinite-canvas/blob/m
 
 Worker 已允许 `*.vercel.app` 跨域；自定义域名需在 Prompt Hub Worker `CORS_ORIGINS` 中追加。
 
+### 视频播放（必读）
+
+仅部署 Vercel **不能**播放 Seedance / 即梦视频。需本地或服务器运行含 **`/v1/media/fetch`** 的网关，并在画布配置 Base URL。当前 fork **播放仍不稳定**，见 [视频播放与故障排查](/docs/overview/video-playback) 与仓库 [DEPLOY.md](https://github.com/study666-creme/infinite-canvas-jay/blob/main/DEPLOY.md#视频播放已知问题与故障排查)。
+
 ## 4. 其它平台
 
 - [Render 部署](/docs/overview/render)

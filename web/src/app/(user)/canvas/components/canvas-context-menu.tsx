@@ -2,7 +2,7 @@
 
 import { useEffect } from "react";
 import type { ReactNode } from "react";
-import { ClipboardPaste, Copy, ImageIcon, Music2, Plus, Save, Trash2, Type, Upload, Video, Wand2 } from "lucide-react";
+import { ClipboardPaste, Copy, FolderPlus, ImageIcon, Layers, Music2, Plus, Save, Trash2, Type, Upload, Video, Wand2 } from "lucide-react";
 
 import { canvasThemes } from "@/lib/canvas-theme";
 import { useThemeStore } from "@/stores/use-theme-store";
@@ -10,6 +10,9 @@ import type { ContextMenuState } from "../types";
 
 type CanvasContextMenuProps = {
     menu: ContextMenuState;
+    selectedCount?: number;
+    canGroup?: boolean;
+    canUngroup?: boolean;
     canPaste: boolean;
     onClose: () => void;
     onUpload: () => void;
@@ -19,15 +22,22 @@ type CanvasContextMenuProps = {
     onAddText: () => void;
     onAddConfig: () => void;
     onPaste: () => void;
+    onGroup?: () => void;
+    onUngroup?: () => void;
     onCopy?: () => void;
     onDuplicate?: () => void;
     onDelete: () => void;
     onSaveToPromptHub?: () => void;
     showSaveToPromptHub?: boolean;
+    onSaveToAssetLibrary?: () => void;
+    showSaveToAssetLibrary?: boolean;
 };
 
 export function CanvasNodeContextMenu({
     menu,
+    selectedCount = 0,
+    canGroup = false,
+    canUngroup = false,
     canPaste,
     onClose,
     onUpload,
@@ -37,11 +47,15 @@ export function CanvasNodeContextMenu({
     onAddText,
     onAddConfig,
     onPaste,
+    onGroup,
+    onUngroup,
     onCopy,
     onDuplicate,
     onDelete,
     onSaveToPromptHub,
     showSaveToPromptHub = false,
+    onSaveToAssetLibrary,
+    showSaveToAssetLibrary = false,
 }: CanvasContextMenuProps) {
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
 
@@ -66,6 +80,14 @@ export function CanvasNodeContextMenu({
         >
             {menu.type === "canvas" ? (
                 <>
+                    {canGroup ? (
+                        <>
+                            <MenuButton icon={<Layers className="size-4" />} label={`成组 (${selectedCount})`} onClick={onGroup} />
+                            <MenuDivider />
+                        </>
+                    ) : null}
+                    {canUngroup ? <MenuButton icon={<Layers className="size-4 rotate-180" />} label="取消成组" onClick={onUngroup} /> : null}
+                    {canUngroup ? <MenuDivider /> : null}
                     <MenuButton icon={<Upload className="size-4" />} label="上传素材" onClick={onUpload} />
                     <MenuDivider />
                     <MenuButton icon={<ImageIcon className="size-4" />} label="新建图片节点" onClick={onAddImage} />
@@ -80,6 +102,10 @@ export function CanvasNodeContextMenu({
 
             {menu.type === "node" ? (
                 <>
+                    {canGroup ? <MenuButton icon={<Layers className="size-4" />} label={`成组 (${selectedCount})`} onClick={onGroup} /> : null}
+                    {canUngroup ? <MenuButton icon={<Layers className="size-4 rotate-180" />} label="取消成组" onClick={onUngroup} /> : null}
+                    {(canGroup || canUngroup) ? <MenuDivider /> : null}
+                    {showSaveToAssetLibrary ? <MenuButton icon={<FolderPlus className="size-4" />} label="保存到画布资产库" onClick={onSaveToAssetLibrary} /> : null}
                     {showSaveToPromptHub ? <MenuButton icon={<Save className="size-4" />} label="存为 Prompt Hub 卡片" onClick={onSaveToPromptHub} /> : null}
                     {onCopy ? <MenuButton icon={<Copy className="size-4" />} label="复制" onClick={onCopy} /> : null}
                     {onDuplicate ? <MenuButton icon={<Plus className="size-4" />} label="创建副本" onClick={onDuplicate} /> : null}

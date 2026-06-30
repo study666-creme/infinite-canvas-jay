@@ -501,217 +501,131 @@
             radial-gradient(circle at 50% 0%, rgba(120, 170, 255, 0.07), transparent 58%);
     }
 
-    .canvas-black-glass-grid {
-        background-image:
-            linear-gradient(rgba(255, 255, 255, 0.04) 1px, transparent 1px),
-            linear-gradient(90deg, rgba(255, 255, 255, 0.04) 1px, transparent 1px);
-        background-size: 28px 28px;
-        mask-image: radial-gradient(circle at center, black 30%, transparent 90%);
-        animation: canvas-black-glass-grid-drift 8s linear infinite;
-    }
-
     .canvas-black-glass-fog {
         overflow: hidden;
-        mask-image: radial-gradient(circle at center, black 55%, transparent 96%);
+    }
+
+    .canvas-black-glass-fog::before {
+        content: "";
+        position: absolute;
+        inset: -8%;
+        filter: blur(36px);
+        opacity: 0.9;
+    }
+
+    .canvas-black-glass-fog-default::before {
+        background:
+            radial-gradient(circle at 18% 22%, rgba(190, 198, 214, 0.1) 0%, transparent 52%),
+            radial-gradient(circle at 82% 28%, rgba(170, 178, 198, 0.08) 0%, transparent 50%),
+            radial-gradient(circle at 24% 78%, rgba(180, 188, 206, 0.08) 0%, transparent 48%),
+            radial-gradient(circle at 78% 74%, rgba(165, 174, 194, 0.09) 0%, transparent 50%),
+            radial-gradient(circle at 50% 50%, rgba(200, 208, 224, 0.07) 0%, transparent 58%);
+    }
+
+    .canvas-black-glass-fog-image::before {
+        background:
+            radial-gradient(circle at 18% 22%, rgba(220, 205, 188, 0.1) 0%, transparent 52%),
+            radial-gradient(circle at 82% 28%, rgba(205, 190, 176, 0.08) 0%, transparent 50%),
+            radial-gradient(circle at 24% 78%, rgba(215, 200, 184, 0.08) 0%, transparent 48%),
+            radial-gradient(circle at 78% 74%, rgba(200, 186, 172, 0.09) 0%, transparent 50%),
+            radial-gradient(circle at 50% 50%, rgba(225, 212, 196, 0.07) 0%, transparent 58%);
+    }
+
+    .canvas-black-glass-fog-video::before {
+        background:
+            radial-gradient(circle at 18% 22%, rgba(186, 196, 216, 0.1) 0%, transparent 52%),
+            radial-gradient(circle at 82% 28%, rgba(168, 178, 202, 0.08) 0%, transparent 50%),
+            radial-gradient(circle at 24% 78%, rgba(178, 188, 210, 0.08) 0%, transparent 48%),
+            radial-gradient(circle at 78% 74%, rgba(160, 172, 198, 0.09) 0%, transparent 50%),
+            radial-gradient(circle at 50% 50%, rgba(194, 204, 222, 0.07) 0%, transparent 58%);
     }
 
     .canvas-black-glass-mist {
         position: absolute;
         border-radius: 9999px;
-        filter: blur(44px);
-        mix-blend-mode: screen;
-        will-change: transform, opacity;
+        filter: blur(68px);
+        opacity: 0.68;
+        will-change: transform;
     }
 
     .canvas-black-glass-mist-default {
-        background: radial-gradient(circle, rgba(210, 220, 255, 0.34) 0%, rgba(210, 220, 255, 0) 72%);
+        background: radial-gradient(circle, rgba(210, 218, 234, 0.46) 0%, rgba(170, 178, 200, 0.2) 42%, rgba(120, 128, 150, 0.06) 68%, transparent 88%);
     }
 
     .canvas-black-glass-mist-image {
-        background: radial-gradient(circle, rgba(255, 210, 170, 0.3) 0%, rgba(255, 210, 170, 0) 72%);
+        background: radial-gradient(circle, rgba(230, 214, 196, 0.42) 0%, rgba(195, 178, 160, 0.18) 42%, rgba(150, 136, 122, 0.06) 68%, transparent 88%);
     }
 
     .canvas-black-glass-mist-video {
-        background: radial-gradient(circle, rgba(120, 180, 255, 0.38) 0%, rgba(120, 180, 255, 0) 72%);
+        background: radial-gradient(circle, rgba(204, 214, 232, 0.48) 0%, rgba(164, 176, 204, 0.22) 42%, rgba(110, 122, 148, 0.07) 68%, transparent 88%);
     }
 
     .canvas-black-glass-mist-a {
-        width: 58%;
-        height: 52%;
-        left: -6%;
-        top: 12%;
-        animation: canvas-black-glass-mist-a 8.6s ease-in-out infinite;
+        width: 88%;
+        height: 82%;
+        left: -34%;
+        top: -30%;
+        animation: canvas-black-glass-mist-drift-a 3.2s ease-in-out infinite;
     }
 
     .canvas-black-glass-mist-b {
-        width: 52%;
-        height: 48%;
-        right: -8%;
-        top: 8%;
-        animation: canvas-black-glass-mist-b 10.2s ease-in-out infinite;
+        width: 84%;
+        height: 78%;
+        right: -32%;
+        top: -28%;
+        animation: canvas-black-glass-mist-drift-b 3.8s ease-in-out infinite;
+        animation-delay: -0.9s;
     }
 
     .canvas-black-glass-mist-c {
-        width: 64%;
-        height: 56%;
-        left: 18%;
-        bottom: -14%;
-        animation: canvas-black-glass-mist-c 9.4s ease-in-out infinite;
+        width: 86%;
+        height: 80%;
+        left: -30%;
+        bottom: -32%;
+        animation: canvas-black-glass-mist-drift-c 3.5s ease-in-out infinite;
+        animation-delay: -1.8s;
     }
 
     .canvas-black-glass-mist-d {
-        width: 44%;
-        height: 40%;
-        right: 14%;
-        bottom: 8%;
-        animation: canvas-black-glass-mist-d 7.8s ease-in-out infinite;
+        width: 82%;
+        height: 76%;
+        right: -30%;
+        bottom: -30%;
+        animation: canvas-black-glass-mist-drift-d 4.1s ease-in-out infinite;
+        animation-delay: -1.2s;
     }
 
     .canvas-black-glass-mist-e {
-        width: 38%;
-        height: 36%;
-        left: 34%;
-        top: 26%;
-        animation: canvas-black-glass-mist-e 11.6s ease-in-out infinite;
-    }
-
-    .canvas-black-glass-haze {
-        background:
-            radial-gradient(circle at 20% 30%, rgba(255, 255, 255, 0.05) 0%, transparent 34%),
-            radial-gradient(circle at 78% 68%, rgba(255, 255, 255, 0.04) 0%, transparent 36%);
-        filter: blur(28px);
-        mix-blend-mode: soft-light;
-        animation: canvas-black-glass-haze 12s ease-in-out infinite alternate;
-    }
-
-    .canvas-black-glass-aurora {
-        position: absolute;
-        inset: -24%;
-        opacity: 0.72;
-        filter: blur(48px);
-        mix-blend-mode: screen;
-        animation: canvas-black-glass-aurora 7.2s ease-in-out infinite alternate;
-    }
-
-    .canvas-black-glass-aurora-default {
-        background:
-            radial-gradient(circle at 18% 32%, rgba(120, 170, 255, 0.16) 0%, transparent 42%),
-            radial-gradient(circle at 78% 28%, rgba(180, 140, 255, 0.12) 0%, transparent 40%),
-            radial-gradient(circle at 52% 78%, rgba(255, 255, 255, 0.08) 0%, transparent 46%);
-    }
-
-    .canvas-black-glass-aurora-image {
-        background:
-            radial-gradient(circle at 22% 34%, rgba(255, 196, 140, 0.14) 0%, transparent 44%),
-            radial-gradient(circle at 72% 28%, rgba(255, 140, 180, 0.1) 0%, transparent 42%),
-            radial-gradient(circle at 48% 78%, rgba(255, 255, 255, 0.06) 0%, transparent 48%);
-    }
-
-    .canvas-black-glass-aurora-video {
-        background:
-            radial-gradient(circle at 20% 30%, rgba(96, 164, 255, 0.2) 0%, transparent 44%),
-            radial-gradient(circle at 80% 36%, rgba(140, 120, 255, 0.14) 0%, transparent 42%),
-            radial-gradient(circle at 50% 84%, rgba(120, 220, 255, 0.1) 0%, transparent 48%);
-    }
-
-    .canvas-black-glass-sheen {
-        position: absolute;
-        inset: 0;
-        opacity: 0.55;
-        animation: canvas-black-glass-breathe 3.6s ease-in-out infinite;
-    }
-
-    .canvas-black-glass-sheen-default {
-        background: radial-gradient(circle at 50% 38%, rgba(255, 255, 255, 0.08), transparent 42%);
-    }
-
-    .canvas-black-glass-sheen-image {
-        background: radial-gradient(circle at 50% 38%, rgba(255, 214, 170, 0.07), transparent 42%);
-    }
-
-    .canvas-black-glass-sheen-video {
-        background: radial-gradient(circle at 50% 38%, rgba(130, 180, 255, 0.1), transparent 42%);
+        width: 78%;
+        height: 72%;
+        left: 11%;
+        top: 14%;
+        animation: canvas-black-glass-mist-drift-e 2.8s ease-in-out infinite;
+        animation-delay: -2.2s;
     }
 
     .canvas-black-glass-sweep {
+        overflow: hidden;
+        z-index: 2;
+    }
+
+    .canvas-black-glass-sweep::before {
+        content: "";
+        position: absolute;
+        inset: -70% -100%;
+        background: linear-gradient(
+            108deg,
+            transparent 0%,
+            transparent 30%,
+            rgba(255, 255, 255, 0.05) 38%,
+            rgba(255, 255, 255, 0.2) 50%,
+            rgba(255, 255, 255, 0.05) 62%,
+            transparent 70%,
+            transparent 100%
+        );
+        filter: blur(14px);
         mix-blend-mode: screen;
-    }
-
-    .canvas-black-glass-sweep-primary {
-        background: linear-gradient(
-            115deg,
-            transparent 0%,
-            transparent 38%,
-            rgba(255, 255, 255, 0.04) 44%,
-            rgba(255, 255, 255, 0.22) 50%,
-            rgba(255, 255, 255, 0.04) 56%,
-            transparent 62%,
-            transparent 100%
-        );
-        background-size: 240% 240%;
         animation: canvas-black-glass-sweep 2.2s linear infinite;
-    }
-
-    .canvas-black-glass-sweep-secondary {
-        background: linear-gradient(
-            125deg,
-            transparent 0%,
-            transparent 40%,
-            rgba(255, 255, 255, 0.02) 46%,
-            rgba(255, 255, 255, 0.1) 50%,
-            rgba(255, 255, 255, 0.02) 54%,
-            transparent 60%,
-            transparent 100%
-        );
-        background-size: 260% 260%;
-        animation: canvas-black-glass-sweep 3.4s linear infinite reverse;
-        opacity: 0.75;
-    }
-
-    .canvas-black-glass-beam {
-        position: absolute;
-        inset: -40% -60%;
-        opacity: 0.9;
-        filter: blur(16px);
-        animation: canvas-black-glass-beam 2.2s linear infinite;
-    }
-
-    .canvas-black-glass-beam-delayed {
-        opacity: 0.55;
-        animation-delay: 1.1s;
-        filter: blur(24px);
-    }
-
-    .canvas-black-glass-beam-default {
-        background: linear-gradient(90deg, transparent 0%, rgba(255, 255, 255, 0) 40%, rgba(255, 255, 255, 0.34) 50%, rgba(255, 255, 255, 0) 60%, transparent 100%);
-    }
-
-    .canvas-black-glass-beam-image {
-        background: linear-gradient(90deg, transparent 0%, rgba(255, 220, 180, 0) 40%, rgba(255, 220, 180, 0.28) 50%, rgba(255, 220, 180, 0) 60%, transparent 100%);
-    }
-
-    .canvas-black-glass-beam-video {
-        background: linear-gradient(90deg, transparent 0%, rgba(120, 180, 255, 0) 40%, rgba(120, 180, 255, 0.42) 50%, rgba(120, 180, 255, 0) 60%, transparent 100%);
-    }
-
-    .canvas-black-glass-scan {
-        position: absolute;
-        inset: -2px 0;
-        opacity: 0.55;
-        pointer-events: none;
-        animation: canvas-black-glass-scan 3.8s ease-in-out infinite;
-    }
-
-    .canvas-black-glass-scan-default {
-        background: linear-gradient(180deg, transparent 0%, rgba(255, 255, 255, 0.08) 48%, rgba(255, 255, 255, 0.16) 50%, rgba(255, 255, 255, 0.08) 52%, transparent 100%);
-    }
-
-    .canvas-black-glass-scan-image {
-        background: linear-gradient(180deg, transparent 0%, rgba(255, 214, 170, 0.08) 48%, rgba(255, 214, 170, 0.14) 50%, rgba(255, 214, 170, 0.08) 52%, transparent 100%);
-    }
-
-    .canvas-black-glass-scan-video {
-        background: linear-gradient(180deg, transparent 0%, rgba(130, 180, 255, 0.1) 48%, rgba(130, 180, 255, 0.22) 50%, rgba(130, 180, 255, 0.1) 52%, transparent 100%);
     }
 
     .canvas-black-glass-edge {
@@ -735,183 +649,91 @@
     }
 
     .canvas-black-glass-vignette {
-        box-shadow: inset 0 0 80px rgba(0, 0, 0, 0.55), inset 0 1px 0 rgba(255, 255, 255, 0.05);
-    }
-
-    .canvas-black-glass-noise {
-        background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.72' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.55'/%3E%3C/svg%3E");
-        mix-blend-mode: soft-light;
-        animation: canvas-black-glass-noise 2.4s steps(3) infinite;
+        box-shadow: inset 0 0 40px rgba(0, 0, 0, 0.32), inset 0 1px 0 rgba(255, 255, 255, 0.05);
     }
 
     @keyframes canvas-black-glass-sweep {
         0% {
-            background-position: 140% 50%;
+            transform: translate3d(-50%, 0, 0) rotate(12deg);
         }
 
         100% {
-            background-position: -40% 50%;
+            transform: translate3d(50%, 0, 0) rotate(12deg);
         }
     }
 
-    @keyframes canvas-black-glass-beam {
-        0% {
-            transform: translate3d(-42%, 0, 0) rotate(16deg);
-        }
-
-        100% {
-            transform: translate3d(42%, 0, 0) rotate(16deg);
-        }
-    }
-
-    @keyframes canvas-black-glass-breathe {
-        0%,
-        100% {
-            opacity: 0.38;
-            transform: scale(1);
-        }
-
-        50% {
-            opacity: 0.82;
-            transform: scale(1.04);
-        }
-    }
-
-    @keyframes canvas-black-glass-aurora {
-        0% {
-            transform: translate3d(-6%, -4%, 0) scale(1) rotate(0deg);
-        }
-
-        100% {
-            transform: translate3d(6%, 5%, 0) scale(1.12) rotate(6deg);
-        }
-    }
-
-    @keyframes canvas-black-glass-mist-a {
+    @keyframes canvas-black-glass-mist-drift-a {
         0%,
         100% {
             transform: translate3d(0, 0, 0) scale(1);
-            opacity: 0.28;
-        }
-
-        33% {
-            transform: translate3d(14%, -10%, 0) scale(1.14);
-            opacity: 0.62;
-        }
-
-        66% {
-            transform: translate3d(-8%, 12%, 0) scale(0.94);
-            opacity: 0.42;
-        }
-    }
-
-    @keyframes canvas-black-glass-mist-b {
-        0%,
-        100% {
-            transform: translate3d(0, 0, 0) scale(1.02);
-            opacity: 0.32;
-        }
-
-        40% {
-            transform: translate3d(-12%, 8%, 0) scale(1.1);
-            opacity: 0.58;
-        }
-
-        75% {
-            transform: translate3d(10%, -6%, 0) scale(0.96);
-            opacity: 0.38;
-        }
-    }
-
-    @keyframes canvas-black-glass-mist-c {
-        0%,
-        100% {
-            transform: translate3d(0, 0, 0) scale(0.98);
-            opacity: 0.34;
-        }
-
-        45% {
-            transform: translate3d(8%, -14%, 0) scale(1.08);
-            opacity: 0.66;
-        }
-
-        80% {
-            transform: translate3d(-10%, 6%, 0) scale(1.02);
-            opacity: 0.44;
-        }
-    }
-
-    @keyframes canvas-black-glass-mist-d {
-        0%,
-        100% {
-            transform: translate3d(0, 0, 0) scale(0.92);
-            opacity: 0.24;
-        }
-
-        50% {
-            transform: translate3d(-6%, -8%, 0) scale(1.06);
-            opacity: 0.52;
-        }
-    }
-
-    @keyframes canvas-black-glass-mist-e {
-        0%,
-        100% {
-            transform: translate3d(0, 0, 0) scale(0.9);
-            opacity: 0.22;
         }
 
         35% {
-            transform: translate3d(6%, 10%, 0) scale(1.12);
-            opacity: 0.48;
+            transform: translate3d(18%, 12%, 0) scale(1.08);
         }
 
         70% {
-            transform: translate3d(-8%, -4%, 0) scale(1.04);
-            opacity: 0.36;
+            transform: translate3d(10%, 22%, 0) scale(1.02);
         }
     }
 
-    @keyframes canvas-black-glass-haze {
-        0% {
-            transform: translate3d(-3%, -2%, 0) scale(1);
-            opacity: 0.45;
-        }
-
-        100% {
-            transform: translate3d(3%, 2%, 0) scale(1.08);
-            opacity: 0.78;
-        }
-    }
-
-    @keyframes canvas-black-glass-grid-drift {
-        0% {
-            background-position: 0 0, 0 0;
-        }
-
-        100% {
-            background-position: 28px 28px, 28px 28px;
-        }
-    }
-
-    @keyframes canvas-black-glass-scan {
+    @keyframes canvas-black-glass-mist-drift-b {
         0%,
         100% {
-            transform: translate3d(0, -110%, 0);
-            opacity: 0;
+            transform: translate3d(0, 0, 0) scale(1.02);
         }
 
-        12% {
-            opacity: 0.45;
+        40% {
+            transform: translate3d(-20%, 16%, 0) scale(1.1);
         }
 
-        50% {
-            transform: translate3d(0, 110%, 0);
-            opacity: 0.55;
+        75% {
+            transform: translate3d(-10%, 6%, 0) scale(0.98);
+        }
+    }
+
+    @keyframes canvas-black-glass-mist-drift-c {
+        0%,
+        100% {
+            transform: translate3d(0, 0, 0) scale(0.98);
         }
 
-        62% {
-            opacity: 0;
+        30% {
+            transform: translate3d(18%, -14%, 0) scale(1.06);
+        }
+
+        65% {
+            transform: translate3d(26%, -4%, 0) scale(1.03);
+        }
+    }
+
+    @keyframes canvas-black-glass-mist-drift-d {
+        0%,
+        100% {
+            transform: translate3d(0, 0, 0) scale(0.96);
+        }
+
+        45% {
+            transform: translate3d(-18%, -14%, 0) scale(1.08);
+        }
+
+        80% {
+            transform: translate3d(-8%, -20%, 0) scale(1.01);
+        }
+    }
+
+    @keyframes canvas-black-glass-mist-drift-e {
+        0%,
+        100% {
+            transform: translate3d(0, 0, 0) scale(1);
+        }
+
+        38% {
+            transform: translate3d(-16%, -12%, 0) scale(1.06);
+        }
+
+        72% {
+            transform: translate3d(14%, 18%, 0) scale(1.1);
         }
     }
 
@@ -925,23 +747,6 @@
             opacity: 1;
         }
     }
-
-    @keyframes canvas-black-glass-noise {
-        0% {
-            transform: translate3d(0, 0, 0) scale(1);
-            opacity: 0.42;
-        }
-
-        50% {
-            transform: translate3d(-3%, 2%, 0) scale(1.04);
-            opacity: 0.62;
-        }
-
-        100% {
-            transform: translate3d(2%, -2%, 0) scale(1.02);
-            opacity: 0.48;
-        }
-    }
 }
 
 ::view-transition-old(root),
@@ -949,3 +754,11 @@
     animation: none;
     mix-blend-mode: normal;
 }
+
+
+
+
+
+
+
+

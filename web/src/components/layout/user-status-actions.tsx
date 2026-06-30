@@ -43,7 +43,7 @@ export function UserStatusActions({ showConfig = true, variant = "default", onOp
             <VersionReleaseModal style={versionStyle} />
             <GitHubLink className={cn("bg-transparent hover:bg-transparent dark:hover:bg-transparent", gitHubClassName)} style={gitHubStyle} />
             {onOpenShortcuts ? (
-                <button type="button" className={naturalIconClass} style={iconStyle} onClick={onOpenShortcuts} aria-label="快捷键" title="快捷键">
+                <button type="button" className={naturalIconClass} style={iconStyle} onClick={onOpenShortcuts} aria-label="操作说明" title="操作说明">
                     <Keyboard className="size-4" />
                 </button>
             ) : null}

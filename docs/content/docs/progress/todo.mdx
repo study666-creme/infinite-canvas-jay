@@ -7,4 +7,15 @@ description: 当前项目后续值得处理的事项
 
 本文档用来记录当前项目后续比较值得处理的事项。
 
+## 视频播放（高优先级）
+
+- [ ] **画布内稳定播放 Seedance / 即梦网关返回的视频**：当前常报 `无法下载.../v1/media/fetch` 或 `<video>` 解码失败。
+- [ ] 验证 `jimeng-free-api-all` 的 `/v1/media/fetch` 与 `/contents/generations/tasks/{id}/content` 与前端 `video.ts` 路径一致。
+- [ ] 网关 Seedance 任务持久化（避免重启后 `/content` 404，只能依赖远程 URL + fetch）。
+- [ ] 生成失败 / 播放失败时的用户可见诊断（Network 请求摘要或复制排查信息）。
+
+详见 [视频播放与故障排查](/docs/overview/video-playback)。
+
+## 其它
+
 - 本地 Agent 接入后续：按[本地 Agent 接入规划](/docs/progress/local-agent-integration-plan)把 Claude Code CLI Adapter 升级为 Claude Agent SDK Adapter，并完善工具队列体验。

@@ -282,7 +282,7 @@ function getTextBeforeCaret(root: HTMLElement) {
     return serializeFragment(preRange.cloneContents());
 }
 
-function placeCaretAtEnd(element: HTMLElement) {
+export function placeCaretAtEnd(element: HTMLElement) {
     const range = document.createRange();
     range.selectNodeContents(element);
     range.collapse(false);

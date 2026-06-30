@@ -23,7 +23,10 @@ export function buildCanvasResourceReferences(nodes: CanvasNodeData[], connectio
 }
 
 export function buildNodeMentionReferences(node: CanvasNodeData, nodes: CanvasNodeData[], connections: CanvasConnection[]) {
-    return labelResourceNodes(getMentionResourceNodes(node.id, nodes, connections), true);
+    return labelResourceNodes(
+        getMentionResourceNodes(node.id, nodes, connections).filter((item) => item.id !== node.id),
+        true,
+    );
 }
 
 export function getMentionResourceNodes(nodeId: string, nodes: CanvasNodeData[], connections: CanvasConnection[]) {
@@ -31,8 +34,7 @@ export function getMentionResourceNodes(nodeId: string, nodes: CanvasNodeData[],
     if (configInputs.length) return configInputs;
     const ownInputs = getContextResourceNodes(nodeId, nodes, connections);
     if (ownInputs.length) return ownInputs;
-    const node = nodes.find((item) => item.id === nodeId);
-    return node && isResourceNode(node) ? [node] : [];
+    return [];
 }
 
 export function getGenerationResourceNodes(nodeId: string, nodes: CanvasNodeData[], connections: CanvasConnection[]) {
@@ -45,7 +47,7 @@ export function getGenerationResourceNodes(nodeId: string, nodes: CanvasNodeData
 
 function getContextResourceNodes(nodeId: string, nodes: CanvasNodeData[], connections: CanvasConnection[]) {
     return connections
-        .filter((connection) => connection.toNodeId === nodeId)
+        .filter((connection) => connection.toNodeId === nodeId && connection.fromNodeId !== nodeId)
         .map((connection) => nodes.find((node) => node.id === connection.fromNodeId))
         .filter((node): node is CanvasNodeData => Boolean(node && isResourceNode(node)));
 }

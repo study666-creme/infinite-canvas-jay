@@ -101,7 +101,7 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
         videoSeconds: mode === "video" ? config.videoSeconds : undefined,
     });
 
-    const availableVideoReferences = mode === "video" ? toVideoReferenceAssets(mentionReferences.filter((reference) => reference.active)) : [];
+    const availableVideoReferences = mode === "video" ? toVideoReferenceAssets(mentionReferences.filter((reference) => reference.active && reference.nodeId !== node.id)) : [];
 
     const activeVideoReferenceLabels = mode === "video" ? resolveActiveVideoReferences(prompt, mentionReferences).map((reference) => reference.label) : [];
 

@@ -5,6 +5,7 @@
   "pages": [
     "quick-start",
     "github-deploy",
+    "video-playback",
     "codex-app-plugin",
     "features",
     "render",

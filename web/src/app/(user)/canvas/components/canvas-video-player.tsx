@@ -1,7 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
-import { RefreshCw } from "lucide-react";
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from "react";
+import { Play, RefreshCw } from "lucide-react";
 
 import { useConfigStore } from "@/stores/use-config-store";
 import { resolveVideoPlayback, type VideoPlaybackResult } from "@/services/api/video";
@@ -19,10 +19,19 @@ type CanvasVideoPlayerProps = {
     onPersisted?: (file: UploadedFile) => void;
 };
 
-export function CanvasVideoPlayer({ content = "", storageKey, mimeType = "video/mp4", taskId, provider, model, onPersisted }: CanvasVideoPlayerProps) {
+export type CanvasVideoPlayerHandle = {
+    togglePlayback: () => void;
+};
+
+export const CanvasVideoPlayer = forwardRef<CanvasVideoPlayerHandle, CanvasVideoPlayerProps>(function CanvasVideoPlayer(
+    { content = "", storageKey, mimeType = "video/mp4", taskId, provider, model, onPersisted },
+    ref,
+) {
     const config = useConfigStore((state) => state.config);
+    const videoRef = useRef<HTMLVideoElement>(null);
     const [playUrl, setPlayUrl] = useState("");
     const [phase, setPhase] = useState<"loading" | "ready" | "error">("loading");
+    const [paused, setPaused] = useState(true);
     const [error, setError] = useState("");
     const ignoreStorageRef = useRef(false);
     const retryCountRef = useRef(0);
@@ -39,6 +48,15 @@ export function CanvasVideoPlayer({ content = "", storageKey, mimeType = "video/
         objectUrlRef.current = "";
     }, []);
 
+    const togglePlayback = useCallback(() => {
+        const video = videoRef.current;
+        if (!video || !playUrl) return;
+        if (video.paused) void video.play().catch(() => undefined);
+        else video.pause();
+    }, [playUrl]);
+
+    useImperativeHandle(ref, () => ({ togglePlayback }), [togglePlayback]);
+
     const hydratePlayableUrl = useCallback(
         async (options?: { ignoreStorageKey?: boolean; resetRetry?: boolean }) => {
             if (hydratingRef.current) return;
@@ -47,6 +65,7 @@ export function CanvasVideoPlayer({ content = "", storageKey, mimeType = "video/
             if (options?.resetRetry) retryCountRef.current = 0;
             setPhase("loading");
             setError("");
+            setPaused(true);
 
             const ignoreStorageKey = options?.ignoreStorageKey ?? ignoreStorageRef.current;
 
@@ -107,6 +126,7 @@ export function CanvasVideoPlayer({ content = "", storageKey, mimeType = "video/
         ignoreStorageRef.current = false;
         setPlayUrl("");
         setPhase("loading");
+        setPaused(true);
         void hydratePlayableUrl();
         return () => revokeObjectUrl();
     }, [config.baseUrl, config.apiKey, content, mimeType, model, provider, storageKey, taskId, hydratePlayableUrl, revokeObjectUrl]);
@@ -158,11 +178,11 @@ export function CanvasVideoPlayer({ content = "", storageKey, mimeType = "video/
         return (
             <div className="relative h-full w-full overflow-hidden rounded-[18px]">
                 <CanvasNodeLoadingState variant="video" />
-                <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 px-6 text-center">
+                <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-3 px-6 text-center">
                     <div className="max-w-[90%] text-xs leading-5 text-red-300/90">{error}</div>
                     <button
                         type="button"
-                        className="inline-flex h-8 items-center gap-1.5 rounded-full border border-white/15 bg-black/40 px-3 text-xs text-white/85 backdrop-blur-sm transition hover:bg-white/10"
+                        className="pointer-events-auto inline-flex h-8 items-center gap-1.5 rounded-full border border-white/15 bg-black/40 px-3 text-xs text-white/85 backdrop-blur-sm transition hover:bg-white/10"
                         onClick={(event) => {
                             event.stopPropagation();
                             handleReload();
@@ -185,21 +205,28 @@ export function CanvasVideoPlayer({ content = "", storageKey, mimeType = "video/
                 </div>
             ) : null}
             <video
+                ref={videoRef}
                 src={playUrl}
-                controls
                 playsInline
                 preload="auto"
-                className="pointer-events-auto h-full w-full bg-black object-contain"
-                data-canvas-no-zoom
-                onPointerDown={(event) => event.stopPropagation()}
-                onMouseDown={(event) => event.stopPropagation()}
+                className="pointer-events-none h-full w-full bg-black object-contain"
                 onDoubleClick={(event) => event.stopPropagation()}
+                onPlay={() => setPaused(false)}
+                onPause={() => setPaused(true)}
                 onLoadedData={() => {
                     setPhase("ready");
+                    setPaused(videoRef.current?.paused ?? true);
                     commitPersistedFile();
                 }}
                 onError={handleVideoError}
             />
+            {phase === "ready" && paused ? (
+                <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-black/20">
+                    <div className="grid size-12 place-items-center rounded-full border border-white/20 bg-black/45 text-white/90 shadow-lg backdrop-blur-sm">
+                        <Play className="ml-0.5 size-5 fill-current" />
+                    </div>
+                </div>
+            ) : null}
         </div>
     );
-}
+});

@@ -1,12 +1,14 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { Button, Empty, Input, Pagination, Spin, message } from "antd";
+import { Button, Empty, Input, Pagination, Select, Spin, message } from "antd";
 import { Search } from "lucide-react";
 
 import { uploadImage } from "@/services/image-storage";
 import {
     listPromptHubCards,
+    listPromptHubGroups,
+    listPromptHubTags,
     preparePromptHubCardForCanvas,
     type PromptHubCardListItem,
 } from "@/services/prompt-hub";
@@ -23,12 +25,14 @@ function PickerCard({
     title,
     cover,
     promptPreview,
+    tags,
     loading,
     onClick,
 }: {
     title: string;
     cover: string;
     promptPreview: string;
+    tags?: string[];
     loading?: boolean;
     onClick: () => void;
 }) {
@@ -42,11 +46,24 @@ function PickerCard({
             {cover ? (
                 <img src={cover} alt={title} className="aspect-[4/3] w-full object-cover" loading="lazy" decoding="async" />
             ) : (
-                <div className="flex aspect-[4/3] items-center justify-center bg-stone-100 p-3 text-center text-xs text-stone-500 dark:bg-stone-800 dark:text-stone-400">无缩略图</div>
+                <div className="flex aspect-[4/3] items-center justify-center bg-stone-100 p-3 text-center text-xs text-stone-500 dark:bg-stone-800 dark:text-stone-400">缩略图加载中…</div>
             )}
             <div className="space-y-1 p-2.5">
                 <div className="line-clamp-1 text-xs font-medium text-stone-800 dark:text-stone-200">{title || "未命名卡片"}</div>
-                {promptPreview ? <div className="line-clamp-2 text-[10px] leading-4 text-stone-500 dark:text-stone-400">{promptPreview}</div> : null}
+                {promptPreview ? (
+                    <div className="line-clamp-3 text-[10px] leading-4 text-stone-500 dark:text-stone-400">{promptPreview}</div>
+                ) : (
+                    <div className="text-[10px] text-stone-400">暂无提示词</div>
+                )}
+                {tags?.length ? (
+                    <div className="flex flex-wrap gap-1 pt-0.5">
+                        {tags.slice(0, 3).map((tag) => (
+                            <span key={tag} className="rounded bg-stone-100 px-1.5 py-0.5 text-[9px] text-stone-600 dark:bg-stone-800 dark:text-stone-300">
+                                {tag}
+                            </span>
+                        ))}
+                    </div>
+                ) : null}
             </div>
             <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-stone-950/0 text-sm font-medium text-white opacity-0 transition group-hover:bg-stone-950/55 group-hover:opacity-100">
                 {loading ? "插入中…" : "插入图片+提示词"}
@@ -60,11 +77,37 @@ export function PromptHubCardsTab({ onInsert }: Props) {
     const apiBase = usePromptHubStore((state) => state.apiBase);
     const getSession = usePromptHubStore((state) => state.getSession);
     const [keyword, setKeyword] = useState("");
+    const [searchDraft, setSearchDraft] = useState("");
+    const [group, setGroup] = useState<string>("");
+    const [tag, setTag] = useState<string>("");
+    const [groups, setGroups] = useState<string[]>([]);
+    const [tags, setTags] = useState<string[]>([]);
     const [page, setPage] = useState(1);
     const [total, setTotal] = useState(0);
     const [cards, setCards] = useState<PromptHubCardListItem[]>([]);
     const [loading, setLoading] = useState(false);
     const [insertingId, setInsertingId] = useState<string | null>(null);
+
+    useEffect(() => {
+        void (async () => {
+            const active = await getSession();
+            if (!active) {
+                setGroups([]);
+                setTags([]);
+                return;
+            }
+            try {
+                const [g, t] = await Promise.all([
+                    listPromptHubGroups(active, { apiBase }),
+                    listPromptHubTags(active, { apiBase }),
+                ]);
+                setGroups(g);
+                setTags(t);
+            } catch {
+                /* 筛选可选，失败不阻塞列表 */
+            }
+        })();
+    }, [apiBase, getSession, session?.access_token]);
 
     const loadCards = useCallback(async () => {
         const active = await getSession();
@@ -80,6 +123,8 @@ export function PromptHubCardsTab({ onInsert }: Props) {
                 page,
                 limit: PAGE_SIZE,
                 q: keyword.trim() || undefined,
+                group: group || undefined,
+                tag: tag || undefined,
             });
             setCards(result.cards);
             setTotal(result.total);
@@ -90,7 +135,7 @@ export function PromptHubCardsTab({ onInsert }: Props) {
         } finally {
             setLoading(false);
         }
-    }, [apiBase, getSession, keyword, page]);
+    }, [apiBase, getSession, group, keyword, page, tag]);
 
     useEffect(() => {
         void loadCards();
@@ -129,23 +174,57 @@ export function PromptHubCardsTab({ onInsert }: Props) {
         );
     }
 
+    const groupOptions = [
+        { value: "", label: "全部分组" },
+        { value: "uncategorized", label: "未分类" },
+        ...groups.map((g) => ({ value: g, label: g })),
+    ];
+    const tagOptions = [{ value: "", label: "全部标签" }, ...tags.map((t) => ({ value: t, label: t }))];
+
     return (
         <div className="space-y-4">
-            <div className="flex flex-wrap items-center gap-3">
+            <div className="flex flex-wrap items-center gap-2">
                 <Input
-                    className="w-64"
+                    className="w-56"
                     size="small"
                     prefix={<Search className="size-3.5 text-stone-400" />}
                     placeholder="搜索标题或提示词"
-                    value={keyword}
+                    value={searchDraft}
                     allowClear
-                    onChange={(e) => {
+                    onChange={(e) => setSearchDraft(e.target.value)}
+                    onPressEnter={() => {
                         setPage(1);
-                        setKeyword(e.target.value);
+                        setKeyword(searchDraft);
                     }}
-                    onPressEnter={() => void loadCards()}
                 />
-                <Button size="small" loading={loading} onClick={() => void loadCards()}>
+                <Select
+                    size="small"
+                    className="min-w-[120px]"
+                    value={group}
+                    options={groupOptions}
+                    onChange={(value) => {
+                        setPage(1);
+                        setGroup(value);
+                    }}
+                />
+                <Select
+                    size="small"
+                    className="min-w-[120px]"
+                    value={tag}
+                    options={tagOptions}
+                    onChange={(value) => {
+                        setPage(1);
+                        setTag(value);
+                    }}
+                />
+                <Button
+                    size="small"
+                    loading={loading}
+                    onClick={() => {
+                        setPage(1);
+                        setKeyword(searchDraft);
+                    }}
+                >
                     搜索
                 </Button>
                 <span className="text-xs text-stone-500">共 {total} 张有图卡片</span>
@@ -163,6 +242,7 @@ export function PromptHubCardsTab({ onInsert }: Props) {
                             title={card.title || card.prompt.slice(0, 24) || "未命名"}
                             cover={card.thumbUrl}
                             promptPreview={card.prompt}
+                            tags={card.tags}
                             loading={insertingId === card.id}
                             onClick={() => void handleInsert(card)}
                         />

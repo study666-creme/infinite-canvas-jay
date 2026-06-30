@@ -1,10 +1,10 @@
-import type { ReactNode } from "react";
 import { Compass, Focus, HelpCircle } from "lucide-react";
 import { useState } from "react";
-import { Button, Modal, Tooltip } from "antd";
+import { Button, Tooltip } from "antd";
 
 import { canvasThemes } from "@/lib/canvas-theme";
 import { useThemeStore } from "@/stores/use-theme-store";
+import { CanvasShortcutsModal } from "./canvas-shortcuts-panel";
 
 type CanvasZoomControlsProps = {
     scale: number;
@@ -53,29 +53,11 @@ export function CanvasZoomControls({ scale, onScaleChange, onReset, isMiniMapOpe
                 <span className="w-10 text-right text-xs tabular-nums" style={{ color: theme.node.muted }}>
                     {Math.round(scale * 100)}%
                 </span>
-                <Tooltip title="快捷键">
-                    <Button type="text" className="!h-8 !w-8 !min-w-8 !p-0" style={shortcutsOpen ? activeStyle : { color: theme.toolbar.item }} icon={<HelpCircle className="size-4" />} onClick={() => setShortcutsOpen(true)} aria-label="快捷键" />
+                <Tooltip title="操作说明">
+                    <Button type="text" className="!h-8 !w-8 !min-w-8 !p-0" style={shortcutsOpen ? activeStyle : { color: theme.toolbar.item }} icon={<HelpCircle className="size-4" />} onClick={() => setShortcutsOpen(true)} aria-label="操作说明" />
                 </Tooltip>
             </div>
-            <Modal title="快捷键" open={shortcutsOpen} onCancel={() => setShortcutsOpen(false)} footer={null} centered>
-                <div className="space-y-3 border-t pt-4 text-sm" style={{ borderColor: theme.node.stroke }}>
-                    <Shortcut label="拖动画布" value="平移视图" />
-                    <Shortcut label="滚轮" value="缩放画布" />
-                    <Shortcut label="Ctrl / Cmd + 拖动" value="框选多个节点" />
-                    <Shortcut label="Shift / Ctrl / Cmd + 点击" value="追加选择节点" />
-                    <Shortcut label="Ctrl / Cmd + C / V" value="复制 / 粘贴节点" />
-                    <Shortcut label="Delete / Backspace" value="删除选中" />
-                </div>
-            </Modal>
-        </div>
-    );
-}
-
-function Shortcut({ label, value }: { label: ReactNode; value: string }) {
-    return (
-        <div className="flex items-center justify-between gap-4">
-            <span className="text-base font-medium">{label}</span>
-            <span className="opacity-60">{value}</span>
+            <CanvasShortcutsModal open={shortcutsOpen} onClose={() => setShortcutsOpen(false)} />
         </div>
     );
 }

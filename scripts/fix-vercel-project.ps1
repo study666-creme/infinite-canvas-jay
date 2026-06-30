@@ -1,4 +1,4 @@
-# Fix Vercel project infinite-canvas-jay: rootDirectory=web, node=20.x, npm build, redeploy
+# Fix Vercel project prompt-canvas: rootDirectory=web, node=20.x, npm build, redeploy
 # Usage:
 #   cd D:\canvas\infinite-canvas
 #   npx vercel login
@@ -8,7 +8,7 @@ $ErrorActionPreference = "Stop"
 
 $ProjectId = "prj_WFDr15QMeKCt7ENKV3u9ERVzOGA9"
 $TeamId = "team_Yx9OAaDQjv28cShhYACANruM"
-$ProjectName = "infinite-canvas-jay"
+$ProjectName = "prompt-canvas"
 $RepoId = 1284099744
 
 function Get-VercelToken {
@@ -72,4 +72,4 @@ try {
     exit 0
 }
 
-Write-Host "[fix-vercel] Done. Open: https://infinite-canvas-jay.vercel.app/canvas" -ForegroundColor Green
+Write-Host "[fix-vercel] Done. Open: https://prompt-canvas.vercel.app/canvas" -ForegroundColor Green

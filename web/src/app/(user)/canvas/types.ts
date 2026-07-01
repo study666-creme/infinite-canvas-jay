@@ -68,6 +68,8 @@ export type CanvasNodeMetadata = {
     durationMs?: number;
     videoTaskId?: string;
     videoProvider?: "openai" | "seedance";
+    generationProgress?: number;
+    generationStage?: string;
 };
 
 export type CanvasNodeData = {

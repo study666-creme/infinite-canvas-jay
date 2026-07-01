@@ -17,7 +17,15 @@ type SeedanceTask = {
     content?: { video_url?: string; last_frame_url?: string } | null;
 };
 type ApiEnvelope<T> = T | { code?: number; data?: T | null; msg?: string };
-type RequestOptions = { signal?: AbortSignal };
+type RequestOptions = { signal?: AbortSignal; onProgress?: (progress: VideoGenerationProgress) => void };
+
+const VIDEO_REQUEST_TIMEOUT_MS = 120_000;
+
+export type VideoGenerationProgress = {
+    phase: "creating" | "queued" | "processing" | "downloading";
+    percent: number;
+    message: string;
+};
 
 export type VideoGenerationResult = { blob?: Blob; url?: string; mimeType?: string; taskId?: string; provider?: "openai" | "seedance"; model?: string };
 export type VideoGenerationTask = { id: string; provider: "openai" | "seedance"; model: string };
@@ -35,14 +43,22 @@ function aiHeaders(config: AiConfig, contentType?: string) {
 }
 
 export async function requestVideoGeneration(config: AiConfig, prompt: string, references: ReferenceImage[] = [], videoReferences: ReferenceVideo[] = [], audioReferences: ReferenceAudio[] = [], options?: RequestOptions): Promise<VideoGenerationResult> {
+    options?.onProgress?.({ phase: "creating", percent: 6, message: "提交任务" });
     const task = await createVideoGenerationTask(config, prompt, references, videoReferences, audioReferences, options);
+    options?.onProgress?.({ phase: "queued", percent: 12, message: "排队中" });
     const delayMs = task.provider === "seedance" ? 5000 : 2500;
-    for (let attempt = 0; attempt < 120; attempt += 1) {
+    const maxAttempts = 120;
+    for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
         if (options?.signal?.aborted) throw new DOMException("Aborted", "AbortError");
         const state = await pollVideoGenerationTask(config, task, options);
-        if (state.status === "completed") return state.result;
+        if (state.status === "completed") {
+            options?.onProgress?.({ phase: "downloading", percent: 96, message: "保存视频" });
+            return state.result;
+        }
         if (state.status === "failed") throw new Error(state.error);
-        if (attempt === 119) throw new Error(`${task.provider === "seedance" ? "Seedance " : ""}视频生成超时，请稍后重试`);
+        if (attempt === maxAttempts - 1) throw new Error(`${task.provider === "seedance" ? "Seedance " : ""}视频生成超时，请稍后重试`);
+        const percent = Math.min(92, 12 + Math.round(((attempt + 1) / maxAttempts) * 80));
+        options?.onProgress?.({ phase: "processing", percent, message: task.provider === "seedance" ? "Seedance 生成中" : "视频生成中" });
         await delay(delayMs, options?.signal);
     }
     throw new Error("视频生成超时，请稍后重试");
@@ -68,28 +84,40 @@ export async function pollVideoGenerationTask(config: AiConfig, task: VideoGener
 }
 
 export async function storeGeneratedVideo(result: VideoGenerationResult, config?: AiConfig): Promise<UploadedFile> {
-    if (result.blob?.size) return uploadMediaFile(normalizeVideoBlob(result.blob, result.mimeType), "video");
+    const mimeType = result.mimeType || "video/mp4";
 
-    if (config && result.taskId && result.provider && result.model) {
-        const blob = normalizeVideoBlob(await downloadTaskContentBlob(config, { id: result.taskId, provider: result.provider, model: result.model }), result.mimeType);
-        if (blob.size) return uploadMediaFile(blob, "video");
+    if (result.blob?.size) {
+        return uploadMediaFile(normalizeVideoBlob(result.blob, mimeType), "video");
     }
 
-    if (result.url && config) {
-        try {
-            const blob = normalizeVideoBlob(await downloadRemoteVideoBlob(config, result.url), result.mimeType);
-            return uploadMediaFile(blob, "video");
-        } catch {
-            // Continue to direct fetch fallback below.
+    if (config?.baseUrl.trim() && config.apiKey.trim()) {
+        if (result.taskId && result.provider && result.model) {
+            for (let attempt = 0; attempt < 3; attempt += 1) {
+                try {
+                    const blob = normalizeVideoBlob(await downloadTaskContentBlob(config, { id: result.taskId, provider: result.provider, model: result.model }), mimeType);
+                    if (blob.size) return uploadMediaFile(blob, "video");
+                } catch {
+                    if (attempt === 2) break;
+                    await delay(1200);
+                }
+            }
+        }
+
+        if (result.url) {
+            for (let attempt = 0; attempt < 3; attempt += 1) {
+                try {
+                    const blob = normalizeVideoBlob(await downloadRemoteVideoBlob(config, result.url), mimeType);
+                    if (blob.size) return uploadMediaFile(blob, "video");
+                } catch {
+                    if (attempt === 2) break;
+                    await delay(1200);
+                }
+            }
         }
     }
 
     if (result.url) {
-        try {
-            return await uploadMediaFile(result.url, "video");
-        } catch {
-            throw new Error("视频已生成但无法下载保存，请确认 API 代理已更新并支持 /v1/media/fetch");
-        }
+        return { url: result.url, storageKey: "", bytes: 0, mimeType, width: 1280, height: 720 };
     }
 
     throw new Error("视频接口没有返回可播放的视频");
@@ -181,7 +209,7 @@ async function blobFromDataUrl(dataUrl: string) {
 
 export async function downloadTaskContentBlob(config: AiConfig, task: VideoGenerationTask, options?: RequestOptions) {
     const url = task.provider === "seedance" ? seedanceContentApiUrl(config, task.id) : aiApiUrl(config, `/videos/${task.id}/content`);
-    const response = await axios.get<Blob>(url, { headers: aiHeaders(config), responseType: "blob", signal: options?.signal });
+    const response = await axios.get<Blob>(url, { headers: aiHeaders(config), responseType: "blob", signal: options?.signal, timeout: VIDEO_REQUEST_TIMEOUT_MS });
     await assertVideoBlob(response.data);
     if (!response.data.size) throw new Error("视频内容为空，请稍后重试");
     return response.data;
@@ -192,6 +220,7 @@ export async function downloadRemoteVideoBlob(config: AiConfig, remoteUrl: strin
         headers: aiHeaders(config),
         responseType: "blob",
         signal: options?.signal,
+        timeout: VIDEO_REQUEST_TIMEOUT_MS,
     });
     await assertVideoBlob(response.data);
     if (!response.data.size) throw new Error("远程视频内容为空");
@@ -209,7 +238,7 @@ async function createOpenAIVideoTask(config: AiConfig, model: string, prompt: st
     const files = await Promise.all(references.slice(0, 7).map(async (image) => dataUrlToFile({ ...image, dataUrl: await imageToDataUrl(image) })));
     files.forEach((file) => body.append("input_reference[]", file));
     try {
-        const created = unwrapVideoResponse((await axios.post<ApiVideoResponse>(aiApiUrl(config, "/videos"), body, { headers: aiHeaders(config), signal: options?.signal })).data);
+        const created = unwrapVideoResponse((await axios.post<ApiVideoResponse>(aiApiUrl(config, "/videos"), body, { headers: aiHeaders(config), signal: options?.signal, timeout: VIDEO_REQUEST_TIMEOUT_MS })).data);
         if (!created.id) throw new Error("视频接口没有返回任务 ID");
         return { id: created.id, provider: "openai", model };
     } catch (error) {
@@ -219,18 +248,9 @@ async function createOpenAIVideoTask(config: AiConfig, model: string, prompt: st
 
 async function pollOpenAIVideoTask(config: AiConfig, task: VideoGenerationTask, options?: RequestOptions): Promise<VideoGenerationTaskState> {
     try {
-        const video = unwrapVideoResponse((await axios.get<ApiVideoResponse>(aiApiUrl(config, `/videos/${task.id}`), { headers: aiHeaders(config), signal: options?.signal })).data);
+        const video = unwrapVideoResponse((await axios.get<ApiVideoResponse>(aiApiUrl(config, `/videos/${task.id}`), { headers: aiHeaders(config), signal: options?.signal, timeout: VIDEO_REQUEST_TIMEOUT_MS })).data);
         if (video.status === "completed") {
-            for (let attempt = 0; attempt < 5; attempt += 1) {
-                try {
-                    const content = await downloadTaskContentBlob(config, task, options);
-                    return { status: "completed", result: { blob: content, mimeType: content.type || "video/mp4", taskId: task.id, provider: task.provider, model: task.model } };
-                } catch {
-                    if (attempt === 4) break;
-                    await delay(1200, options?.signal);
-                }
-            }
-            throw new Error("视频已生成但无法从 API 下载内容，请确认代理服务支持 /videos/:id/content");
+            return { status: "completed", result: { taskId: task.id, provider: task.provider, model: task.model, mimeType: "video/mp4" } };
         }
         if (video.status === "failed" || video.status === "cancelled") return { status: "failed", error: video.error?.message || "视频生成失败" };
         return { status: "pending" };
@@ -258,7 +278,7 @@ async function createSeedanceTask(config: AiConfig, model: string, prompt: strin
     };
 
     try {
-        const created = unwrapSeedanceTask((await axios.post<ApiEnvelope<SeedanceTask>>(seedanceApiUrl(config), payload, { headers: aiHeaders(config, "application/json"), signal: options?.signal })).data);
+        const created = unwrapSeedanceTask((await axios.post<ApiEnvelope<SeedanceTask>>(seedanceApiUrl(config), payload, { headers: aiHeaders(config, "application/json"), signal: options?.signal, timeout: VIDEO_REQUEST_TIMEOUT_MS })).data);
         if (!created.id) throw new Error("Seedance 接口没有返回任务 ID");
         return { id: created.id, provider: "seedance", model };
     } catch (error) {
@@ -268,25 +288,14 @@ async function createSeedanceTask(config: AiConfig, model: string, prompt: strin
 
 async function pollSeedanceTask(config: AiConfig, task: VideoGenerationTask, options?: RequestOptions): Promise<VideoGenerationTaskState> {
     try {
-        const state = unwrapSeedanceTask((await axios.get<ApiEnvelope<SeedanceTask>>(seedanceApiUrl(config, task.id), { headers: aiHeaders(config), signal: options?.signal })).data);
+        const state = unwrapSeedanceTask((await axios.get<ApiEnvelope<SeedanceTask>>(seedanceApiUrl(config, task.id), { headers: aiHeaders(config), signal: options?.signal, timeout: VIDEO_REQUEST_TIMEOUT_MS })).data);
         if (state.status === "succeeded") {
             const url = state.content?.video_url;
             if (!url) return { status: "failed", error: "Seedance 任务成功但没有返回视频 URL" };
-            for (let attempt = 0; attempt < 5; attempt += 1) {
-                try {
-                    const content = await downloadTaskContentBlob(config, task, options);
-                    return { status: "completed", result: { blob: content, mimeType: content.type || "video/mp4", taskId: task.id, provider: task.provider, model: task.model, url } };
-                } catch {
-                    if (attempt === 4) break;
-                    await delay(1200, options?.signal);
-                }
-            }
-            try {
-                const blob = await downloadRemoteVideoBlob(config, url, options);
-                return { status: "completed", result: { blob, mimeType: blob.type || "video/mp4", taskId: task.id, provider: task.provider, model: task.model, url } };
-            } catch {
-                throw new Error("Seedance 视频已生成但无法下载，请确认 jimeng 服务已重启并支持 /v1/media/fetch");
-            }
+            return {
+                status: "completed",
+                result: { url, taskId: task.id, provider: task.provider, model: task.model, mimeType: "video/mp4" },
+            };
         }
         if (state.status === "failed" || state.status === "cancelled" || state.status === "expired") return { status: "failed", error: state.error?.message || `Seedance 视频生成${state.status === "expired" ? "超时" : "失败"}` };
         return { status: "pending" };

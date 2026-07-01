@@ -33,10 +33,15 @@ export type PromptHubCardListItem = {
     prompt: string;
     imageRef: string;
     thumbUrl: string;
+    hasImage?: boolean;
     tags?: string[];
     group?: string | null;
     updatedAt?: number;
 };
+
+export type PreparedPromptHubCard =
+    | { kind: "image"; blob: Blob; prompt: string; title: string }
+    | { kind: "text"; prompt: string; title: string };
 
 export type PromptHubCardListResult = {
     cards: PromptHubCardListItem[];
@@ -210,14 +215,20 @@ export async function preparePromptHubCardForCanvas(
     card: PromptHubCardListItem,
     session: PromptHubSession,
     opts: { apiBase?: string } = {},
-) {
-    const imageUrl = await signPromptHubImageRef(card.imageRef, session, { ...opts, variant: "full" });
+): Promise<PreparedPromptHubCard> {
+    const prompt = String(card.prompt || card.title || "").trim();
+    const title = String(card.title || prompt.slice(0, 32) || "Prompt Hub 卡片").trim();
+    const imageRef = String(card.imageRef || "").trim();
+    const hasImage = card.hasImage !== false && Boolean(imageRef);
+    if (!hasImage) {
+        if (!prompt) throw new Error("该卡片没有提示词");
+        return { kind: "text", prompt, title };
+    }
+    const imageUrl = await signPromptHubImageRef(imageRef, session, { ...opts, variant: "full" });
     const res = await fetch(imageUrl, { mode: "cors", credentials: "omit" });
     if (!res.ok) throw new Error("下载卡片图片失败");
     const blob = await res.blob();
-    const prompt = String(card.prompt || card.title || "").trim();
-    const title = String(card.title || prompt.slice(0, 32) || "Prompt Hub 卡片").trim();
-    return { blob, prompt, title };
+    return { kind: "image", blob, prompt, title };
 }
 
 export async function savePromptHubQuickCard(

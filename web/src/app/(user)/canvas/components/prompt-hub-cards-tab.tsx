@@ -27,6 +27,7 @@ function PickerCard({
     promptPreview,
     tags,
     loading,
+    textOnly,
     onClick,
 }: {
     title: string;
@@ -34,6 +35,7 @@ function PickerCard({
     promptPreview: string;
     tags?: string[];
     loading?: boolean;
+    textOnly?: boolean;
     onClick: () => void;
 }) {
     return (
@@ -43,7 +45,11 @@ function PickerCard({
             className="group relative cursor-pointer overflow-hidden rounded-lg border border-stone-200 bg-white text-left transition hover:border-stone-400 hover:shadow-md disabled:cursor-wait disabled:opacity-70 dark:border-stone-700 dark:bg-stone-900 dark:hover:border-stone-500"
             onClick={onClick}
         >
-            {cover ? (
+            {textOnly ? (
+                <div className="flex aspect-[4/3] items-center justify-center bg-stone-50 p-4 text-center text-xs leading-5 text-stone-600 dark:bg-stone-800 dark:text-stone-300">
+                    纯提示词卡片
+                </div>
+            ) : cover ? (
                 <img src={cover} alt={title} className="aspect-[4/3] w-full object-cover" loading="lazy" decoding="async" />
             ) : (
                 <div className="flex aspect-[4/3] items-center justify-center bg-stone-100 p-3 text-center text-xs text-stone-500 dark:bg-stone-800 dark:text-stone-400">缩略图加载中…</div>
@@ -66,7 +72,7 @@ function PickerCard({
                 ) : null}
             </div>
             <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-stone-950/0 text-sm font-medium text-white opacity-0 transition group-hover:bg-stone-950/55 group-hover:opacity-100">
-                {loading ? "插入中…" : "插入图片+提示词"}
+                {loading ? "插入中…" : textOnly ? "插入提示词" : "插入图片+提示词"}
             </div>
         </button>
     );
@@ -150,6 +156,14 @@ export function PromptHubCardsTab({ onInsert }: Props) {
         setInsertingId(card.id);
         try {
             const prepared = await preparePromptHubCardForCanvas(card, active, { apiBase });
+            if (prepared.kind === "text") {
+                onInsert({
+                    kind: "text",
+                    content: prepared.prompt,
+                    title: prepared.title,
+                });
+                return;
+            }
             const uploaded = await uploadImage(prepared.blob, { source: "upload" });
             onInsert({
                 kind: "image",
@@ -227,7 +241,7 @@ export function PromptHubCardsTab({ onInsert }: Props) {
                 >
                     搜索
                 </Button>
-                <span className="text-xs text-stone-500">共 {total} 张有图卡片</span>
+                <span className="text-xs text-stone-500">共 {total} 张卡片</span>
             </div>
 
             {loading && !cards.length ? (
@@ -243,6 +257,7 @@ export function PromptHubCardsTab({ onInsert }: Props) {
                             cover={card.thumbUrl}
                             promptPreview={card.prompt}
                             tags={card.tags}
+                            textOnly={card.hasImage === false || !String(card.imageRef || "").trim()}
                             loading={insertingId === card.id}
                             onClick={() => void handleInsert(card)}
                         />

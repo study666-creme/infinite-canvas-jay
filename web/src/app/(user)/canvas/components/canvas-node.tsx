@@ -38,7 +38,7 @@ type CanvasNodeProps = {
     batchOpening?: boolean;
     batchRecovering?: boolean;
     batchMotion?: { x: number; y: number; index: number };
-    onPointerDown: (event: React.PointerEvent, nodeId: string) => void;
+    onMouseDown: (event: React.MouseEvent, nodeId: string) => void;
     onHoverStart: (nodeId: string) => void;
     onHoverEnd: (nodeId: string) => void;
     onConnectStart: (event: React.MouseEvent, nodeId: string, handleType: "source" | "target") => void;
@@ -101,7 +101,7 @@ export const CanvasNode = React.memo(function CanvasNode({
     batchOpening = false,
     batchRecovering = false,
     batchMotion,
-    onPointerDown,
+    onMouseDown,
     onHoverStart,
     onHoverEnd,
     onConnectStart,
@@ -279,7 +279,6 @@ export const CanvasNode = React.memo(function CanvasNode({
                 height: data.height,
                 transition: "box-shadow 200ms ease",
                 contain: "layout style",
-                touchAction: "none",
             }}
             onMouseEnter={() => {
                 setHovered(true);
@@ -303,14 +302,12 @@ export const CanvasNode = React.memo(function CanvasNode({
                           ? `0 18px 48px rgba(0,0,0,.14)`
                           : undefined,
                 }}
-                onPointerDown={(event) => {
-                    if (event.button !== 0) return;
+                onMouseDown={(event) => {
                     const target = event.target as HTMLElement;
                     if (target.closest("button")) return;
                     if (target.closest("[data-canvas-interactive]")) return;
-                    event.preventDefault();
-                    event.stopPropagation();
-                    onPointerDown(event, data.id);
+                    if (target.closest("[data-resize-handle]")) return;
+                    onMouseDown(event, data.id);
                 }}
                 onDoubleClick={(event) => {
                     if (isBatchRoot) {
@@ -388,7 +385,13 @@ function NodeContent(props: NodeContentRendererProps) {
     if (props.node.type === CanvasNodeType.Config && props.renderNodeContent) return props.renderNodeContent(props.node);
     if (props.isBatchRoot) return <ImageNodeContent {...props} />;
     if (props.node.metadata?.status === "loading" && props.node.type !== CanvasNodeType.Video) {
-        return <CanvasNodeLoadingState variant={props.node.type === CanvasNodeType.Image ? "image" : "default"} />;
+        return (
+            <CanvasNodeLoadingState
+                variant={props.node.type === CanvasNodeType.Image ? "image" : "default"}
+                progress={props.node.metadata?.generationProgress}
+                label={props.node.metadata?.generationStage}
+            />
+        );
     }
     if (props.node.metadata?.status === "error") return <ErrorContent node={props.node} theme={props.theme} onRetry={props.onRetry} />;
 
@@ -497,7 +500,7 @@ function ImageNodeContent(props: NodeContentRendererProps) {
     if (!props.node.metadata?.content && props.isBatchRoot) {
         const content =
             props.node.metadata?.status === "loading" ? (
-                <CanvasNodeLoadingState variant="image" />
+                <CanvasNodeLoadingState variant="image" progress={props.node.metadata?.generationProgress} label={props.node.metadata?.generationStage} />
             ) : props.node.metadata?.status === "error" ? (
                 <ErrorContent node={props.node} theme={props.theme} onRetry={props.onRetry} />
             ) : (
@@ -558,7 +561,7 @@ function VideoNodeContent({ node, theme, onVideoPersisted, onRegisterVideoContro
         return (
             <div className="relative h-full w-full overflow-hidden">
                 {isLoading ? (
-                    <CanvasNodeLoadingState variant="video" />
+                    <CanvasNodeLoadingState variant="video" progress={node.metadata?.generationProgress} label={node.metadata?.generationStage} />
                 ) : (
                     <div className="flex h-full w-full flex-col items-center justify-center gap-2.5" style={{ color: theme.node.placeholder }}>
                         <div className="grid size-12 place-items-center rounded-2xl" style={{ background: `${theme.toolbar.activeBg}cc`, boxShadow: "inset 0 1px 0 rgba(255,255,255,.06)" }}>
@@ -735,7 +738,16 @@ function ResizeHandle({ corner, onMouseDown }: { corner: ResizeCorner; onMouseDo
         "bottom-right": "-bottom-[14px] -right-[14px] cursor-nwse-resize",
     }[corner];
 
-    return <div className={`absolute z-50 size-7 ${positionClass}`} onMouseDown={(event) => onMouseDown(event, corner)} />;
+    return (
+        <div
+            data-resize-handle
+            className={`absolute z-50 size-7 ${positionClass}`}
+            onMouseDown={(event) => {
+                event.stopPropagation();
+                onMouseDown(event, corner);
+            }}
+        />
+    );
 }
 
 function ConnectionHandlePlus({

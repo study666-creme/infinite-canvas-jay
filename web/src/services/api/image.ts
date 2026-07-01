@@ -184,23 +184,53 @@ function resolveRequestSize(quality: string | undefined, size: string) {
 
 function resolveImageDataUrl(item: Record<string, unknown>) {
     if (typeof item.b64_json === "string" && item.b64_json) {
-        return `data:image/png;base64,${item.b64_json}`;
+        return item.b64_json.startsWith("data:") ? item.b64_json : `data:image/png;base64,${item.b64_json}`;
     }
     if (typeof item.url === "string" && item.url) {
         return item.url;
     }
+    if (typeof item.image_url === "string" && item.image_url) {
+        return item.image_url;
+    }
+    if (typeof item.imageUrl === "string" && item.imageUrl) {
+        return item.imageUrl;
+    }
+    if (item.image && typeof item.image === "object") {
+        return resolveImageDataUrl(item.image as Record<string, unknown>);
+    }
     return null;
+}
+
+function extractImagePayloadEntries(payload: ImageApiResponse): Array<Record<string, unknown> | string> {
+    let candidate: unknown = payload.data;
+
+    if (candidate && typeof candidate === "object" && !Array.isArray(candidate)) {
+        const record = candidate as Record<string, unknown>;
+        if (Array.isArray(record.data)) candidate = record.data;
+        else if (Array.isArray(record.images)) candidate = record.images;
+        else if (Array.isArray(record.output)) candidate = record.output;
+        else if (Array.isArray(record.results)) candidate = record.results;
+    }
+
+    if (Array.isArray(candidate)) return candidate;
+
+    const topLevel = payload as Record<string, unknown>;
+    if (Array.isArray(topLevel.images)) return topLevel.images as Array<Record<string, unknown> | string>;
+    if (Array.isArray(topLevel.output)) return topLevel.output as Array<Record<string, unknown> | string>;
+
+    return [];
 }
 
 function parseImagePayload(payload: ImageApiResponse) {
     if (typeof payload.code === "number" && payload.code !== 0) {
-        throw new Error(payload.msg || "请求失败");
+        const envelope = payload as ImageApiResponse & { message?: string };
+        throw new Error(envelope.msg || envelope.message || "请求失败");
     }
-    const images =
-        payload.data
-            ?.map(resolveImageDataUrl)
-            .filter((value): value is string => Boolean(value))
-            .map((dataUrl) => ({ id: nanoid(), dataUrl })) || [];
+
+    const images = extractImagePayloadEntries(payload)
+        .map((item) => (typeof item === "string" ? item : resolveImageDataUrl(item)))
+        .filter((value): value is string => Boolean(value))
+        .map((dataUrl) => ({ id: nanoid(), dataUrl }));
 
     if (images.length === 0) {
         throw new Error("接口没有返回图片");

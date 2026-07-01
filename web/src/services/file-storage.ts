@@ -16,7 +16,7 @@ import {
     type LocalMediaSource,
 } from "@/services/local-media-store";
 
-export type UploadedFile = { url: string; storageKey: string; bytes: number; mimeType: string; width?: number; height?: number; durationMs?: number };
+export type UploadedFile = { url: string; storageKey?: string; bytes: number; mimeType: string; width?: number; height?: number; durationMs?: number };
 
 type UploadMediaOptions = {
     source?: LocalMediaSource;

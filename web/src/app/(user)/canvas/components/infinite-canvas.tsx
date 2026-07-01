@@ -173,7 +173,7 @@ export function InfiniteCanvas({ containerRef, viewport, backgroundMode = "lines
         <div
             ref={containerRef}
             className={`relative h-full w-full select-none overflow-hidden ${isSpacePressed ? "cursor-grab" : "cursor-default"}`}
-            style={{ background: theme.canvas.background, touchAction: "none" }}
+            style={{ background: theme.canvas.background }}
             onPointerDown={handlePointerDown}
             onPointerMove={(event) => onCanvasPointerMove?.(event)}
             onWheel={handleWheel}

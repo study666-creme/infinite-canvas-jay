@@ -9,10 +9,10 @@ import type { NodeGroupBounds } from "../utils/canvas-node-groups";
 type CanvasNodeGroupFrameProps = {
     bounds: NodeGroupBounds;
     selected: boolean;
-    onMouseDown: (event: React.MouseEvent, rootId: string) => void;
+    onPointerDown: (event: React.PointerEvent, rootId: string) => void;
 };
 
-export function CanvasNodeGroupFrame({ bounds, selected, onMouseDown }: CanvasNodeGroupFrameProps) {
+export function CanvasNodeGroupFrame({ bounds, selected, onPointerDown }: CanvasNodeGroupFrameProps) {
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
 
     return (
@@ -43,7 +43,11 @@ export function CanvasNodeGroupFrame({ bounds, selected, onMouseDown }: CanvasNo
                     background: `${theme.toolbar.panel}ee`,
                     color: theme.node.text,
                 }}
-                onMouseDown={(event) => onMouseDown(event, bounds.rootId)}
+                onPointerDown={(event) => {
+                    if (event.button !== 0) return;
+                    event.preventDefault();
+                    onPointerDown(event, bounds.rootId);
+                }}
             >
                 <Layers className="size-3.5 shrink-0 opacity-70" />
                 <span className="truncate">组合 · {bounds.memberIds.length}</span>

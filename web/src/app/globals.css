@@ -654,40 +654,93 @@
 
     .canvas-generation-progress-overlay {
         position: absolute;
-        inset: auto 12px 12px 12px;
-        z-index: 2;
+        inset: auto 14px 14px 14px;
+        z-index: 20;
         display: flex;
         flex-direction: column;
-        gap: 5px;
-        padding: 7px 9px;
-        border-radius: 10px;
-        background: rgba(12, 12, 14, 0.42);
-        border: 1px solid rgba(255, 255, 255, 0.06);
-        backdrop-filter: blur(8px);
+        gap: 6px;
+        padding: 8px 10px;
+        border-radius: 12px;
+        background: rgba(8, 8, 10, 0.82);
+        border: 1px solid rgba(255, 255, 255, 0.14);
+        backdrop-filter: blur(10px);
+        box-shadow: 0 8px 24px rgba(0, 0, 0, 0.28);
+    }
+
+    .canvas-generation-progress-center {
+        position: absolute;
+        inset: 0;
+        z-index: 18;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 10px;
+        padding: 24px;
+        text-align: center;
+    }
+
+    .canvas-generation-progress-center-value {
+        font-size: 42px;
+        font-weight: 700;
+        font-variant-numeric: tabular-nums;
+        line-height: 1;
+        letter-spacing: -0.03em;
+        color: rgba(255, 255, 255, 0.94);
+        text-shadow: 0 2px 16px rgba(0, 0, 0, 0.35);
+    }
+
+    .canvas-generation-progress-center-label {
+        max-width: 80%;
+        font-size: 13px;
+        font-weight: 600;
+        letter-spacing: 0.02em;
+        color: rgba(255, 255, 255, 0.78);
+    }
+
+    .canvas-generation-progress-center-spinner {
+        width: 34px;
+        height: 34px;
+        border-radius: 999px;
+        border: 3px solid rgba(255, 255, 255, 0.14);
+        border-top-color: rgba(255, 255, 255, 0.82);
+        animation: canvas-generation-progress-spin 0.9s linear infinite;
+    }
+
+    .canvas-generation-progress-track-center {
+        width: min(220px, 72%);
+        height: 5px;
+    }
+
+    @keyframes canvas-generation-progress-spin {
+        to {
+            transform: rotate(360deg);
+        }
     }
 
     .canvas-generation-progress-row {
         display: flex;
         align-items: center;
         justify-content: space-between;
-        gap: 8px;
-        min-height: 14px;
+        gap: 10px;
+        min-height: 16px;
     }
 
     .canvas-generation-progress-label {
-        font-size: 11px;
-        font-weight: 500;
+        font-size: 12px;
+        font-weight: 600;
         letter-spacing: 0.02em;
-        color: rgba(255, 255, 255, 0.58);
+        color: rgba(255, 255, 255, 0.88);
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
     }
 
     .canvas-generation-progress-percent {
-        font-size: 10px;
+        font-size: 12px;
+        font-weight: 600;
         font-variant-numeric: tabular-nums;
-        color: rgba(255, 255, 255, 0.42);
+        color: rgba(255, 255, 255, 0.72);
         flex-shrink: 0;
     }
 
@@ -701,10 +754,10 @@
 
     .canvas-generation-progress-track {
         position: relative;
-        height: 2px;
+        height: 4px;
         overflow: hidden;
         border-radius: 999px;
-        background: rgba(255, 255, 255, 0.07);
+        background: rgba(255, 255, 255, 0.12);
     }
 
     .canvas-generation-progress-track.is-indeterminate .canvas-generation-progress-fill-indeterminate {

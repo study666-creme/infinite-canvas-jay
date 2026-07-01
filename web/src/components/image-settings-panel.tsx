@@ -46,7 +46,7 @@ const jimengAspectValues = ["21:9", "16:9", "4:3", "1:1", "3:4", "9:16"] as cons
 
 export function ImageSettingsPanel({ config, onConfigChange, theme, showTitle = true, className = "w-[320px] space-y-4 rounded-2xl px-1 py-0.5", maxCount = 15, quickCount = 10, variant = "default" }: ImageSettingsPanelProps) {
     const [snapDimensionToStep, setSnapDimensionToStep] = useState(true);
-    const quality = config.quality || "auto";
+    const quality = normalizeJimengQualityValue(config.quality || "2k");
     const count = Math.max(1, Math.min(maxCount, Math.floor(Math.abs(Number(config.count)) || 1)));
     const activeSize = config.size || "auto";
     const selectedAspect = aspectOptions.find((item) => (item.size || item.value) === activeSize || item.value === activeSize);
@@ -68,11 +68,12 @@ export function ImageSettingsPanel({ config, onConfigChange, theme, showTitle = 
         return { value, label: preview.label, width: preview.width, height: preview.height };
     });
     const jimengQualityOptions = [
-        { value: "high", label: "1080P" },
-        { value: "medium", label: "720P" },
-        { value: "low", label: "480P" },
+        { value: "4k", label: "4K" },
+        { value: "2k", label: "2K" },
+        { value: "1k", label: "1K" },
     ];
     const selectedJimengRatio = aspectOptions.find((item) => (item.size || item.value) === activeSize || item.value === activeSize)?.value || "16:9";
+    const selectedJimengQuality = quality;
 
     return (
         <ImageSettingsTheme theme={theme}>
@@ -100,7 +101,7 @@ export function ImageSettingsPanel({ config, onConfigChange, theme, showTitle = 
                         </div>
                         <div className="space-y-3">
                             <JimengSectionTitle color={theme.node.muted}>选择分辨率</JimengSectionTitle>
-                            <JimengPillRow options={jimengQualityOptions} value={quality === "auto" ? "medium" : quality} theme={theme} columns={3} onChange={(value) => onConfigChange("quality", value)} />
+                            <JimengPillRow options={jimengQualityOptions} value={selectedJimengQuality} theme={theme} columns={3} onChange={(value) => onConfigChange("quality", value)} />
                         </div>
                         <div className="space-y-3">
                             <JimengSectionTitle color={theme.node.muted}>选择生成数量</JimengSectionTitle>
@@ -193,16 +194,30 @@ export function ImageSettingsTheme({ theme, children }: { theme: CanvasTheme; ch
 }
 
 export function imageQualityLabel(value: string) {
-    return ({ auto: "自动", high: "1080P", medium: "720P", low: "480P" } as Record<string, string>)[value] || value;
+    return imageJimengQualityLabel(value);
+}
+
+export function imageJimengQualityLabel(value: string) {
+    const normalized = normalizeJimengQualityValue(value);
+    return ({ "4k": "4K", "2k": "2K", "1k": "1K" } as Record<string, string>)[normalized] || "2K";
+}
+
+export function normalizeJimengQualityValue(quality: string) {
+    const value = (quality || "2k").trim().toLowerCase();
+    if (value === "auto" || value === "medium" || value === "720" || value === "720p" || value === "1080" || value === "1080p") return "2k";
+    if (value === "high" || value === "4k") return "4k";
+    if (value === "low" || value === "480" || value === "480p" || value === "1k") return "1k";
+    if (value === "2k") return "2k";
+    return "2k";
 }
 
 export function imageJimengSummaryParts(config: Pick<AiConfig, "size" | "quality" | "count">) {
     const activeSize = config.size || "auto";
     const ratio = aspectOptions.find((item) => (item.size || item.value) === activeSize || item.value === activeSize)?.value || "16:9";
     const ratioLabel = ratioPreviewSize(ratio).label;
-    const quality = config.quality === "auto" ? "medium" : config.quality || "medium";
+    const quality = normalizeJimengQualityValue(config.quality || "auto");
     const count = Math.max(1, Math.floor(Math.abs(Number(config.count)) || 1));
-    return [ratioLabel, imageQualityLabel(quality), String(count)];
+    return [ratioLabel, imageJimengQualityLabel(quality), String(count)];
 }
 
 function jimengAspectTarget(value: string) {

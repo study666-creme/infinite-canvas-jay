@@ -59,6 +59,7 @@ import { applyCanvasAgentOps, type CanvasAgentOp, type CanvasAgentSnapshot } fro
 import { buildCanvasResourceReferences, buildNodeMentionReferences } from "../utils/canvas-resource-references";
 import { getCanvasViewBounds, isConnectionInView, isNodeInView } from "../utils/canvas-viewport";
 import { canGroupNodes, collectDragNodeIds, createGroupPatch, expandSelectionWithGroups, getGroupRootId, isGroupSelected, listNodeGroups, ungroupPatch } from "../utils/canvas-node-groups";
+import { normalizeJimengQualityValue } from "@/components/image-settings-panel";
 import { applyUploadedImageToNode, createBatchChildNode, createBatchConnections, loadingProgressMetadata, startGenerationProgressTicker, type GeneratedImageItem } from "../utils/canvas-image-batch";
 import { CanvasNodeGroupFrame } from "../components/canvas-node-group-frame";
 import type { CanvasAgentMode } from "../components/canvas-agent-chat-ui";
@@ -2318,6 +2319,7 @@ function InfiniteCanvasPage() {
                             batchUsesReferenceImages: referenceImages.length > 0,
                             ...generationMetadata,
                             imageBatchExpanded: count > 1 ? true : undefined,
+                            ...loadingProgressMetadata(4, "准备生成"),
                         },
                     };
                     const childNodes: CanvasNodeData[] = childIds.map((id, index) => ({
@@ -2330,7 +2332,7 @@ function InfiniteCanvasPage() {
                         },
                         width: imageConfig.width,
                         height: imageConfig.height,
-                        metadata: { prompt: effectivePrompt, status: NODE_STATUS_LOADING, batchRootId: count > 1 ? rootId : undefined, ...generationMetadata },
+                        metadata: { prompt: effectivePrompt, status: NODE_STATUS_LOADING, batchRootId: count > 1 ? rootId : undefined, ...generationMetadata, ...loadingProgressMetadata(4, "准备生成") },
                     }));
                     const batchConnections = [...(isEmptyImageNode ? [] : [{ id: nanoid(), fromNodeId: nodeId, toNodeId: rootId }]), ...childIds.map((childId) => ({ id: nanoid(), fromNodeId: rootId, toNodeId: childId }))];
 
@@ -3781,10 +3783,11 @@ function getInputSummary(inputs: NodeGenerationInput[]) {
 
 function buildGenerationConfig(config: AiConfig, node: CanvasNodeData | undefined, mode: CanvasNodeGenerationMode): AiConfig {
     const defaultModel = mode === "image" ? config.imageModel : mode === "video" ? config.videoModel : mode === "audio" ? config.audioModel : config.textModel;
+    const rawQuality = node?.metadata?.quality || config.quality || defaultConfig.quality;
     return {
         ...config,
         model: node?.metadata?.model || defaultModel || (mode === "audio" ? defaultConfig.audioModel : config.model || defaultConfig.model),
-        quality: node?.metadata?.quality || config.quality || defaultConfig.quality,
+        quality: mode === "image" ? normalizeJimengQualityValue(rawQuality) : rawQuality,
         size: node?.metadata?.size || config.size || defaultConfig.size,
         videoSeconds: node?.metadata?.seconds || config.videoSeconds || defaultConfig.videoSeconds,
         vquality: node?.metadata?.vquality || config.vquality || defaultConfig.vquality,

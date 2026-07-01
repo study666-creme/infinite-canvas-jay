@@ -8,7 +8,7 @@ type CanvasNodeLoadingStateProps = {
 
 export function CanvasNodeLoadingState({ variant = "default", progress, label }: CanvasNodeLoadingStateProps) {
     const tone = variant === "video" ? "video" : variant === "image" ? "image" : "default";
-    const displayLabel = label || (variant === "video" ? "生成中" : variant === "image" ? "生成中" : undefined);
+    const displayLabel = label || (variant === "video" ? "视频生成中" : variant === "image" ? "图片生成中" : "生成中");
     const hasProgress = typeof progress === "number";
     const clampedProgress = hasProgress ? Math.max(4, Math.min(100, progress)) : undefined;
 
@@ -22,10 +22,17 @@ export function CanvasNodeLoadingState({ variant = "default", progress, label }:
             </div>
             <div className="canvas-black-glass-sweep absolute inset-0" />
             <div className={`canvas-black-glass-edge canvas-black-glass-edge-${tone}`} />
+            <div className={`canvas-generation-progress-center canvas-generation-progress-${tone}`}>
+                {hasProgress ? <div className="canvas-generation-progress-center-value">{clampedProgress}%</div> : <div className="canvas-generation-progress-center-spinner" />}
+                <div className="canvas-generation-progress-center-label">{displayLabel}</div>
+                <div className={`canvas-generation-progress-track canvas-generation-progress-track-center ${hasProgress ? "" : "is-indeterminate"}`}>
+                    {hasProgress ? <div className="canvas-generation-progress-fill" style={{ width: `${clampedProgress}%` }} /> : <div className="canvas-generation-progress-fill canvas-generation-progress-fill-indeterminate" />}
+                </div>
+            </div>
             <div className={`canvas-generation-progress-overlay canvas-generation-progress-${tone}`}>
                 <div className="canvas-generation-progress-row">
-                    {displayLabel ? <span className="canvas-generation-progress-label">{displayLabel}</span> : null}
-                    {hasProgress ? <span className="canvas-generation-progress-percent">{clampedProgress}%</span> : null}
+                    <span className="canvas-generation-progress-label">{displayLabel}</span>
+                    <span className="canvas-generation-progress-percent">{hasProgress ? `${clampedProgress}%` : "…"}</span>
                 </div>
                 <div className={`canvas-generation-progress-track ${hasProgress ? "" : "is-indeterminate"}`}>
                     {hasProgress ? <div className="canvas-generation-progress-fill" style={{ width: `${clampedProgress}%` }} /> : <div className="canvas-generation-progress-fill canvas-generation-progress-fill-indeterminate" />}

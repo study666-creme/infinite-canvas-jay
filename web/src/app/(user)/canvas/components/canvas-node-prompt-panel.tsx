@@ -20,6 +20,8 @@ import { canvasThemes } from "@/lib/canvas-theme";
 
 import { useThemeStore } from "@/stores/use-theme-store";
 
+import { normalizeJimengQualityValue } from "@/components/image-settings-panel";
+
 import { CanvasImageSettingsPopover } from "./canvas-image-settings-popover";
 
 import { CanvasPromptLibrary } from "./canvas-prompt-library";
@@ -229,7 +231,7 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
 
                                 variant="jimeng"
 
-                                onConfigChange={(key, value) => onConfigChange(node.id, key === "count" ? { count: Number(value) || 1 } : { [key]: value })}
+                                onConfigChange={(key, value) => onConfigChange(node.id, key === "count" ? { count: Number(value) || 1 } : key === "quality" ? { quality: normalizeJimengQualityValue(value) } : { [key]: value })}
 
                                 onMissingConfig={() => openConfigDialog(true)}
 
@@ -357,7 +359,7 @@ function buildNodeConfig(globalConfig: AiConfig, node: CanvasNodeData, mode: Can
 
         model: node.metadata?.model || defaultModel || (mode === "audio" ? defaultConfig.audioModel : globalConfig.model || defaultConfig.model),
 
-        quality: node.metadata?.quality || globalConfig.quality || defaultConfig.quality,
+        quality: mode === "image" ? normalizeJimengQualityValue(node.metadata?.quality || globalConfig.quality || defaultConfig.quality) : node.metadata?.quality || globalConfig.quality || defaultConfig.quality,
 
         size: node.metadata?.size || globalConfig.size || defaultConfig.size,
 

@@ -104,7 +104,7 @@ export const defaultConfig: AiConfig = {
     videoModels: ["default::grok-imagine-video"],
     textModels: ["default::gpt-5.5"],
     audioModels: ["default::gpt-4o-mini-tts"],
-    quality: "auto",
+    quality: "2k",
     size: "1:1",
     count: "1",
     canvasImageCount: "3",

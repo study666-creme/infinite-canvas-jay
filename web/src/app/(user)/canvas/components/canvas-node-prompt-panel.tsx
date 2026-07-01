@@ -30,7 +30,7 @@ import { CanvasAudioSettingsPopover, type CanvasAudioSettingKey } from "./canvas
 
 import { CanvasResourceMentionPicker } from "./canvas-resource-mention-picker";
 
-import { CanvasResourceMentionTextarea } from "./canvas-resource-mention-textarea";
+import { CanvasResourceMentionTextarea, type CanvasResourceMentionTextareaHandle } from "./canvas-resource-mention-textarea";
 
 import { CanvasVideoDurationPopover } from "./canvas-video-duration-popover";
 
@@ -90,10 +90,10 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
 
     const hasImageContent = node.type === CanvasNodeType.Image && Boolean(node.metadata?.content);
 
-    const isEditingExistingContent = hasTextContent || hasImageContent;
+    const isTextEditMode = node.type === CanvasNodeType.Text && hasTextContent;
 
-    const [prompt, setPrompt] = useState(isEditingExistingContent ? "" : node.metadata?.prompt || "");
-    const promptInputRef = useRef<HTMLDivElement>(null);
+    const [prompt, setPrompt] = useState(isTextEditMode ? "" : node.metadata?.prompt || "");
+    const promptInputRef = useRef<CanvasResourceMentionTextareaHandle>(null);
 
     const credits = requestCreditCost({
         channelMode: config.channelMode,
@@ -112,38 +112,20 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
 
 
     useEffect(() => {
-
-        setPrompt(isEditingExistingContent ? "" : node.metadata?.prompt || "");
-
-    }, [isEditingExistingContent, node.id]);
+        setPrompt(isTextEditMode ? "" : node.metadata?.prompt || "");
+    }, [isTextEditMode, node.id, node.metadata?.prompt]);
 
 
 
     const updatePrompt = (value: string) => {
-
         setPrompt(value);
-
-        if (!isEditingExistingContent) onPromptChange(node.id, value);
-
+        if (!isTextEditMode) onPromptChange(node.id, value);
     };
 
 
 
     const insertReferenceLabel = (label: string) => {
-        const token = `${label} `;
-        const next = prompt.trim() ? `${prompt.trimEnd()} ${token}` : token;
-        updatePrompt(next);
-        requestAnimationFrame(() => {
-            const editor = promptInputRef.current;
-            if (!editor) return;
-            editor.focus();
-            const range = document.createRange();
-            range.selectNodeContents(editor);
-            range.collapse(false);
-            const selection = window.getSelection();
-            selection?.removeAllRanges();
-            selection?.addRange(range);
-        });
+        promptInputRef.current?.insertReferenceLabel(label);
     };
 
 
@@ -160,15 +142,10 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
 
 
     const submit = () => {
-
         const text = prompt.trim();
-
         if (!text || isRunning) return;
-
+        if (!isTextEditMode) onPromptChange(node.id, text);
         onGenerate(node.id, mode, text);
-
-        setPrompt("");
-
     };
 
 

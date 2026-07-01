@@ -60,7 +60,19 @@ import { buildCanvasResourceReferences, buildNodeMentionReferences } from "../ut
 import { getCanvasViewBounds, isConnectionInView, isNodeInView } from "../utils/canvas-viewport";
 import { canGroupNodes, collectDragNodeIds, createGroupPatch, expandSelectionWithGroups, getGroupRootId, isGroupSelected, listNodeGroups, ungroupPatch } from "../utils/canvas-node-groups";
 import { normalizeJimengQualityValue } from "@/components/image-settings-panel";
-import { applyUploadedImageToNode, createBatchChildNode, createBatchConnections, loadingProgressMetadata, startGenerationProgressTicker, type GeneratedImageItem } from "../utils/canvas-image-batch";
+import {
+    applyUploadedImageToNode,
+    buildPromptHubConnections,
+    buildPromptHubImageNodes,
+    buildPromptHubSiblingImageNodes,
+    buildPromptTextNodePatch,
+    createBatchChildNode,
+    createBatchConnections,
+    loadingProgressMetadata,
+    resolvePromptHubAnchor,
+    startGenerationProgressTicker,
+    type GeneratedImageItem,
+} from "../utils/canvas-image-batch";
 import { CanvasNodeGroupFrame } from "../components/canvas-node-group-frame";
 import type { CanvasAgentMode } from "../components/canvas-agent-chat-ui";
 import {
@@ -2406,6 +2418,82 @@ function InfiniteCanvasPage() {
                         stopProgressTicker = null;
                         if (!items.length) throw new Error("接口没有返回图片");
 
+                        const usePromptTextHub = items.length > 1 && !isConfigNode && (isEmptyImageNode || sourceNode?.type === CanvasNodeType.Text || !isImageNode);
+                        const usePromptSiblingHub = items.length > 1 && isImageNode && sourceNode?.metadata?.content;
+
+                        if (usePromptTextHub || usePromptSiblingHub) {
+                            const anchorNode = nodesRef.current.find((node) => node.id === nodeId) || sourceNode!;
+                            const textSpec = NODE_DEFAULT_SIZE[CanvasNodeType.Text];
+                            const hubPlan = usePromptSiblingHub
+                                ? buildPromptHubSiblingImageNodes({
+                                      anchor: anchorNode,
+                                      prompt: effectivePrompt,
+                                      count: items.length,
+                                      generationMetadata,
+                                  })
+                                : buildPromptHubImageNodes({
+                                      anchor: resolvePromptHubAnchor(anchorNode, anchorNode.position, textSpec),
+                                      prompt: effectivePrompt,
+                                      count: items.length,
+                                      generationMetadata,
+                                  });
+                            const hubConnections = buildPromptHubConnections(nodeId, hubPlan.ids);
+                            hubPlan.ids.forEach((targetId) => startGenerationRequest(targetId, nodeId, nodeId, controller));
+
+                            setNodes((prev) => {
+                                const next = prev.map((node) => {
+                                    if (node.id !== nodeId) return node;
+                                    if (usePromptSiblingHub) {
+                                        return { ...node, metadata: { ...node.metadata, prompt: effectivePrompt, status: NODE_STATUS_SUCCESS, errorDetails: undefined } };
+                                    }
+                                    return buildPromptTextNodePatch(node, effectivePrompt, textSpec);
+                                });
+                                const existingIds = new Set(next.map((node) => node.id));
+                                return [...next, ...hubPlan.nodes.filter((node) => !existingIds.has(node.id))];
+                            });
+                            setConnections((prev) => [...prev, ...hubConnections]);
+                            if (items.length > 1) message.success(`接口返回 ${items.length} 张图片，已自动展开`);
+
+                            for (let index = 0; index < items.length; index += 1) {
+                                const targetId = hubPlan.ids[index];
+                                const item = items[index];
+                                const saveProgress = Math.round(((index + 0.5) / items.length) * 100);
+                                setNodes((prev) =>
+                                    prev.map((node) =>
+                                        node.id === targetId
+                                            ? { ...node, metadata: { ...node.metadata, ...loadingProgressMetadata(saveProgress, `保存 ${index + 1}/${items.length}`) } }
+                                            : node,
+                                    ),
+                                );
+                                try {
+                                    const uploaded = await uploadImage(item.dataUrl);
+                                    setNodes((prev) => prev.map((node) => (node.id === targetId ? applyUploadedImageToNode(node, uploaded) : node)));
+                                    hasSuccess = true;
+                                } catch (error) {
+                                    if (isGenerationCanceled(error)) continue;
+                                    hasFailure = true;
+                                    const errorDetails = error instanceof Error ? error.message : "生成失败";
+                                    setNodes((prev) => prev.map((node) => (node.id === targetId ? { ...node, metadata: { ...node.metadata, status: NODE_STATUS_ERROR, errorDetails } } : node)));
+                                } finally {
+                                    finishGenerationRequest(targetId, controller);
+                                }
+                            }
+
+                            if (controller.signal.aborted) {
+                                setNodes((prev) => prev.map((node) => (node.id === nodeId && isConfigNode && node.metadata?.status === NODE_STATUS_LOADING ? { ...node, metadata: { ...node.metadata, status: NODE_STATUS_IDLE, errorDetails: undefined } } : node)));
+                                return;
+                            }
+                            if (hasFailure) message.error(hasSuccess ? "部分图片生成失败" : "全部图片生成失败");
+                            setNodes((prev) =>
+                                prev.map((node) =>
+                                    node.id === nodeId
+                                        ? { ...node, metadata: { ...node.metadata, prompt: effectivePrompt, status: hasSuccess ? NODE_STATUS_SUCCESS : NODE_STATUS_ERROR, errorDetails: hasSuccess ? undefined : "全部图片生成失败" } }
+                                        : node,
+                                ),
+                            );
+                            return;
+                        }
+
                         let assignChildIds = count > 1 ? [...childIds] : [];
                         let assignRootAsBatch = count > 1;
                         let newChildIds: string[] = [];
@@ -2812,6 +2900,50 @@ function InfiniteCanvasPage() {
                 const generationMetadata = savedImageMetadata?.generationType
                     ? { generationType: savedImageMetadata.generationType, model: generationConfig.model, size: generationConfig.size, quality: generationConfig.quality, count: items.length, references: savedImageMetadata.references }
                     : buildImageGenerationMetadata(useReferenceImages ? "edit" : "generation", generationConfig, items.length, retryImages);
+
+                const isEmptyImageNode = node.type === CanvasNodeType.Image && !node.metadata?.content;
+                const usePromptTextHub = items.length > 1 && (isEmptyImageNode || node.type === CanvasNodeType.Text);
+                const usePromptSiblingHub = items.length > 1 && node.type === CanvasNodeType.Image && node.metadata?.content;
+
+                if (usePromptTextHub || usePromptSiblingHub) {
+                    const textSpec = NODE_DEFAULT_SIZE[CanvasNodeType.Text];
+                    const hubPlan = usePromptSiblingHub
+                        ? buildPromptHubSiblingImageNodes({ anchor: node, prompt, count: items.length, generationMetadata })
+                        : buildPromptHubImageNodes({
+                              anchor: resolvePromptHubAnchor(node, node.position, textSpec),
+                              prompt,
+                              count: items.length,
+                              generationMetadata,
+                          });
+                    setNodes((prev) => {
+                        const next = prev.map((item) => {
+                            if (item.id !== node.id) return item;
+                            if (usePromptSiblingHub) {
+                                return { ...item, metadata: { ...item.metadata, prompt, status: NODE_STATUS_SUCCESS, errorDetails: undefined } };
+                            }
+                            return buildPromptTextNodePatch(item, prompt, textSpec);
+                        });
+                        const existingIds = new Set(next.map((entry) => entry.id));
+                        return [...next, ...hubPlan.nodes.filter((entry) => !existingIds.has(entry.id))];
+                    });
+                    setConnections((prev) => [...prev, ...buildPromptHubConnections(node.id, hubPlan.ids)]);
+                    if (items.length > 1) message.success(`已获取 ${items.length} 张图片`);
+
+                    for (let index = 0; index < items.length; index += 1) {
+                        const targetId = hubPlan.ids[index];
+                        setNodes((prev) =>
+                            prev.map((item) =>
+                                item.id === targetId
+                                    ? { ...item, metadata: { ...item.metadata, ...loadingProgressMetadata(Math.round(((index + 0.5) / items.length) * 100), `保存 ${index + 1}/${items.length}`) } }
+                                    : item,
+                            ),
+                        );
+                        const uploaded = await uploadImage(items[index].dataUrl);
+                        setNodes((prev) => prev.map((item) => (item.id === targetId ? applyUploadedImageToNode(item, uploaded) : item)));
+                    }
+                    setNodes((prev) => prev.map((item) => (item.id === node.id ? { ...item, metadata: { ...item.metadata, prompt, status: NODE_STATUS_SUCCESS, errorDetails: undefined } } : item)));
+                    return;
+                }
 
                 const imageConfig = NODE_DEFAULT_SIZE[CanvasNodeType.Image];
                 const uploadedImages = [];

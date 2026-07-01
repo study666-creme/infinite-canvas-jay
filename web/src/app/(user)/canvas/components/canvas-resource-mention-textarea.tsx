@@ -1,6 +1,6 @@
 "use client";
 
-import { forwardRef, useEffect, useMemo, useRef, useState } from "react";
+import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
 import type { CSSProperties, HTMLAttributes, KeyboardEvent, MouseEvent, PointerEvent } from "react";
 import { createPortal } from "react-dom";
 import { FileText, Image as ImageIcon, Music2, Video } from "lucide-react";
@@ -23,7 +23,12 @@ type Props = Omit<HTMLAttributes<HTMLDivElement>, "onChange" | "value"> & {
     placeholder?: string;
 };
 
-export const CanvasResourceMentionTextarea = forwardRef<HTMLDivElement, Props>(function CanvasResourceMentionTextarea({ value, references, onChange, onSubmit, onKeyDown, className, containerClassName, style, highlightLabels = true, placeholder, ...props }, forwardedRef) {
+export type CanvasResourceMentionTextareaHandle = {
+    insertReferenceLabel: (label: string) => void;
+    focusEditor: () => void;
+};
+
+export const CanvasResourceMentionTextarea = forwardRef<CanvasResourceMentionTextareaHandle, Props>(function CanvasResourceMentionTextarea({ value, references, onChange, onSubmit, onKeyDown, className, containerClassName, style, highlightLabels = true, placeholder, ...props }, forwardedRef) {
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const editorRef = useRef<HTMLDivElement | null>(null);
     const [mention, setMention] = useState<MentionState | null>(null);
@@ -90,19 +95,35 @@ export const CanvasResourceMentionTextarea = forwardRef<HTMLDivElement, Props>(f
         setActiveIndex(0);
     };
 
-    const insertReference = (reference: CanvasResourceReference) => {
+    const insertReferenceLabelAtCaret = (label: string) => {
         const editor = editorRef.current;
-        if (!editor || !mention) return;
-        const full = serializeEditor(editor);
+        if (!editor) return;
         const prefix = getTextBeforeCaret(editor);
-        const match = /(^|\s)@([^\s@]*)$/.exec(prefix);
-        if (!match) return;
-        const next = `${prefix.slice(0, prefix.length - match[0].length)}${reference.label} ${full.slice(prefix.length)}`;
+        const suffixStart = prefix.length;
+        const full = serializeEditor(editor);
+        const suffix = full.slice(suffixStart);
+        const mentionMatch = /(^|\s)@([^\s@]*)$/.exec(prefix);
+        const nextPrefix = mentionMatch ? `${prefix.slice(0, prefix.length - mentionMatch[0].length)}${label} ` : `${prefix}${prefix && !/\s$/.test(prefix) ? " " : ""}${label} `;
+        const next = `${nextPrefix}${suffix}`;
         renderValueToEditor(editor, next, activeLabels, referenceByLabel, theme);
-        setCaretAtTextOffset(editor, prefix.length - match[0].length + reference.label.length + 1);
+        setCaretAtTextOffset(editor, nextPrefix.length);
         setIsEmpty(!next.trim());
         onChange(next);
         closeMention();
+        editor.focus();
+    };
+
+    useImperativeHandle(
+        forwardedRef,
+        () => ({
+            insertReferenceLabel: insertReferenceLabelAtCaret,
+            focusEditor: () => editorRef.current?.focus(),
+        }),
+        [activeLabels, referenceByLabel, theme, onChange],
+    );
+
+    const insertReference = (reference: CanvasResourceReference) => {
+        insertReferenceLabelAtCaret(reference.label);
     };
 
     const handleKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
@@ -169,8 +190,6 @@ export const CanvasResourceMentionTextarea = forwardRef<HTMLDivElement, Props>(f
                 {...props}
                 ref={(node) => {
                     editorRef.current = node;
-                    if (typeof forwardedRef === "function") forwardedRef(node);
-                    else if (forwardedRef) forwardedRef.current = node;
                 }}
                 role="textbox"
                 aria-multiline="true"

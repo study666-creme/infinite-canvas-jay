@@ -192,6 +192,10 @@ function resolveImageDataUrl(item: Record<string, unknown>) {
     if (typeof item.image_url === "string" && item.image_url) {
         return item.image_url;
     }
+    if (item.image_url && typeof item.image_url === "object") {
+        const nested = item.image_url as { url?: string };
+        if (typeof nested.url === "string" && nested.url) return nested.url;
+    }
     if (typeof item.imageUrl === "string" && item.imageUrl) {
         return item.imageUrl;
     }
@@ -210,9 +214,21 @@ function extractImagePayloadEntries(payload: ImageApiResponse): Array<Record<str
         else if (Array.isArray(record.images)) candidate = record.images;
         else if (Array.isArray(record.output)) candidate = record.output;
         else if (Array.isArray(record.results)) candidate = record.results;
+        else if (Array.isArray(record.list)) candidate = record.list;
     }
 
-    if (Array.isArray(candidate)) return candidate;
+    if (Array.isArray(candidate)) {
+        return candidate.flatMap((item) => {
+            if (typeof item === "string") return [item];
+            if (Array.isArray(item)) return item;
+            if (item && typeof item === "object") {
+                const record = item as Record<string, unknown>;
+                if (Array.isArray(record.images)) return record.images;
+                if (Array.isArray(record.data)) return record.data;
+            }
+            return [item];
+        });
+    }
 
     const topLevel = payload as Record<string, unknown>;
     if (Array.isArray(topLevel.images)) return topLevel.images as Array<Record<string, unknown> | string>;

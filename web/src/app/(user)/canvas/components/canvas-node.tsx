@@ -13,7 +13,7 @@ import { CanvasVideoPlayer, type CanvasVideoPlayerHandle } from "./canvas-video-
 import { CanvasNodeType, type CanvasNodeData, type ConnectionHandle, type Position } from "../types";
 import type { CanvasResourceReference } from "../utils/canvas-resource-references";
 
-type ResizeCorner = "top-left" | "top-right" | "bottom-left" | "bottom-right";
+type ResizeHandle = "top-left" | "top-right" | "bottom-left" | "bottom-right" | "top" | "right" | "bottom" | "left";
 
 type CanvasNodeProps = {
     data: CanvasNodeData;
@@ -44,6 +44,7 @@ type CanvasNodeProps = {
     onConnectStart: (event: React.MouseEvent, nodeId: string, handleType: "source" | "target") => void;
     onConnectMenu?: (nodeId: string, handleType: "source" | "target") => void;
     onResize: (nodeId: string, width: number, height: number, position?: Position) => void;
+    onResizeActiveChange?: (active: boolean) => void;
     onContentChange: (nodeId: string, content: string) => void;
     onToggleBatch?: (nodeId: string) => void;
     onSetBatchPrimary?: (node: CanvasNodeData) => void;
@@ -107,6 +108,7 @@ export const CanvasNode = React.memo(function CanvasNode({
     onConnectStart,
     onConnectMenu,
     onResize,
+    onResizeActiveChange,
     onContentChange,
     onToggleBatch,
     onSetBatchPrimary,
@@ -131,7 +133,7 @@ export const CanvasNode = React.memo(function CanvasNode({
     const textareaRef = useRef<HTMLDivElement | null>(null);
     const resizeRef = useRef({
         isResizing: false,
-        corner: "bottom-right" as ResizeCorner,
+        handle: "bottom-right" as ResizeHandle,
         startX: 0,
         startY: 0,
         startLeft: 0,
@@ -183,22 +185,33 @@ export const CanvasNode = React.memo(function CanvasNode({
     }, [isEditingContent]);
 
     const handleResizeMove = useCallback(
-        (event: MouseEvent) => {
+        (event: PointerEvent) => {
             if (!resizeRef.current.isResizing) return;
 
             const dx = (event.clientX - resizeRef.current.startX) / scale;
             const dy = (event.clientY - resizeRef.current.startY) / scale;
             const minWidth = 220;
             const minHeight = 160;
+            const handle = resizeRef.current.handle;
+            const isCorner = handle.includes("-");
+            const fromLeft = handle.includes("left");
+            const fromTop = handle.includes("top");
+            const fromRight = handle === "right" || handle.endsWith("-right");
+            const fromBottom = handle === "bottom" || handle.endsWith("-bottom");
             const startRight = resizeRef.current.startLeft + resizeRef.current.startWidth;
             const startBottom = resizeRef.current.startTop + resizeRef.current.startHeight;
-            const fromLeft = resizeRef.current.corner.includes("left");
-            const fromTop = resizeRef.current.corner.includes("top");
-            const rawWidth = Math.max(minWidth, resizeRef.current.startWidth + (fromLeft ? -dx : dx));
-            const rawHeight = Math.max(minHeight, resizeRef.current.startHeight + (fromTop ? -dy : dy));
-            let width = rawWidth;
-            let height = rawHeight;
-            if (resizeRef.current.keepRatio) {
+
+            let width = resizeRef.current.startWidth;
+            let height = resizeRef.current.startHeight;
+
+            if (fromLeft || fromRight) {
+                width = Math.max(minWidth, resizeRef.current.startWidth + (fromLeft ? -dx : dx));
+            }
+            if (fromTop || fromBottom) {
+                height = Math.max(minHeight, resizeRef.current.startHeight + (fromTop ? -dy : dy));
+            }
+
+            if (resizeRef.current.keepRatio && isCorner) {
                 const ratio = resizeRef.current.ratio;
                 if (Math.abs(dx) >= Math.abs(dy)) {
                     height = width / ratio;
@@ -224,17 +237,21 @@ export const CanvasNode = React.memo(function CanvasNode({
     );
 
     const handleResizeUp = useCallback(() => {
+        if (!resizeRef.current.isResizing) return;
         resizeRef.current.isResizing = false;
-        window.removeEventListener("mousemove", handleResizeMove);
-        window.removeEventListener("mouseup", handleResizeUp);
-    }, [handleResizeMove]);
+        onResizeActiveChange?.(false);
+        window.removeEventListener("pointermove", handleResizeMove);
+        window.removeEventListener("pointerup", handleResizeUp);
+        window.removeEventListener("pointercancel", handleResizeUp);
+    }, [handleResizeMove, onResizeActiveChange]);
 
-    const handleResizeMouseDown = (event: React.MouseEvent, corner: ResizeCorner) => {
+    const handleResizePointerDown = (event: React.PointerEvent<HTMLDivElement>, handle: ResizeHandle) => {
         event.stopPropagation();
         event.preventDefault();
+        onResizeActiveChange?.(true);
         resizeRef.current = {
             isResizing: true,
-            corner,
+            handle,
             startX: event.clientX,
             startY: event.clientY,
             startLeft: data.position.x,
@@ -244,14 +261,16 @@ export const CanvasNode = React.memo(function CanvasNode({
             keepRatio: (data.type === CanvasNodeType.Image && !data.metadata?.freeResize) || data.type === CanvasNodeType.Video,
             ratio: (data.metadata?.naturalWidth || data.width) / (data.metadata?.naturalHeight || data.height || 1),
         };
-        window.addEventListener("mousemove", handleResizeMove);
-        window.addEventListener("mouseup", handleResizeUp);
+        window.addEventListener("pointermove", handleResizeMove);
+        window.addEventListener("pointerup", handleResizeUp);
+        window.addEventListener("pointercancel", handleResizeUp);
     };
 
     useEffect(() => {
         return () => {
-            window.removeEventListener("mousemove", handleResizeMove);
-            window.removeEventListener("mouseup", handleResizeUp);
+            window.removeEventListener("pointermove", handleResizeMove);
+            window.removeEventListener("pointerup", handleResizeUp);
+            window.removeEventListener("pointercancel", handleResizeUp);
         };
     }, [handleResizeMove, handleResizeUp]);
 
@@ -302,12 +321,15 @@ export const CanvasNode = React.memo(function CanvasNode({
                           ? `0 18px 48px rgba(0,0,0,.14)`
                           : undefined,
                 }}
-                onMouseDown={(event) => {
+                onPointerDown={(event) => {
                     const target = event.target as HTMLElement;
                     if (target.closest("button")) return;
                     if (target.closest("[data-canvas-interactive]")) return;
-                    if (target.closest("[data-resize-handle]")) return;
-                    onMouseDown(event, data.id);
+                    if (target.closest("[data-resize-handle]")) {
+                        event.stopPropagation();
+                        return;
+                    }
+                    onMouseDown(event as unknown as React.MouseEvent, data.id);
                 }}
                 onDoubleClick={(event) => {
                     if (isBatchRoot) {
@@ -369,10 +391,18 @@ export const CanvasNode = React.memo(function CanvasNode({
                     <div className="pointer-events-none absolute inset-x-0 bottom-0 h-12" style={{ background: `linear-gradient(to top, ${theme.canvas.background}66, transparent)` }} />
                 ) : null}
 
-                <ResizeHandle corner="top-left" onMouseDown={handleResizeMouseDown} />
-                <ResizeHandle corner="top-right" onMouseDown={handleResizeMouseDown} />
-                <ResizeHandle corner="bottom-left" onMouseDown={handleResizeMouseDown} />
-                <ResizeHandle corner="bottom-right" onMouseDown={handleResizeMouseDown} />
+                {showSelectionChrome ? (
+                    <>
+                        <ResizeHandle handle="top-left" onPointerDown={handleResizePointerDown} />
+                        <ResizeHandle handle="top-right" onPointerDown={handleResizePointerDown} />
+                        <ResizeHandle handle="bottom-left" onPointerDown={handleResizePointerDown} />
+                        <ResizeHandle handle="bottom-right" onPointerDown={handleResizePointerDown} />
+                        <ResizeHandle handle="top" onPointerDown={handleResizePointerDown} />
+                        <ResizeHandle handle="right" onPointerDown={handleResizePointerDown} />
+                        <ResizeHandle handle="bottom" onPointerDown={handleResizePointerDown} />
+                        <ResizeHandle handle="left" onPointerDown={handleResizePointerDown} />
+                    </>
+                ) : null}
             </div>
 
             <ConnectionHandlePlus side="left" visible={hovered || connectHover === "left" || leftHandleActive} emphasized={leftHandleActive} onHoverChange={(active) => setConnectHover(active ? "left" : connectHover === "left" ? null : connectHover)} onConnectStart={(event) => onConnectStart(event, data.id, "target")} onConnectMenu={onConnectMenu ? () => onConnectMenu(data.id, "target") : undefined} />
@@ -742,23 +772,30 @@ function BatchFrame({ batchCount, batchExpanded, batchOpening, batchRecovering, 
         </div>
     );
 }
-function ResizeHandle({ corner, onMouseDown }: { corner: ResizeCorner; onMouseDown: (event: React.MouseEvent, corner: ResizeCorner) => void }) {
+function ResizeHandle({ handle, onPointerDown }: { handle: ResizeHandle; onPointerDown: (event: React.PointerEvent<HTMLDivElement>, handle: ResizeHandle) => void }) {
     const positionClass = {
-        "top-left": "-left-[14px] -top-[14px] cursor-nwse-resize",
-        "top-right": "-right-[14px] -top-[14px] cursor-nesw-resize",
-        "bottom-left": "-bottom-[14px] -left-[14px] cursor-nesw-resize",
-        "bottom-right": "-bottom-[14px] -right-[14px] cursor-nwse-resize",
-    }[corner];
+        "top-left": "-left-[14px] -top-[14px] size-7 cursor-nwse-resize",
+        "top-right": "-right-[14px] -top-[14px] size-7 cursor-nesw-resize",
+        "bottom-left": "-bottom-[14px] -left-[14px] size-7 cursor-nesw-resize",
+        "bottom-right": "-bottom-[14px] -right-[14px] size-7 cursor-nwse-resize",
+        top: "-top-[10px] left-1/2 h-5 w-14 -translate-x-1/2 cursor-ns-resize",
+        right: "-right-[10px] top-1/2 h-14 w-5 -translate-y-1/2 cursor-ew-resize",
+        bottom: "-bottom-[10px] left-1/2 h-5 w-14 -translate-x-1/2 cursor-ns-resize",
+        left: "-left-[10px] top-1/2 h-14 w-5 -translate-y-1/2 cursor-ew-resize",
+    }[handle];
+    const isCorner = handle.includes("-");
 
     return (
         <div
             data-resize-handle
-            className={`absolute z-50 size-7 ${positionClass}`}
-            onMouseDown={(event) => {
+            className={`absolute z-[60] touch-none ${positionClass}`}
+            onPointerDown={(event) => {
                 event.stopPropagation();
-                onMouseDown(event, corner);
+                onPointerDown(event, handle);
             }}
-        />
+        >
+            {isCorner ? <span className="pointer-events-none absolute inset-0 m-auto size-3 rounded-full border-2 border-white bg-[#2f80ff] shadow-[0_0_0_1px_rgba(0,0,0,.35)]" /> : null}
+        </div>
     );
 }
 

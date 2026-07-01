@@ -363,6 +363,7 @@ function InfiniteCanvasPage() {
     const selectedNodeIdsRef = useRef(selectedNodeIds);
     const viewportRef = useRef(viewport);
     const generateNodeRef = useRef<((nodeId: string, mode: CanvasNodeGenerationMode, prompt: string) => Promise<void>) | null>(null);
+    const nodeResizingRef = useRef(false);
     const connectingParamsRef = useRef(connectingParams);
     const connectionTargetNodeIdRef = useRef(connectionTargetNodeId);
     const selectionBoxRef = useRef(selectionBox);
@@ -1252,6 +1253,8 @@ function InfiniteCanvasPage() {
     );
 
     const handleNodeMouseDown = useCallback((event: ReactMouseEvent, nodeId: string) => {
+        if (nodeResizingRef.current) return;
+        if ((event.target as HTMLElement).closest("[data-resize-handle]")) return;
         event.stopPropagation();
         setContextMenu(null);
         setHoveredNodeId(null);
@@ -1364,6 +1367,7 @@ function InfiniteCanvasPage() {
 
     const applyNodeDragMove = useCallback((clientX: number, clientY: number) => {
         if (!dragRef.current.isDraggingNode) return;
+        if (nodeResizingRef.current) return;
 
         const currentViewport = viewportRef.current;
         const dx = (clientX - dragRef.current.startX) / currentViewport.k;
@@ -1671,6 +1675,21 @@ function InfiniteCanvasPage() {
         },
         [screenToCanvas, setConnecting],
     );
+
+    const handleNodeResizeActiveChange = useCallback((active: boolean) => {
+        nodeResizingRef.current = active;
+        if (!active) return;
+        if (rafRef.current) {
+            cancelAnimationFrame(rafRef.current);
+            rafRef.current = null;
+        }
+        dragRef.current.isDraggingNode = false;
+        dragRef.current.hasMoved = false;
+        dragRef.current.initialSelectedNodes = [];
+        historyPausedRef.current = false;
+        nodeDraggingRef.current = false;
+        setIsNodeDragging(false);
+    }, []);
 
     const handleNodeResize = useCallback((nodeId: string, width: number, height: number, position?: Position) => {
         setNodes((prev) => prev.map((node) => (node.id === nodeId ? { ...node, width, height, position: position || node.position } : node)));
@@ -3280,6 +3299,7 @@ function InfiniteCanvasPage() {
                             onConnectStart={handleConnectStart}
                             onConnectMenu={openConnectionMenu}
                             onResize={handleNodeResize}
+                            onResizeActiveChange={handleNodeResizeActiveChange}
                             onContentChange={handleNodeContentChange}
                             onToggleBatch={toggleBatchExpanded}
                             onSetBatchPrimary={setBatchPrimary}

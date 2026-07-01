@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { App, Modal, Segmented, Tooltip } from "antd";
-import { Download, Ellipsis, FolderPlus, Image as ImageIcon, Info, MessageSquare, Minus, Music2, Pencil, Plus, RefreshCw, Settings2, Trash2, Upload, Video } from "lucide-react";
+import { Download, Ellipsis, FolderPlus, Image as ImageIcon, Info, MessageSquare, Minus, Music2, Pencil, Plus, RefreshCw, ScanLine, Settings2, Trash2, Upload, Video } from "lucide-react";
 
 import { canvasThemes } from "@/lib/canvas-theme";
 import { formatBytes, getDataUrlByteSize } from "@/lib/image-utils";
@@ -33,6 +33,7 @@ type CanvasNodeHoverToolbarProps = {
     onAngle: (node: CanvasNodeData) => void;
     onViewImage: (node: CanvasNodeData) => void;
     onReversePrompt: (node: CanvasNodeData) => void;
+    onCaptureVideoFrame: (node: CanvasNodeData) => void;
     onRetry: (node: CanvasNodeData) => void;
     onToggleFreeResize: (node: CanvasNodeData) => void;
     onDelete: (node: CanvasNodeData) => void;
@@ -69,14 +70,15 @@ export function CanvasNodeHoverToolbar({
     onAngle,
     onViewImage,
     onReversePrompt,
+    onCaptureVideoFrame,
     onRetry,
     onToggleFreeResize,
     onDelete,
 }: CanvasNodeHoverToolbarProps) {
     const [quickImageToolIds, setQuickImageToolIds] = useState<ImageQuickToolId[]>(defaultImageQuickToolIds);
-    const [showImageToolLabels, setShowImageToolLabels] = useState(true);
+    const [showImageToolLabels, setShowImageToolLabels] = useState(false);
     const [draftImageToolIds, setDraftImageToolIds] = useState<ImageQuickToolId[]>(defaultImageQuickToolIds);
-    const [draftShowImageToolLabels, setDraftShowImageToolLabels] = useState(true);
+    const [draftShowImageToolLabels, setDraftShowImageToolLabels] = useState(false);
     const [imageToolSettingsOpen, setImageToolSettingsOpen] = useState(false);
     const { message } = App.useApp();
     const copyText = useCopyText();
@@ -159,6 +161,7 @@ export function CanvasNodeHoverToolbar({
         ...(isText ? [{ id: "decreaseFont", title: "减小字号", label: "缩小", icon: <Minus className="size-4" />, onClick: () => onDecreaseFont(node) }] : []),
         ...(isText ? [{ id: "increaseFont", title: "增大字号", label: "放大", icon: <Plus className="size-4" />, onClick: () => onIncreaseFont(node) }] : []),
         ...(isImage && !hasImage ? [{ id: "uploadImage", title: "上传图片", label: "上传图片", icon: <Upload className="size-4" />, onClick: () => onUpload(node) }] : []),
+        ...(hasVideo ? [{ id: "captureFrame", title: "截取最后一帧为图片节点", label: "截帧", icon: <ScanLine className="size-4" />, onClick: () => onCaptureVideoFrame(node) }] : []),
         ...(isVideo ? [{ id: "uploadVideo", title: hasVideo ? "替换视频" : "上传视频", label: hasVideo ? "替换视频" : "上传视频", icon: <Video className="size-4" />, onClick: () => onUpload(node) }] : []),
         ...(isAudio ? [{ id: "uploadAudio", title: hasAudio ? "替换音频" : "上传音频", label: hasAudio ? "替换音频" : "上传音频", icon: <Music2 className="size-4" />, onClick: () => onUpload(node) }] : []),
         ...(hasImage ? imageTools.map((tool) => ({ id: tool.id, title: tool.title, label: tool.label, icon: tool.icon, active: tool.active, onClick: tool.onClick })) : []),
@@ -191,14 +194,14 @@ export function CanvasNodeHoverToolbar({
         <>
             <div
                 data-canvas-node-toolbar
-                className="absolute z-[70] flex max-w-[min(92vw,720px)] -translate-x-1/2 -translate-y-full items-center overflow-x-auto rounded-2xl border px-1 py-1 backdrop-blur-xl"
+                className="absolute z-[70] flex max-w-[96vw] -translate-x-1/2 -translate-y-full flex-nowrap items-center gap-0.5 rounded-full border px-1 py-0.5 backdrop-blur-md"
                 style={{
                     left,
                     top,
-                    background: `${theme.toolbar.panel}ee`,
-                    borderColor: `${theme.toolbar.border}aa`,
+                    background: `${theme.toolbar.panel}f2`,
+                    borderColor: `${theme.toolbar.border}88`,
                     color: theme.node.text,
-                    boxShadow: "0 16px 40px rgba(0,0,0,.32), inset 0 1px 0 rgba(255,255,255,.06)",
+                    boxShadow: "0 8px 24px rgba(0,0,0,.24)",
                 }}
                 onMouseDown={(event) => event.stopPropagation()}
                 onPointerDown={(event) => event.stopPropagation()}
@@ -297,31 +300,31 @@ export function CanvasNodeInfoModal({ node, open, onClose }: { node: CanvasNodeD
 function ToolbarAction({ title, label, icon, onClick, showLabel, active = false, danger = false, theme }: ToolbarTool & { showLabel: boolean; theme: (typeof canvasThemes)[keyof typeof canvasThemes] }) {
     const hasText = showLabel && Boolean(label);
     return (
-        <Tooltip title={title} placement="top" mouseEnterDelay={0.25} color={theme.toolbar.panel} styles={{ body: { color: theme.node.text, boxShadow: "0 8px 24px rgba(0,0,0,.28)", fontSize: 12 } }}>
+        <Tooltip title={hasText ? title : label ? `${title}` : title} placement="top" mouseEnterDelay={0.2} color={theme.toolbar.panel} styles={{ body: { color: theme.node.text, boxShadow: "0 6px 18px rgba(0,0,0,.24)", fontSize: 11 } }}>
             <button
                 type="button"
-                className={`group relative flex h-9 items-center whitespace-nowrap px-1 ${danger ? "text-red-400" : ""}`}
+                className={`group relative flex shrink-0 items-center ${danger ? "text-red-400" : ""}`}
                 style={{ color: danger ? undefined : theme.node.text }}
                 onClick={onClick}
                 aria-label={title}
             >
                 <span
-                    className={`flex h-8 items-center ${hasText ? "gap-1.5 px-2.5" : "justify-center px-2"} rounded-xl transition ${active ? "opacity-100" : "opacity-80 group-hover:opacity-100"}`}
+                    className={`flex h-7 items-center ${hasText ? "gap-1 px-2" : "size-7 justify-center"} rounded-full transition ${active ? "opacity-100" : "opacity-72 group-hover:opacity-100"}`}
                     style={{
                         background: active ? theme.toolbar.activeBg : undefined,
                         color: active ? theme.toolbar.activeText : undefined,
                     }}
                     onMouseEnter={(event) => {
                         if (active) return;
-                        (event.currentTarget as HTMLElement).style.background = `${theme.toolbar.activeBg}55`;
+                        (event.currentTarget as HTMLElement).style.background = `${theme.toolbar.activeBg}44`;
                     }}
                     onMouseLeave={(event) => {
                         if (active) return;
                         (event.currentTarget as HTMLElement).style.background = "";
                     }}
                 >
-                    {icon}
-                    {hasText ? <span className="text-[12px]">{label}</span> : null}
+                    <span className="grid size-3.5 place-items-center [&>svg]:size-3.5">{icon}</span>
+                    {hasText ? <span className="text-[11px]">{label}</span> : null}
                 </span>
             </button>
         </Tooltip>

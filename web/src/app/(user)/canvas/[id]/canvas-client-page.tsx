@@ -43,6 +43,8 @@ import { CanvasNodeSplitDialog, type CanvasImageSplitParams } from "../component
 import { CanvasNodeUpscaleDialog, type CanvasImageUpscaleParams } from "../components/canvas-node-upscale-dialog";
 import { buildNodeGenerationContext, buildNodeGenerationInputs, buildNodeResponseMessages, hydrateNodeGenerationContext, type NodeGenerationInput } from "../components/canvas-node-generation";
 import { resolveActiveVideoReferences, toVideoReferenceAssets } from "../utils/canvas-video-references";
+import { captureLastFrameFromPlaybackSource } from "../utils/canvas-video-frame";
+import type { CanvasVideoPlayerHandle } from "../components/canvas-video-player";
 import { CanvasNodeHoverToolbar, CanvasNodeInfoModal } from "../components/canvas-node-hover-toolbar";
 import { InfiniteCanvas } from "../components/infinite-canvas";
 import { Minimap } from "../components/canvas-mini-map";
@@ -273,11 +275,11 @@ function InfiniteCanvasPage() {
         void ensureAllLocalMediaPermissions();
     }, []);
 
-    const videoControlsRef = useRef(new Map<string, () => void>());
+    const videoPlayerRef = useRef(new Map<string, CanvasVideoPlayerHandle>());
 
-    const registerVideoControl = useCallback((nodeId: string, toggle: (() => void) | null) => {
-        if (toggle) videoControlsRef.current.set(nodeId, toggle);
-        else videoControlsRef.current.delete(nodeId);
+    const registerVideoControl = useCallback((nodeId: string, handle: CanvasVideoPlayerHandle | null) => {
+        if (handle) videoPlayerRef.current.set(nodeId, handle);
+        else videoPlayerRef.current.delete(nodeId);
     }, []);
 
     const dragRef = useRef<{
@@ -1353,7 +1355,7 @@ function InfiniteCanvasPage() {
         if (wasClick && clickedNodeId) {
             const clickedNode = nodesRef.current.find((node) => node.id === clickedNodeId);
             if (clickedNode?.type === CanvasNodeType.Video && clickedNode.metadata?.content) {
-                videoControlsRef.current.get(clickedNodeId)?.();
+                videoPlayerRef.current.get(clickedNodeId)?.togglePlayback();
                 return;
             }
             setToolbarNodeId((current) => (current === clickedNodeId ? null : clickedNodeId));
@@ -1924,6 +1926,59 @@ function InfiniteCanvasPage() {
         [effectiveConfig.model, effectiveConfig.textModel, message],
     );
 
+    const captureVideoLastFrame = useCallback(
+        async (node: CanvasNodeData) => {
+            if (node.type !== CanvasNodeType.Video || !node.metadata?.content) {
+                message.warning("视频节点为空，无法截帧");
+                return;
+            }
+
+            const hide = message.loading("正在截取最后一帧...", 0);
+            try {
+                const player = videoPlayerRef.current.get(node.id);
+                const dataUrl = player
+                    ? await player.captureLastFrame()
+                    : await captureLastFrameFromPlaybackSource({
+                          config,
+                          content: node.metadata.content,
+                          storageKey: node.metadata.storageKey,
+                          mimeType: node.metadata.mimeType,
+                          taskId: node.metadata.videoTaskId,
+                          provider: node.metadata.videoProvider,
+                          model: node.metadata.model,
+                      });
+                const image = await uploadImage(dataUrl);
+                const gap = 96;
+                const size = fitNodeSize(image.width, image.height);
+                const childId = nanoid();
+                const child: CanvasNodeData = {
+                    id: childId,
+                    type: CanvasNodeType.Image,
+                    title: `${node.title || "视频"} 末帧`,
+                    position: { x: node.position.x + node.width + gap, y: node.position.y + node.height / 2 - size.height / 2 },
+                    width: size.width,
+                    height: size.height,
+                    metadata: {
+                        ...imageMetadata(image),
+                        prompt: node.metadata?.prompt,
+                    },
+                };
+                setNodes((prev) => [...prev, child]);
+                setConnections((prev) => [...prev, { id: nanoid(), fromNodeId: node.id, toNodeId: childId }]);
+                setSelectedNodeIds(new Set([childId]));
+                setSelectedConnectionId(null);
+                setDialogNodeId(childId);
+                setContextMenu(null);
+                message.success("已截取最后一帧");
+            } catch (error) {
+                message.error(error instanceof Error ? error.message : "截帧失败");
+            } finally {
+                hide();
+            }
+        },
+        [config, message],
+    );
+
     const cropImageNode = useCallback(async (node: CanvasNodeData, crop: CanvasImageCropRect) => {
         if (!node.metadata?.content) return;
         const cropped = await cropDataUrl(node.metadata.content, crop);
@@ -2437,8 +2492,8 @@ function InfiniteCanvasPage() {
                         stopProgressTicker = null;
                         if (!items.length) throw new Error("接口没有返回图片");
 
-                        const usePromptTextHub = items.length > 1 && !isConfigNode && (isEmptyImageNode || sourceNode?.type === CanvasNodeType.Text || !isImageNode);
-                        const usePromptSiblingHub = items.length > 1 && isImageNode && sourceNode?.metadata?.content;
+                        const usePromptTextHub = items.length > 1 && !isConfigNode && sourceNode?.type === CanvasNodeType.Text;
+                        const usePromptSiblingHub = items.length > 1 && isImageNode && Boolean(sourceNode?.metadata?.content);
 
                         if (usePromptTextHub || usePromptSiblingHub) {
                             const anchorNode = nodesRef.current.find((node) => node.id === nodeId) || sourceNode!;
@@ -2921,8 +2976,8 @@ function InfiniteCanvasPage() {
                     : buildImageGenerationMetadata(useReferenceImages ? "edit" : "generation", generationConfig, items.length, retryImages);
 
                 const isEmptyImageNode = node.type === CanvasNodeType.Image && !node.metadata?.content;
-                const usePromptTextHub = items.length > 1 && (isEmptyImageNode || node.type === CanvasNodeType.Text);
-                const usePromptSiblingHub = items.length > 1 && node.type === CanvasNodeType.Image && node.metadata?.content;
+                const usePromptTextHub = items.length > 1 && node.type === CanvasNodeType.Text;
+                const usePromptSiblingHub = items.length > 1 && node.type === CanvasNodeType.Image && Boolean(node.metadata?.content);
 
                 if (usePromptTextHub || usePromptSiblingHub) {
                     const textSpec = NODE_DEFAULT_SIZE[CanvasNodeType.Text];
@@ -3358,6 +3413,7 @@ function InfiniteCanvasPage() {
                     onAngle={(node) => setAngleNodeId(node.id)}
                     onViewImage={(node) => setPreviewNodeId(node.id)}
                     onReversePrompt={createImageReversePromptNodes}
+                    onCaptureVideoFrame={(node) => void captureVideoLastFrame(node)}
                     onRetry={(node) => void handleRetryNode(node)}
                     onToggleFreeResize={(node) => toggleNodeFreeResize(node.id)}
                     onDelete={(node) => deleteNodes(new Set([node.id]))}

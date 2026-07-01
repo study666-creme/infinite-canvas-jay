@@ -7,6 +7,8 @@ import { useConfigStore } from "@/stores/use-config-store";
 import { resolveVideoPlayback, type VideoPlaybackResult } from "@/services/api/video";
 import type { UploadedFile } from "@/services/file-storage";
 
+import { captureLastFrameFromVideoElement } from "../utils/canvas-video-frame";
+
 import { CanvasNodeLoadingState } from "./canvas-node-loading-state";
 
 type CanvasVideoPlayerProps = {
@@ -17,14 +19,16 @@ type CanvasVideoPlayerProps = {
     provider?: "openai" | "seedance";
     model?: string;
     onPersisted?: (file: UploadedFile) => void;
+    onHandleReady?: (handle: CanvasVideoPlayerHandle | null) => void;
 };
 
 export type CanvasVideoPlayerHandle = {
     togglePlayback: () => void;
+    captureLastFrame: () => Promise<string>;
 };
 
 export const CanvasVideoPlayer = forwardRef<CanvasVideoPlayerHandle, CanvasVideoPlayerProps>(function CanvasVideoPlayer(
-    { content = "", storageKey, mimeType = "video/mp4", taskId, provider, model, onPersisted },
+    { content = "", storageKey, mimeType = "video/mp4", taskId, provider, model, onPersisted, onHandleReady },
     ref,
 ) {
     const config = useConfigStore((state) => state.config);
@@ -55,7 +59,45 @@ export const CanvasVideoPlayer = forwardRef<CanvasVideoPlayerHandle, CanvasVideo
         else video.pause();
     }, [playUrl]);
 
-    useImperativeHandle(ref, () => ({ togglePlayback }), [togglePlayback]);
+    const captureLastFrame = useCallback(async () => {
+        const video = videoRef.current;
+        if (!video || !playUrl) {
+            throw new Error("视频未就绪");
+        }
+        const previousTime = video.currentTime;
+        const wasPaused = video.paused;
+        try {
+            return await captureLastFrameFromVideoElement(video);
+        } finally {
+            try {
+                video.currentTime = previousTime;
+                if (!wasPaused) {
+                    void video.play().catch(() => undefined);
+                }
+            } catch {
+                // Ignore restore failures after capture.
+            }
+        }
+    }, [playUrl]);
+
+    const playerHandle = useCallback(
+        (): CanvasVideoPlayerHandle => ({
+            togglePlayback,
+            captureLastFrame,
+        }),
+        [captureLastFrame, togglePlayback],
+    );
+
+    useImperativeHandle(ref, playerHandle, [playerHandle]);
+
+    useEffect(() => {
+        if (phase !== "ready" || !playUrl) {
+            onHandleReady?.(null);
+            return;
+        }
+        onHandleReady?.(playerHandle());
+        return () => onHandleReady?.(null);
+    }, [onHandleReady, phase, playUrl, playerHandle]);
 
     const hydratePlayableUrl = useCallback(
         async (options?: { ignoreStorageKey?: boolean; resetRetry?: boolean }) => {

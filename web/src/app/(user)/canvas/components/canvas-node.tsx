@@ -7,7 +7,7 @@ import { ChevronRight, Image as ImageIcon, Music2, Plus, RefreshCw, Star, Video 
 import { canvasThemes } from "@/lib/canvas-theme";
 import { formatBytes } from "@/lib/image-utils";
 import { useThemeStore } from "@/stores/use-theme-store";
-import { CanvasResourceMentionTextarea, placeCaretAtEnd } from "./canvas-resource-mention-textarea";
+import { CanvasResourceMentionTextarea, placeCaretAtEnd, type CanvasResourceMentionTextareaHandle } from "./canvas-resource-mention-textarea";
 import { CanvasNodeLoadingState } from "./canvas-node-loading-state";
 import { CanvasVideoPlayer, type CanvasVideoPlayerHandle } from "./canvas-video-player";
 import { CanvasNodeType, type CanvasNodeData, type ConnectionHandle, type Position } from "../types";
@@ -53,7 +53,7 @@ type CanvasNodeProps = {
     onViewImage?: (node: CanvasNodeData) => void;
     onContextMenu: (event: React.MouseEvent, nodeId: string) => void;
     onVideoPersisted?: (nodeId: string, file: { url: string; storageKey: string; bytes: number; mimeType: string; width?: number; height?: number; durationMs?: number }) => void;
-    onRegisterVideoControl?: (nodeId: string, toggle: (() => void) | null) => void;
+    onRegisterVideoControl?: (nodeId: string, handle: CanvasVideoPlayerHandle | null) => void;
 };
 
 type NodeContentRendererProps = {
@@ -61,7 +61,7 @@ type NodeContentRendererProps = {
     theme: (typeof canvasThemes)[keyof typeof canvasThemes];
     isSelected: boolean;
     isEditingContent: boolean;
-    textareaRef: React.RefObject<HTMLDivElement | null>;
+    textareaRef: React.RefObject<CanvasResourceMentionTextareaHandle | null>;
     isBatchRoot: boolean;
     batchCount: number;
     batchExpanded: boolean;
@@ -76,7 +76,7 @@ type NodeContentRendererProps = {
     onToggleBatch?: () => void;
     onSetBatchPrimary?: () => void;
     onVideoPersisted?: (file: { url: string; storageKey: string; bytes: number; mimeType: string; width?: number; height?: number; durationMs?: number }) => void;
-    onRegisterVideoControl?: (toggle: (() => void) | null) => void;
+    onRegisterVideoControl?: (handle: CanvasVideoPlayerHandle | null) => void;
 };
 
 export const CanvasNode = React.memo(function CanvasNode({
@@ -130,7 +130,7 @@ export const CanvasNode = React.memo(function CanvasNode({
     const isBatchChild = data.type === CanvasNodeType.Image && Boolean(data.metadata?.batchRootId);
     const leftHandleActive = activeConnectHandle?.nodeId === data.id && activeConnectHandle.handleType === "target";
     const rightHandleActive = activeConnectHandle?.nodeId === data.id && activeConnectHandle.handleType === "source";
-    const textareaRef = useRef<HTMLDivElement | null>(null);
+    const textareaRef = useRef<CanvasResourceMentionTextareaHandle | null>(null);
     const resizeRef = useRef({
         isResizing: false,
         handle: "bottom-right" as ResizeHandle,
@@ -145,7 +145,7 @@ export const CanvasNode = React.memo(function CanvasNode({
     });
 
     useEffect(() => {
-        const textarea = textareaRef.current;
+        const textarea = textareaRef.current?.getEditorElement();
         if (!textarea) return;
 
         const handleWheel = (event: WheelEvent) => event.stopPropagation();
@@ -156,7 +156,7 @@ export const CanvasNode = React.memo(function CanvasNode({
     useEffect(() => {
         if (!isEditingContent) return;
         const frame = requestAnimationFrame(() => {
-            const editor = textareaRef.current;
+            const editor = textareaRef.current?.getEditorElement();
             if (!editor) return;
             editor.focus();
             placeCaretAtEnd(editor);
@@ -175,7 +175,8 @@ export const CanvasNode = React.memo(function CanvasNode({
         const handleOutsidePointerDown = (event: PointerEvent) => {
             const target = event.target;
             if (!(target instanceof Node)) return;
-            if (isEditingContent && textareaRef.current?.contains(target)) return;
+            const editor = textareaRef.current?.getEditorElement();
+            if (isEditingContent && editor?.contains(target)) return;
 
             setIsEditingContent(false);
         };
@@ -380,7 +381,7 @@ export const CanvasNode = React.memo(function CanvasNode({
                         onToggleBatch={() => onToggleBatch?.(data.id)}
                         onSetBatchPrimary={() => onSetBatchPrimary?.(data)}
                         onVideoPersisted={onVideoPersisted ? (file) => onVideoPersisted(data.id, file) : undefined}
-                        onRegisterVideoControl={onRegisterVideoControl ? (toggle) => onRegisterVideoControl(data.id, toggle) : undefined}
+                        onRegisterVideoControl={onRegisterVideoControl ? (handle) => onRegisterVideoControl(data.id, handle) : undefined}
                     />
                 </div>
 
@@ -589,20 +590,10 @@ function EmptyImageContent({ node, theme, isBatchRoot, batchCount, batchExpanded
 }
 
 function VideoNodeContent({ node, theme, onVideoPersisted, onRegisterVideoControl }: NodeContentRendererProps) {
-    const playerRef = useRef<CanvasVideoPlayerHandle>(null);
-
-    useEffect(() => {
-        if (!onRegisterVideoControl || !node.metadata?.content) return;
-        onRegisterVideoControl(() => playerRef.current?.togglePlayback());
-        return () => onRegisterVideoControl(null);
-    }, [node.id, node.metadata?.content, onRegisterVideoControl]);
-
-    const isLoading = node.metadata?.status === "loading";
-
     if (!node.metadata?.content) {
         return (
             <div className="relative h-full w-full overflow-hidden">
-                {isLoading ? (
+                {node.metadata?.status === "loading" ? (
                     <CanvasNodeLoadingState variant="video" progress={node.metadata?.generationProgress} label={node.metadata?.generationStage} />
                 ) : (
                     <div className="flex h-full w-full flex-col items-center justify-center gap-2.5" style={{ color: theme.node.placeholder }}>
@@ -618,7 +609,6 @@ function VideoNodeContent({ node, theme, onVideoPersisted, onRegisterVideoContro
     return (
         <div className="relative h-full w-full overflow-hidden">
             <CanvasVideoPlayer
-                ref={playerRef}
                 content={node.metadata.content}
                 storageKey={node.metadata.storageKey}
                 mimeType={node.metadata.mimeType}
@@ -626,6 +616,7 @@ function VideoNodeContent({ node, theme, onVideoPersisted, onRegisterVideoContro
                 provider={node.metadata.videoProvider}
                 model={node.metadata.model}
                 onPersisted={onVideoPersisted}
+                onHandleReady={onRegisterVideoControl}
             />
         </div>
     );
@@ -783,7 +774,6 @@ function ResizeHandle({ handle, onPointerDown }: { handle: ResizeHandle; onPoint
         bottom: "-bottom-[10px] left-1/2 h-5 w-14 -translate-x-1/2 cursor-ns-resize",
         left: "-left-[10px] top-1/2 h-14 w-5 -translate-y-1/2 cursor-ew-resize",
     }[handle];
-    const isCorner = handle.includes("-");
 
     return (
         <div
@@ -793,9 +783,7 @@ function ResizeHandle({ handle, onPointerDown }: { handle: ResizeHandle; onPoint
                 event.stopPropagation();
                 onPointerDown(event, handle);
             }}
-        >
-            {isCorner ? <span className="pointer-events-none absolute inset-0 m-auto size-3 rounded-full border-2 border-white bg-[#2f80ff] shadow-[0_0_0_1px_rgba(0,0,0,.35)]" /> : null}
-        </div>
+        />
     );
 }
 

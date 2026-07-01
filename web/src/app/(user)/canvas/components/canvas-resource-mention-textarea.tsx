@@ -26,6 +26,7 @@ type Props = Omit<HTMLAttributes<HTMLDivElement>, "onChange" | "value"> & {
 export type CanvasResourceMentionTextareaHandle = {
     insertReferenceLabel: (label: string) => void;
     focusEditor: () => void;
+    getEditorElement: () => HTMLDivElement | null;
 };
 
 export const CanvasResourceMentionTextarea = forwardRef<CanvasResourceMentionTextareaHandle, Props>(function CanvasResourceMentionTextarea({ value, references, onChange, onSubmit, onKeyDown, className, containerClassName, style, highlightLabels = true, placeholder, ...props }, forwardedRef) {
@@ -118,6 +119,7 @@ export const CanvasResourceMentionTextarea = forwardRef<CanvasResourceMentionTex
         () => ({
             insertReferenceLabel: insertReferenceLabelAtCaret,
             focusEditor: () => editorRef.current?.focus(),
+            getEditorElement: () => editorRef.current,
         }),
         [activeLabels, referenceByLabel, theme, onChange],
     );

@@ -11,6 +11,7 @@ import { Button } from "antd";
 
 
 import { ModelPicker } from "@/components/model-picker";
+import { PromptHubAwareImageModelPicker } from "@/components/prompt-hub-model-picker";
 
 import { defaultConfig, useConfigStore, useEffectiveConfig, type AiConfig } from "@/stores/use-config-store";
 
@@ -198,7 +199,7 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
 
                         <>
 
-                            <ModelPicker config={config} value={config.model} onChange={(model) => onConfigChange(node.id, { model })} capability="image" onMissingConfig={() => openConfigDialog(true)} />
+                            <PromptHubAwareImageModelPicker config={config} value={config.model} onChange={(model) => onConfigChange(node.id, { model })} onMissingConfig={() => openConfigDialog(true)} />
 
                             <CanvasImageSettingsPopover
 

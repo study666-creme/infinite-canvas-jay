@@ -19,6 +19,8 @@ import {
     resolveImageNodePrompt,
     savePromptHubQuickCard,
 } from "@/services/prompt-hub";
+import { requestPromptHubCanvasImages } from "@/services/prompt-hub-generation";
+import { parsePromptHubModelId } from "@/services/prompt-hub-models";
 import { usePromptHubStore } from "@/stores/use-prompt-hub-store";
 import { resolveMediaUrl, uploadMediaFile, type UploadedFile } from "@/services/file-storage";
 import { nanoid } from "nanoid";
@@ -269,6 +271,7 @@ function InfiniteCanvasPage() {
     const didInitialCenterRef = useRef(false);
     const rafRef = useRef<number | null>(null);
     const toolbarHideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const toolbarImageSettingsOpenRef = useRef(false);
     const nodeDraggingRef = useRef(false);
 
     useEffect(() => {
@@ -333,6 +336,7 @@ function InfiniteCanvasPage() {
     const [assetPickerOpen, setAssetPickerOpen] = useState(false);
     const [projectLoaded, setProjectLoaded] = useState(false);
     const [toolbarNodeId, setToolbarNodeId] = useState<string | null>(null);
+    const [toolbarImageSettingsOpen, setToolbarImageSettingsOpen] = useState(false);
     const [nodeImageSettingsOpen, setNodeImageSettingsOpen] = useState(false);
     const [dialogNodeId, setDialogNodeId] = useState<string | null>(null);
     const [editingNodeId, setEditingNodeId] = useState<string | null>(null);
@@ -340,6 +344,7 @@ function InfiniteCanvasPage() {
     const [infoNodeId, setInfoNodeId] = useState<string | null>(null);
     const [cropNodeId, setCropNodeId] = useState<string | null>(null);
     const [videoFrameNodeId, setVideoFrameNodeId] = useState<string | null>(null);
+    const [videoFrameCrop, setVideoFrameCrop] = useState<{ node: CanvasNodeData; dataUrl: string } | null>(null);
     const [maskEditNodeId, setMaskEditNodeId] = useState<string | null>(null);
     const [splitNodeId, setSplitNodeId] = useState<string | null>(null);
     const [upscaleNodeId, setUpscaleNodeId] = useState<string | null>(null);
@@ -538,6 +543,10 @@ function InfiniteCanvasPage() {
     }, [activeChatId, backgroundMode, chatSessions, connections, nodes, projectId, projectLoaded, showImageInfo, updateProject]);
 
     useEffect(() => {
+        toolbarImageSettingsOpenRef.current = toolbarImageSettingsOpen;
+    }, [toolbarImageSettingsOpen]);
+
+    useEffect(() => {
         if (!dialogNodeId) setNodeImageSettingsOpen(false);
     }, [dialogNodeId]);
 
@@ -655,7 +664,7 @@ function InfiniteCanvasPage() {
 
     const keepNodeToolbar = useCallback(
         (nodeId: string) => {
-            if (nodeDraggingRef.current || nodeImageSettingsOpen) return;
+            if (nodeDraggingRef.current || nodeImageSettingsOpen || toolbarImageSettingsOpenRef.current) return;
             if (toolbarHideTimerRef.current) {
                 clearTimeout(toolbarHideTimerRef.current);
                 toolbarHideTimerRef.current = null;
@@ -666,8 +675,10 @@ function InfiniteCanvasPage() {
     );
 
     const hideNodeToolbar = useCallback(() => {
+        if (toolbarImageSettingsOpenRef.current) return;
         if (toolbarHideTimerRef.current) clearTimeout(toolbarHideTimerRef.current);
         toolbarHideTimerRef.current = setTimeout(() => {
+            if (toolbarImageSettingsOpenRef.current) return;
             setToolbarNodeId(null);
             toolbarHideTimerRef.current = null;
         }, 120);
@@ -2325,7 +2336,10 @@ function InfiniteCanvasPage() {
         async (nodeId: string, mode: CanvasNodeGenerationMode, prompt: string) => {
             const sourceNode = nodesRef.current.find((node) => node.id === nodeId);
             const generationConfig = buildGenerationConfig(effectiveConfig, sourceNode, mode);
-            if (!isAiConfigReady(generationConfig, generationConfig.model)) {
+            const promptHubSession = mode === "image" ? await usePromptHubStore.getState().getSession() : null;
+            const phModelId = mode === "image" ? parsePromptHubModelId(generationConfig.model) : null;
+            const usePromptHubGen = mode === "image" && !!promptHubSession && !!phModelId;
+            if (!usePromptHubGen && !isAiConfigReady(generationConfig, generationConfig.model)) {
                 openConfigDialog(true);
                 return;
             }
@@ -2472,9 +2486,22 @@ function InfiniteCanvasPage() {
                                 ),
                             );
                         }, { start: 10, max: 82, stage: count > 1 ? "批量生成" : "生成中" });
-                        const items = referenceImages.length
-                            ? await requestEdit({ ...generationConfig, count: String(count) }, effectivePrompt, referenceImages, undefined, { signal: controller.signal })
-                            : await requestGeneration({ ...generationConfig, count: String(count) }, effectivePrompt, { signal: controller.signal });
+                        const phStore = usePromptHubStore.getState();
+                        const items = usePromptHubGen && promptHubSession && phModelId
+                            ? await requestPromptHubCanvasImages({
+                                  session: promptHubSession,
+                                  apiBase: phStore.apiBase,
+                                  prompt: effectivePrompt,
+                                  count,
+                                  model: phModelId,
+                                  resolution: mapPromptHubResolution(generationConfig),
+                                  referenceImages: referenceImages.length ? referenceImages : undefined,
+                                  signal: controller.signal,
+                              })
+                            : referenceImages.length
+                              ? await requestEdit({ ...generationConfig, count: String(count) }, effectivePrompt, referenceImages, undefined, { signal: controller.signal })
+                              : await requestGeneration({ ...generationConfig, count: String(count) }, effectivePrompt, { signal: controller.signal });
+                        if (usePromptHubGen) void phStore.refreshGenerationAccount();
                         stopProgressTicker?.();
                         stopProgressTicker = null;
                         if (!items.length) throw new Error("接口没有返回图片");
@@ -3395,6 +3422,7 @@ function InfiniteCanvasPage() {
                         if (toolbarNode) keepNodeToolbar(toolbarNode.id);
                     }}
                     onPointerLeave={() => hideNodeToolbar()}
+                    onImageToolSettingsOpenChange={setToolbarImageSettingsOpen}
                     onInfo={(node) => setInfoNodeId(node.id)}
                     onEditText={openTextEditor}
                     onDecreaseFont={(node) => handleFontSizeChange(node.id, Math.max(10, (node.metadata?.fontSize || 14) - 2))}
@@ -3571,7 +3599,22 @@ function InfiniteCanvasPage() {
                         open={Boolean(videoFrameNode)}
                         initialPlayUrl={videoPlayerRef.current.get(videoFrameNode.id)?.getPlayUrl() || ""}
                         onClose={() => setVideoFrameNodeId(null)}
-                        onConfirm={(dataUrl) => void createImageFromVideoFrame(videoFrameNode, dataUrl)}
+                        onConfirm={(dataUrl) => {
+                            setVideoFrameNodeId(null);
+                            setVideoFrameCrop({ node: videoFrameNode, dataUrl });
+                        }}
+                    />
+                ) : null}
+                {videoFrameCrop ? (
+                    <CanvasNodeCropDialog
+                        dataUrl={videoFrameCrop.dataUrl}
+                        open
+                        onClose={() => setVideoFrameCrop(null)}
+                        onConfirm={(crop) => {
+                            const payload = videoFrameCrop;
+                            setVideoFrameCrop(null);
+                            void cropDataUrl(payload.dataUrl, crop).then((cropped) => createImageFromVideoFrame(payload.node, cropped));
+                        }}
                     />
                 ) : null}
 
@@ -3591,7 +3634,7 @@ function InfiniteCanvasPage() {
                     title={previewNode?.type === CanvasNodeType.Video ? "视频预览" : "图片详情"}
                     open={Boolean(previewNode?.metadata?.content)}
                     centered
-                    destroyOnClose
+                    destroyOnHidden
                     onCancel={() => setPreviewNodeId(null)}
                     footer={null}
                     width="auto"
@@ -3995,6 +4038,16 @@ function syncVideoReferenceAssetsForNodes(nodes: CanvasNodeData[], connections: 
         const assets = toVideoReferenceAssets(resolveActiveVideoReferences(node.metadata?.prompt || "", buildNodeMentionReferences(node, nodes, connections)));
         return { ...node, metadata: { ...node.metadata, videoReferenceAssets: assets } };
     });
+}
+
+function mapPromptHubResolution(config: AiConfig): "1k" | "2k" | "4k" {
+    const q = String(config.quality || "").toLowerCase();
+    if (q.includes("4k")) return "4k";
+    if (q.includes("2k")) return "2k";
+    const s = String(config.size || "").toLowerCase();
+    if (s.includes("4k") || s.includes("4096")) return "4k";
+    if (s.includes("2k") || s.includes("2048")) return "2k";
+    return "1k";
 }
 
 function normalizeConnection(firstNodeId: string, secondNodeId: string, nodes: CanvasNodeData[], firstHandleType: "source" | "target") {

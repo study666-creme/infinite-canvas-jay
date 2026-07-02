@@ -5,6 +5,7 @@ import { Empty, Input, Modal, Pagination, Tabs, Tag } from "antd";
 import { Search } from "lucide-react";
 
 import { cn } from "@/lib/utils";
+import { AssetFolderBar, matchesAssetFolder, type AssetFolderFilter } from "@/components/asset-folder-bar";
 import { useAssetStore, type Asset } from "@/stores/use-asset-store";
 import { PromptHubCardsTab } from "./prompt-hub-cards-tab";
 
@@ -71,6 +72,7 @@ function MyAssetsTab({ onInsert }: { onInsert: (payload: InsertAssetPayload) => 
     const assets = useAssetStore((state) => state.assets);
     const [keyword, setKeyword] = useState("");
     const [kindFilter, setKindFilter] = useState("all");
+    const [folderFilter, setFolderFilter] = useState<AssetFolderFilter>("all");
     const [page, setPage] = useState(1);
 
     const filtered = useMemo(() => {
@@ -78,8 +80,9 @@ function MyAssetsTab({ onInsert }: { onInsert: (payload: InsertAssetPayload) => 
         return assets
             .filter((a) => a.kind === "text" || a.kind === "image" || a.kind === "video")
             .filter((a) => kindFilter === "all" || a.kind === kindFilter)
+            .filter((a) => matchesAssetFolder(a.folderId, folderFilter))
             .filter((a) => !query || [a.title, ...(a.tags || [])].join(" ").toLowerCase().includes(query));
-    }, [assets, keyword, kindFilter]);
+    }, [assets, keyword, kindFilter, folderFilter]);
 
     const visible = useMemo(() => filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE), [filtered, page]);
 
@@ -98,6 +101,7 @@ function MyAssetsTab({ onInsert }: { onInsert: (payload: InsertAssetPayload) => 
 
     return (
         <div className="space-y-4">
+            <AssetFolderBar value={folderFilter} onChange={(value) => { setFolderFilter(value); setPage(1); }} />
             <div className="flex flex-wrap items-center gap-3">
                 <Input
                     className="w-56"

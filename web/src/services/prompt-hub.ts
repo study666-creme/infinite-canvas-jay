@@ -59,6 +59,53 @@ export type PromptHubCardFilters = {
     tag?: string;
 };
 
+export type PromptHubImageModel = {
+    id: string;
+    label: string;
+    description?: string;
+    resolutions?: string[];
+    selectable?: boolean;
+    cost?: { credits?: number };
+};
+
+export type PromptHubGenerationJob = {
+    jobId: string;
+    status: string;
+    imageUrl?: string | null;
+    extraImageUrls?: string[];
+    mjGalleryUrls?: string[];
+    creditsRemaining?: number;
+    errorMessage?: string;
+    message?: string;
+};
+
+async function phAuthFetch(
+    path: string,
+    session: PromptHubSession,
+    opts: { apiBase?: string; method?: string; body?: unknown; signal?: AbortSignal } = {},
+) {
+    const apiBase = normalizeApiBase(opts.apiBase || PROMPT_HUB_DEFAULTS.apiBase);
+    const res = await fetch(`${apiBase}${path}`, {
+        method: opts.method || "GET",
+        headers: {
+            Authorization: `Bearer ${session.access_token}`,
+            ...(opts.body ? { "Content-Type": "application/json" } : {}),
+        },
+        body: opts.body ? JSON.stringify(opts.body) : undefined,
+        signal: opts.signal,
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || data.ok === false) {
+        const code = data.code || data.error || "";
+        const msg = data.message || code || `HTTP ${res.status}`;
+        if (res.status === 402 || code === "INSUFFICIENT_CREDITS") {
+            throw new Error(`积分不足：${msg}`);
+        }
+        throw new Error(msg);
+    }
+    return data;
+}
+
 function normalizeApiBase(apiBase: string) {
     return String(apiBase || PROMPT_HUB_DEFAULTS.apiBase).replace(/\/$/, "");
 }
@@ -131,15 +178,95 @@ export async function getValidPromptHubSession(
 }
 
 export async function checkPromptHubStatus(session: PromptHubSession, opts: { apiBase?: string } = {}) {
-    const apiBase = normalizeApiBase(opts.apiBase || PROMPT_HUB_DEFAULTS.apiBase);
-    const res = await fetch(`${apiBase}/api/v1/extension/status`, {
-        headers: { Authorization: `Bearer ${session.access_token}` },
-    });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) {
-        throw new Error(data.message || data.code || `HTTP ${res.status}`);
-    }
+    const data = await phAuthFetch("/api/v1/extension/status", session, opts);
     return data;
+}
+
+export async function fetchPromptHubImageModels(session: PromptHubSession, opts: { apiBase?: string } = {}) {
+    const data = await phAuthFetch("/api/v1/generate/models", session, opts);
+    const models = Array.isArray(data.data?.models) ? (data.data.models as PromptHubImageModel[]) : [];
+    return models.filter((m) => m.selectable !== false);
+}
+
+export async function fetchPromptHubGenerationCost(
+    session: PromptHubSession,
+    params: { model: string; resolution?: string; apiBase?: string },
+) {
+    const apiBase = normalizeApiBase(params.apiBase || PROMPT_HUB_DEFAULTS.apiBase);
+    const q = new URLSearchParams({
+        model: params.model,
+        resolution: params.resolution || "1k",
+    });
+    const data = await phAuthFetch(`/api/v1/generate/cost?${q.toString()}`, session, { apiBase });
+    return data.data as { credits?: number; cost?: number };
+}
+
+export async function submitPromptHubGeneration(
+    session: PromptHubSession,
+    payload: {
+        prompt: string;
+        model: string;
+        resolution?: "1k" | "2k" | "4k";
+        quality?: "standard" | "high" | "ultra";
+        refImageUrls?: string[];
+        apiBase?: string;
+        signal?: AbortSignal;
+    },
+) {
+    const body: Record<string, unknown> = {
+        prompt: payload.prompt,
+        model: payload.model,
+        resolution: payload.resolution || "1k",
+        quality: payload.quality || "standard",
+    };
+    if (payload.refImageUrls?.length) {
+        body.refImageUrls = payload.refImageUrls.slice(0, 8);
+    }
+    const data = await phAuthFetch("/api/v1/generate", session, {
+        apiBase: payload.apiBase,
+        method: "POST",
+        body,
+        signal: payload.signal,
+    });
+    return data.data as { jobId: string; creditsRemaining?: number; status?: string };
+}
+
+export async function pollPromptHubGenerationJob(
+    session: PromptHubSession,
+    jobId: string,
+    opts: { apiBase?: string; signal?: AbortSignal } = {},
+): Promise<PromptHubGenerationJob> {
+    const apiBase = normalizeApiBase(opts.apiBase || PROMPT_HUB_DEFAULTS.apiBase);
+    for (let i = 0; i < 90; i += 1) {
+        if (opts.signal?.aborted) throw new Error("已取消生成");
+        const delay = i < 2 ? 1500 : i < 8 ? 2500 : i < 20 ? 4000 : 6000;
+        await new Promise((r) => setTimeout(r, delay));
+        const settle = i >= 6 ? "?settle=1" : "";
+        const data = await phAuthFetch(`/api/v1/generate/jobs/${encodeURIComponent(jobId)}${settle}`, session, {
+            apiBase,
+            signal: opts.signal,
+        });
+        const job = data.data as PromptHubGenerationJob;
+        if (job.status === "failed") {
+            throw new Error(job.errorMessage || job.message || "卡藏生图失败");
+        }
+        const urls = collectPromptHubJobImageUrls(job);
+        if (job.status === "completed" && urls.length) {
+            return { ...job, imageUrl: urls[0], extraImageUrls: urls.slice(1) };
+        }
+    }
+    throw new Error("卡藏生图超时，请到 Prompt Hub 生图页查看是否已完成");
+}
+
+function collectPromptHubJobImageUrls(job: PromptHubGenerationJob) {
+    const urls: string[] = [];
+    const push = (u?: string | null) => {
+        if (u && typeof u === "string" && !urls.includes(u)) urls.push(u);
+    };
+    push(job.imageUrl);
+    (job.mjGalleryUrls || []).forEach(push);
+    (job.extraImageUrls || []).forEach(push);
+    return urls;
 }
 
 export async function listPromptHubCards(

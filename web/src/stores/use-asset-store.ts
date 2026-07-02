@@ -14,12 +14,20 @@ export type ImageAsset = AssetBase<"image"> & { data: { dataUrl: string; storage
 export type VideoAsset = AssetBase<"video"> & { data: { url: string; storageKey?: string; width: number; height: number; bytes: number; mimeType: string } };
 export type Asset = TextAsset | ImageAsset | VideoAsset;
 
+export type AssetFolder = {
+    id: string;
+    name: string;
+    createdAt: string;
+    updatedAt: string;
+};
+
 type AssetBase<T extends AssetKind> = {
     id: string;
     kind: T;
     title: string;
     coverUrl: string;
     tags: string[];
+    folderId?: string | null;
     source?: string;
     note?: string;
     createdAt: string;
@@ -29,7 +37,11 @@ type AssetBase<T extends AssetKind> = {
 
 type AssetStore = {
     hydrated: boolean;
+    folders: AssetFolder[];
     assets: Asset[];
+    addFolder: (name: string) => string;
+    renameFolder: (id: string, name: string) => void;
+    removeFolder: (id: string) => void;
     addAsset: (asset: Omit<Asset, "id" | "createdAt" | "updatedAt">) => string;
     updateAsset: (id: string, patch: Partial<Omit<Asset, "id" | "createdAt">>) => void;
     removeAsset: (id: string) => void;
@@ -44,6 +56,7 @@ const assetStorage: PersistStorage<AssetStore> = {
         const value = await localForageStorage.getItem(name);
         if (!value) return null;
         const parsed = JSON.parse(value) as StorageValue<AssetStore>;
+        parsed.state.folders = parsed.state.folders || [];
         parsed.state.assets = await Promise.all(
             parsed.state.assets.map(async (asset) => {
                 if (asset.kind === "video" && asset.data.storageKey) return { ...asset, data: { ...asset.data, url: await resolveMediaUrl(asset.data.storageKey, asset.data.url) } };
@@ -69,7 +82,23 @@ export const useAssetStore = create<AssetStore>()(
     persist(
         (set, get) => ({
             hydrated: false,
+            folders: [],
             assets: [],
+            addFolder: (name) => {
+                const now = new Date().toISOString();
+                const folder = { id: nanoid(), name: name.trim(), createdAt: now, updatedAt: now };
+                set((state) => ({ folders: [...state.folders, folder] }));
+                return folder.id;
+            },
+            renameFolder: (id, name) =>
+                set((state) => ({
+                    folders: state.folders.map((folder) => (folder.id === id ? { ...folder, name: name.trim(), updatedAt: new Date().toISOString() } : folder)),
+                })),
+            removeFolder: (id) =>
+                set((state) => ({
+                    folders: state.folders.filter((folder) => folder.id !== id),
+                    assets: state.assets.map((asset) => (asset.folderId === id ? { ...asset, folderId: null, updatedAt: new Date().toISOString() } : asset)),
+                })),
             addAsset: (asset) => {
                 const now = new Date().toISOString();
                 const id = nanoid();
@@ -98,7 +127,13 @@ export const useAssetStore = create<AssetStore>()(
         {
             name: ASSET_STORE_KEY,
             storage: assetStorage,
-            partialize: (state) => ({ assets: state.assets }) as StorageValue<AssetStore>["state"],
+            partialize: (state) => ({ assets: state.assets, folders: state.folders }) as StorageValue<AssetStore>["state"],
+            merge: (persisted, current) => ({
+                ...current,
+                ...(persisted as Partial<AssetStore>),
+                folders: (persisted as Partial<AssetStore>)?.folders || [],
+                assets: (persisted as Partial<AssetStore>)?.assets || [],
+            }),
             onRehydrateStorage: () => () => {
                 useAssetStore.setState({ hydrated: true });
             },

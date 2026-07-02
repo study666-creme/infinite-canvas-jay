@@ -273,7 +273,7 @@ export function CanvasNodeVideoFrameDialog({ node, open, initialPlayUrl = "", on
                         取消
                     </Button>
                     <Button type="primary" icon={<Check className="size-4" />} loading={submitting} disabled={phase !== "ready" || !previewUrl} onClick={() => void handleConfirm()}>
-                        生成图片节点
+                        下一步：裁剪
                     </Button>
                 </div>
             </div>

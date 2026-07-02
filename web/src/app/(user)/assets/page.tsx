@@ -6,6 +6,7 @@ import { App, Button, Card, Drawer, Empty, Form, Image, Input, Modal, Pagination
 import { saveAs } from "file-saver";
 
 import { useCopyText } from "@/hooks/use-copy-text";
+import { AssetFolderBar, matchesAssetFolder, type AssetFolderFilter } from "@/components/asset-folder-bar";
 import { formatBytes, readFileAsDataUrl } from "@/lib/image-utils";
 import { uploadImage } from "@/services/image-storage";
 import { cn } from "@/lib/utils";
@@ -17,6 +18,7 @@ type AssetFormValues = {
     title: string;
     coverUrl: string;
     tags: string[];
+    folderId?: string | null;
     source?: string;
     note?: string;
     content?: string;
@@ -39,11 +41,13 @@ export default function AssetsPage() {
     const imageInputRef = useRef<HTMLInputElement>(null);
     const assetInputRef = useRef<HTMLInputElement>(null);
     const assets = useAssetStore((state) => state.assets);
+    const folders = useAssetStore((state) => state.folders);
     const addAsset = useAssetStore((state) => state.addAsset);
     const updateAsset = useAssetStore((state) => state.updateAsset);
     const removeAsset = useAssetStore((state) => state.removeAsset);
     const [keyword, setKeyword] = useState("");
     const [kindFilter, setKindFilter] = useState<AssetKind | "all">("all");
+    const [folderFilter, setFolderFilter] = useState<AssetFolderFilter>("all");
     const [page, setPage] = useState(1);
     const [pageSize, setPageSize] = useState(10);
     const [editingAsset, setEditingAsset] = useState<Asset | null>(null);
@@ -62,10 +66,11 @@ export default function AssetsPage() {
         const query = keyword.trim().toLowerCase();
         return validAssets.filter((asset) => {
             if (kindFilter !== "all" && asset.kind !== kindFilter) return false;
+            if (!matchesAssetFolder(asset.folderId, folderFilter)) return false;
             if (!query) return true;
             return assetSearchText(asset).includes(query);
         });
-    }, [validAssets, keyword, kindFilter]);
+    }, [validAssets, keyword, kindFilter, folderFilter]);
 
     const visibleAssets = useMemo(() => {
         const start = (page - 1) * pageSize;
@@ -81,7 +86,7 @@ export default function AssetsPage() {
         setEditingAsset(null);
         setImageDraft(null);
         setFormKind("text");
-        form.setFieldsValue({ kind: "text", title: "", coverUrl: "", tags: [], source: "手动添加", note: "", content: "" });
+        form.setFieldsValue({ kind: "text", title: "", coverUrl: "", tags: [], folderId: folderFilter !== "all" && folderFilter !== "uncategorized" ? folderFilter : null, source: "手动添加", note: "", content: "" });
         setIsAssetOpen(true);
     };
 
@@ -94,6 +99,7 @@ export default function AssetsPage() {
             title: asset.title,
             coverUrl: asset.coverUrl,
             tags: asset.tags || [],
+            folderId: asset.folderId || null,
             source: asset.source,
             note: asset.note,
             content: asset.kind === "text" ? asset.data.content : "",
@@ -107,6 +113,7 @@ export default function AssetsPage() {
             title: values.title.trim(),
             coverUrl: values.coverUrl?.trim() || (values.kind === "image" && imageDraft ? imageDraft.dataUrl : ""),
             tags: values.tags || [],
+            folderId: values.folderId || null,
             source: values.source?.trim(),
             note: values.note?.trim(),
             metadata: editingAsset?.metadata || { source: "manual" },
@@ -215,6 +222,10 @@ export default function AssetsPage() {
                         />
                     </div>
 
+                    <div className="mx-auto mt-6 w-full max-w-6xl">
+                        <AssetFolderBar value={folderFilter} onChange={(value) => { setFolderFilter(value); setPage(1); }} />
+                    </div>
+
                     <div className="mx-auto mt-6 grid max-w-6xl gap-3 text-left">
                         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                             <div className="grid gap-2 sm:grid-cols-[56px_minmax(0,1fr)] sm:items-center">
@@ -309,6 +320,9 @@ export default function AssetsPage() {
                                     上传
                                 </Button>
                             </Space.Compact>
+                        </Form.Item>
+                        <Form.Item name="folderId" label="分类文件夹">
+                            <Select allowClear placeholder="未分类" options={folders.map((folder) => ({ label: folder.name, value: folder.id }))} />
                         </Form.Item>
                         <Form.Item name="tags" label="标签">
                             <Select mode="tags" tokenSeparators={[",", "，"]} placeholder="输入标签后回车" />

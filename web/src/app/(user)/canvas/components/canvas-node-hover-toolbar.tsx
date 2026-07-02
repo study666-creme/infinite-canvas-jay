@@ -39,6 +39,7 @@ type CanvasNodeHoverToolbarProps = {
     onDelete: (node: CanvasNodeData) => void;
     onPointerEnter?: () => void;
     onPointerLeave?: () => void;
+    onImageToolSettingsOpenChange?: (open: boolean) => void;
 };
 
 type ToolbarTool = {
@@ -78,6 +79,7 @@ export function CanvasNodeHoverToolbar({
     onDelete,
     onPointerEnter,
     onPointerLeave,
+    onImageToolSettingsOpenChange,
 }: CanvasNodeHoverToolbarProps) {
     const [quickImageToolIds, setQuickImageToolIds] = useState<ImageQuickToolId[]>(defaultImageQuickToolIds);
     const [showImageToolLabels, setShowImageToolLabels] = useState(false);
@@ -148,6 +150,7 @@ export function CanvasNodeHoverToolbar({
         setDraftImageToolIds(quickImageToolIds);
         setDraftShowImageToolLabels(showImageToolLabels);
         setImageToolSettingsOpen(true);
+        onImageToolSettingsOpenChange?.(true);
     }
 
     const baseToolbarTools: ToolbarTool[] = [
@@ -176,6 +179,7 @@ export function CanvasNodeHoverToolbar({
 
     const closeImageToolSettings = () => {
         setImageToolSettingsOpen(false);
+        onImageToolSettingsOpenChange?.(false);
     };
 
     const setDraftImageToolVisible = (id: ImageQuickToolId, visible: boolean) => {
@@ -216,7 +220,7 @@ export function CanvasNodeHoverToolbar({
                 {toolbarTools.map((tool) => (
                     <ToolbarAction key={tool.id} {...tool} showLabel={showImageToolLabels} theme={theme} />
                 ))}
-                {hasImage ? <ToolbarAction id="more" title="配置快捷工具" label="更多" icon={<Ellipsis className="size-4" />} active={imageToolSettingsOpen} onClick={openImageToolSettings} showLabel={showImageToolLabels} theme={theme} /> : null}
+                {hasImage ? <ToolbarAction id="more" title="配置快捷工具" label="更多" icon={<Ellipsis className="size-4" />} active={imageToolSettingsOpen} suppressTooltip={imageToolSettingsOpen} onClick={openImageToolSettings} showLabel={showImageToolLabels} theme={theme} /> : null}
             </div>
             {hasImage ? (
                 <ImageToolSettingsModal
@@ -304,10 +308,10 @@ export function CanvasNodeInfoModal({ node, open, onClose }: { node: CanvasNodeD
     );
 }
 
-function ToolbarAction({ title, label, icon, onClick, showLabel, active = false, danger = false, theme }: ToolbarTool & { showLabel: boolean; theme: (typeof canvasThemes)[keyof typeof canvasThemes] }) {
+function ToolbarAction({ title, label, icon, onClick, showLabel, active = false, danger = false, suppressTooltip = false, theme }: ToolbarTool & { showLabel: boolean; suppressTooltip?: boolean; theme: (typeof canvasThemes)[keyof typeof canvasThemes] }) {
     const hasText = showLabel && Boolean(label);
     return (
-        <Tooltip title={hasText ? title : label ? `${title}` : title} placement="top" mouseEnterDelay={0.2} color={theme.toolbar.panel} styles={{ body: { color: theme.node.text, boxShadow: "0 6px 18px rgba(0,0,0,.24)", fontSize: 11 } }}>
+        <Tooltip open={suppressTooltip ? false : undefined} destroyOnHidden title={hasText ? title : label ? `${title}` : title} placement="top" mouseEnterDelay={0.2} color={theme.toolbar.panel} styles={{ body: { color: theme.node.text, boxShadow: "0 6px 18px rgba(0,0,0,.24)", fontSize: 11 } }}>
             <button
                 type="button"
                 className={`group relative flex shrink-0 items-center ${danger ? "text-red-400" : ""}`}

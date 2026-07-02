@@ -18,6 +18,7 @@ type CanvasVideoPlayerProps = {
     taskId?: string;
     provider?: "openai" | "seedance";
     model?: string;
+    variant?: "node" | "preview";
     onPersisted?: (file: UploadedFile) => void;
     onHandleReady?: (handle: CanvasVideoPlayerHandle | null) => void;
 };
@@ -25,12 +26,14 @@ type CanvasVideoPlayerProps = {
 export type CanvasVideoPlayerHandle = {
     togglePlayback: () => void;
     captureLastFrame: () => Promise<string>;
+    getPlayUrl: () => string;
 };
 
 export const CanvasVideoPlayer = forwardRef<CanvasVideoPlayerHandle, CanvasVideoPlayerProps>(function CanvasVideoPlayer(
-    { content = "", storageKey, mimeType = "video/mp4", taskId, provider, model, onPersisted, onHandleReady },
+    { content = "", storageKey, mimeType = "video/mp4", taskId, provider, model, variant = "node", onPersisted, onHandleReady },
     ref,
 ) {
+    const isPreview = variant === "preview";
     const config = useConfigStore((state) => state.config);
     const videoRef = useRef<HTMLVideoElement>(null);
     const [playUrl, setPlayUrl] = useState("");
@@ -84,8 +87,9 @@ export const CanvasVideoPlayer = forwardRef<CanvasVideoPlayerHandle, CanvasVideo
         (): CanvasVideoPlayerHandle => ({
             togglePlayback,
             captureLastFrame,
+            getPlayUrl: () => playUrl,
         }),
-        [captureLastFrame, togglePlayback],
+        [captureLastFrame, playUrl, togglePlayback],
     );
 
     useImperativeHandle(ref, playerHandle, [playerHandle]);
@@ -95,9 +99,10 @@ export const CanvasVideoPlayer = forwardRef<CanvasVideoPlayerHandle, CanvasVideo
             onHandleReady?.(null);
             return;
         }
+        if (isPreview) return;
         onHandleReady?.(playerHandle());
         return () => onHandleReady?.(null);
-    }, [onHandleReady, phase, playUrl, playerHandle]);
+    }, [isPreview, onHandleReady, phase, playUrl, playerHandle]);
 
     const hydratePlayableUrl = useCallback(
         async (options?: { ignoreStorageKey?: boolean; resetRetry?: boolean }) => {
@@ -251,7 +256,9 @@ export const CanvasVideoPlayer = forwardRef<CanvasVideoPlayerHandle, CanvasVideo
                 src={playUrl}
                 playsInline
                 preload="auto"
-                className="pointer-events-none h-full w-full bg-black object-contain"
+                controls={isPreview}
+                className={`h-full w-full bg-black object-contain ${isPreview ? "pointer-events-auto" : "pointer-events-none"}`}
+                {...(isPreview ? { "data-canvas-interactive": true, "data-canvas-no-zoom": true } : {})}
                 onDoubleClick={(event) => event.stopPropagation()}
                 onPlay={() => setPaused(false)}
                 onPause={() => setPaused(true)}
@@ -262,12 +269,24 @@ export const CanvasVideoPlayer = forwardRef<CanvasVideoPlayerHandle, CanvasVideo
                 }}
                 onError={handleVideoError}
             />
-            {phase === "ready" && paused ? (
-                <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-black/20">
-                    <div className="grid size-12 place-items-center rounded-full border border-white/20 bg-black/45 text-white/90 shadow-lg backdrop-blur-sm">
-                        <Play className="ml-0.5 size-5 fill-current" />
-                    </div>
-                </div>
+            {!isPreview && phase === "ready" ? (
+                <button
+                    type="button"
+                    data-canvas-interactive
+                    data-canvas-no-zoom
+                    className={`absolute inset-0 flex items-center justify-center transition ${paused ? "bg-black/20" : "bg-transparent hover:bg-black/10"}`}
+                    onPointerDown={(event) => {
+                        event.stopPropagation();
+                        togglePlayback();
+                    }}
+                    aria-label={paused ? "播放视频" : "暂停视频"}
+                >
+                    {paused ? (
+                        <div className="grid size-12 place-items-center rounded-full border border-white/20 bg-black/45 text-white/90 shadow-lg backdrop-blur-sm">
+                            <Play className="ml-0.5 size-5 fill-current" />
+                        </div>
+                    ) : null}
+                </button>
             ) : null}
         </div>
     );

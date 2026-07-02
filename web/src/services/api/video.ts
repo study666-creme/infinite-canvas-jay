@@ -136,6 +136,18 @@ type VideoPlaybackInput = {
     ignoreStorageKey?: boolean;
 };
 
+async function isPlayableMediaUrl(url: string) {
+    if (!url.startsWith("blob:") && !url.startsWith("data:")) return true;
+    try {
+        const response = await fetch(url);
+        if (!response.ok) return false;
+        const blob = await response.blob();
+        return blob.size > 0;
+    } catch {
+        return false;
+    }
+}
+
 export async function resolveVideoPlayback(input: VideoPlaybackInput): Promise<VideoPlaybackResult> {
     const { config, content = "", storageKey, mimeType = "video/mp4", taskId, provider, model, ignoreStorageKey = false } = input;
     const hasApi = Boolean(config.baseUrl.trim() && config.apiKey.trim());
@@ -156,15 +168,29 @@ export async function resolveVideoPlayback(input: VideoPlaybackInput): Promise<V
     }
 
     if (content.startsWith("blob:") || content.startsWith("data:")) {
-        if (hasApi && content.startsWith("data:")) {
+        if (content.startsWith("data:") && hasApi) {
             try {
                 const file = await uploadMediaFile(normalizeVideoBlob(await blobFromDataUrl(content), mimeType), "video");
                 return { kind: "file", url: file.url, file };
             } catch {
-                return { kind: "url", url: content };
+                if (await isPlayableMediaUrl(content)) {
+                    return { kind: "url", url: content };
+                }
             }
         }
-        return { kind: "url", url: content };
+        if (await isPlayableMediaUrl(content)) {
+            return { kind: "url", url: content };
+        }
+        if (taskId && provider && model && hasApi) {
+            try {
+                const blob = normalizeVideoBlob(await downloadTaskContentBlob(config, { id: taskId, provider, model }), mimeType);
+                const file = await uploadMediaFile(blob, "video");
+                return { kind: "file", url: file.url, file };
+            } catch {
+                // Fall through.
+            }
+        }
+        return { kind: "error", message: "视频缓存已失效，请重新上传或生成视频后再选帧" };
     }
 
     if (taskId && provider && model && hasApi) {
@@ -183,7 +209,11 @@ export async function resolveVideoPlayback(input: VideoPlaybackInput): Promise<V
             const file = await uploadMediaFile(blob, "video");
             return { kind: "file", url: file.url, file };
         } catch (error) {
-            return { kind: "error", message: error instanceof Error ? error.message : "视频代理下载失败" };
+            const message = error instanceof Error ? error.message : "视频代理下载失败";
+            if (/failed to fetch|network error/i.test(message)) {
+                return { kind: "error", message: "无法连接视频网关，请确认 Base URL 在本机可访问（127.0.0.1 仅在本机浏览器有效）" };
+            }
+            return { kind: "error", message };
         }
     }
 

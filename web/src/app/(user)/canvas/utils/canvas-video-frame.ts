@@ -1,7 +1,7 @@
 import type { AiConfig } from "@/stores/use-config-store";
 import { resolveVideoPlayback, type VideoPlaybackInput } from "@/services/api/video";
 
-function waitForVideoEvent(video: HTMLVideoElement, eventName: "loadedmetadata" | "loadeddata", timeoutMs = 20000): Promise<void> {
+function waitForVideoEvent(video: HTMLVideoElement, eventName: "loadedmetadata" | "loadeddata" | "seeked", timeoutMs = 20000): Promise<void> {
     if (eventName === "loadedmetadata" && video.readyState >= 1 && Number.isFinite(video.duration)) {
         return Promise.resolve();
     }
@@ -12,7 +12,7 @@ function waitForVideoEvent(video: HTMLVideoElement, eventName: "loadedmetadata" 
     return new Promise((resolve, reject) => {
         const timeout = window.setTimeout(() => {
             cleanup();
-            reject(new Error("视频加载超时"));
+            reject(new Error(eventName === "seeked" ? "定位画面超时" : "视频加载超时"));
         }, timeoutMs);
 
         const onReady = () => {
@@ -36,13 +36,15 @@ function waitForVideoEvent(video: HTMLVideoElement, eventName: "loadedmetadata" 
     });
 }
 
-function seekVideoToLastFrame(video: HTMLVideoElement): Promise<void> {
-    const duration = video.duration;
-    if (!Number.isFinite(duration) || duration <= 0) {
-        return video.readyState >= 2 ? Promise.resolve() : waitForVideoEvent(video, "loadeddata");
-    }
+export function getDefaultLastFrameTime(duration: number) {
+    if (!Number.isFinite(duration) || duration <= 0) return 0;
+    return Math.max(0, duration - 0.05);
+}
 
-    const target = Math.max(0, duration - 0.05);
+export function seekVideoToTime(video: HTMLVideoElement, time: number): Promise<void> {
+    const duration = Number.isFinite(video.duration) ? video.duration : time;
+    const target = Math.max(0, Math.min(time, Math.max(0, duration - 0.001)));
+
     if (Math.abs(video.currentTime - target) < 0.02 && video.readyState >= 2) {
         return Promise.resolve();
     }
@@ -50,7 +52,7 @@ function seekVideoToLastFrame(video: HTMLVideoElement): Promise<void> {
     return new Promise((resolve, reject) => {
         const timeout = window.setTimeout(() => {
             cleanup();
-            reject(new Error("定位最后一帧超时"));
+            reject(new Error("定位画面超时"));
         }, 15000);
 
         const onSeeked = () => {
@@ -60,7 +62,7 @@ function seekVideoToLastFrame(video: HTMLVideoElement): Promise<void> {
 
         const onError = () => {
             cleanup();
-            reject(new Error("无法定位到最后一帧"));
+            reject(new Error("无法定位到指定画面"));
         };
 
         const cleanup = () => {
@@ -77,12 +79,12 @@ function seekVideoToLastFrame(video: HTMLVideoElement): Promise<void> {
             video.currentTime = target;
         } catch (error) {
             cleanup();
-            reject(error instanceof Error ? error : new Error("无法定位到最后一帧"));
+            reject(error instanceof Error ? error : new Error("无法定位到指定画面"));
         }
     });
 }
 
-function videoFrameToDataUrl(video: HTMLVideoElement): string {
+export function captureFrameFromVideoElement(video: HTMLVideoElement): string {
     const width = video.videoWidth;
     const height = video.videoHeight;
     if (!width || !height) {
@@ -106,27 +108,40 @@ function videoFrameToDataUrl(video: HTMLVideoElement): string {
     }
 }
 
-export async function captureLastFrameFromVideoElement(video: HTMLVideoElement): Promise<string> {
+export async function captureFrameAtTime(video: HTMLVideoElement, time: number): Promise<string> {
     if (video.readyState < 1) {
         await waitForVideoEvent(video, "loadedmetadata");
     }
     if (video.readyState < 2) {
         await waitForVideoEvent(video, "loadeddata");
     }
-    await seekVideoToLastFrame(video);
-    return videoFrameToDataUrl(video);
+    await seekVideoToTime(video, time);
+    return captureFrameFromVideoElement(video);
 }
 
-export async function captureLastFrameFromPlaybackSource(input: VideoPlaybackInput & { config: AiConfig }): Promise<string> {
+export async function captureLastFrameFromVideoElement(video: HTMLVideoElement): Promise<string> {
+    if (video.readyState < 1) {
+        await waitForVideoEvent(video, "loadedmetadata");
+    }
+    const time = getDefaultLastFrameTime(video.duration);
+    return captureFrameAtTime(video, time);
+}
+
+export async function resolveVideoPlayUrl(input: VideoPlaybackInput & { config: AiConfig }) {
     const result = await resolveVideoPlayback(input);
     if (result.kind === "error") {
         throw new Error(result.message);
     }
+    return result;
+}
 
+export async function captureLastFrameFromPlaybackSource(input: VideoPlaybackInput & { config: AiConfig }): Promise<string> {
+    const result = await resolveVideoPlayUrl(input);
     const video = document.createElement("video");
     video.muted = true;
     video.playsInline = true;
     video.preload = "auto";
+    video.crossOrigin = "anonymous";
     video.src = result.url;
 
     try {

@@ -38,13 +38,13 @@ import { CANVAS_AGENT_PANEL_MOTION_MS, CanvasAssistantPanel } from "../component
 import { CanvasNodeContextMenu } from "../components/canvas-context-menu";
 import { CanvasNodeAngleDialog, type CanvasImageAngleParams } from "../components/canvas-node-angle-dialog";
 import { CanvasNodeCropDialog, type CanvasImageCropRect } from "../components/canvas-node-crop-dialog";
+import { CanvasNodeVideoFrameDialog } from "../components/canvas-node-video-frame-dialog";
 import { CanvasNodeMaskEditDialog, type CanvasImageMaskEditPayload } from "../components/canvas-node-mask-edit-dialog";
 import { CanvasNodeSplitDialog, type CanvasImageSplitParams } from "../components/canvas-node-split-dialog";
 import { CanvasNodeUpscaleDialog, type CanvasImageUpscaleParams } from "../components/canvas-node-upscale-dialog";
 import { buildNodeGenerationContext, buildNodeGenerationInputs, buildNodeResponseMessages, hydrateNodeGenerationContext, type NodeGenerationInput } from "../components/canvas-node-generation";
 import { resolveActiveVideoReferences, toVideoReferenceAssets } from "../utils/canvas-video-references";
-import { captureLastFrameFromPlaybackSource } from "../utils/canvas-video-frame";
-import type { CanvasVideoPlayerHandle } from "../components/canvas-video-player";
+import { CanvasVideoPlayer, type CanvasVideoPlayerHandle } from "../components/canvas-video-player";
 import { CanvasNodeHoverToolbar, CanvasNodeInfoModal } from "../components/canvas-node-hover-toolbar";
 import { InfiniteCanvas } from "../components/infinite-canvas";
 import { Minimap } from "../components/canvas-mini-map";
@@ -339,6 +339,7 @@ function InfiniteCanvasPage() {
     const [editRequestNonce, setEditRequestNonce] = useState(0);
     const [infoNodeId, setInfoNodeId] = useState<string | null>(null);
     const [cropNodeId, setCropNodeId] = useState<string | null>(null);
+    const [videoFrameNodeId, setVideoFrameNodeId] = useState<string | null>(null);
     const [maskEditNodeId, setMaskEditNodeId] = useState<string | null>(null);
     const [splitNodeId, setSplitNodeId] = useState<string | null>(null);
     const [upscaleNodeId, setUpscaleNodeId] = useState<string | null>(null);
@@ -765,6 +766,7 @@ function InfiniteCanvasPage() {
     const toolbarNode = toolbarNodeId ? nodeById.get(toolbarNodeId) || null : null;
     const infoNode = infoNodeId ? nodeById.get(infoNodeId) || null : null;
     const cropNode = cropNodeId ? nodeById.get(cropNodeId) || null : null;
+    const videoFrameNode = videoFrameNodeId ? nodeById.get(videoFrameNodeId) || null : null;
     const maskEditNode = maskEditNodeId ? nodeById.get(maskEditNodeId) || null : null;
     const splitNode = splitNodeId ? nodeById.get(splitNodeId) || null : null;
     const upscaleNode = upscaleNodeId ? nodeById.get(upscaleNodeId) || null : null;
@@ -975,6 +977,7 @@ function InfiniteCanvasPage() {
             setEditingNodeId((current) => (current && allIds.has(current) ? null : current));
             setInfoNodeId((current) => (current && allIds.has(current) ? null : current));
             setCropNodeId((current) => (current && allIds.has(current) ? null : current));
+            setVideoFrameNodeId((current) => (current && allIds.has(current) ? null : current));
             setMaskEditNodeId((current) => (current && allIds.has(current) ? null : current));
             setAngleNodeId((current) => (current && allIds.has(current) ? null : current));
             setPreviewNodeId((current) => (current && allIds.has(current) ? null : current));
@@ -1030,6 +1033,7 @@ function InfiniteCanvasPage() {
         setConnections([]);
         setInfoNodeId(null);
         setCropNodeId(null);
+        setVideoFrameNodeId(null);
         setMaskEditNodeId(null);
         setAngleNodeId(null);
         setPreviewNodeId(null);
@@ -1354,18 +1358,19 @@ function InfiniteCanvasPage() {
         dragRef.current.initialSelectedNodes = [];
         if (wasClick && clickedNodeId) {
             const clickedNode = nodesRef.current.find((node) => node.id === clickedNodeId);
-            if (clickedNode?.type === CanvasNodeType.Video && clickedNode.metadata?.content) {
-                videoPlayerRef.current.get(clickedNodeId)?.togglePlayback();
-                return;
+            const isVideoWithContent = clickedNode?.type === CanvasNodeType.Video && Boolean(clickedNode.metadata?.content);
+            if (isVideoWithContent) {
+                keepNodeToolbar(clickedNodeId);
+            } else {
+                setToolbarNodeId((current) => (current === clickedNodeId ? null : clickedNodeId));
             }
-            setToolbarNodeId((current) => (current === clickedNodeId ? null : clickedNodeId));
             if (clickedNode?.type === CanvasNodeType.Text) {
                 setDialogNodeId((current) => (current === clickedNodeId ? current : null));
             } else {
                 setDialogNodeId(clickedNodeId);
             }
         }
-    }, []);
+    }, [keepNodeToolbar]);
 
     const applyNodeDragMove = useCallback((clientX: number, clientY: number) => {
         if (!dragRef.current.isDraggingNode) return;
@@ -1657,6 +1662,7 @@ function InfiniteCanvasPage() {
                 setEditingNodeId(null);
                 setInfoNodeId(null);
                 setCropNodeId(null);
+                setVideoFrameNodeId(null);
                 setMaskEditNodeId(null);
                 setPendingConnectionCreate(null);
             }
@@ -1926,27 +1932,9 @@ function InfiniteCanvasPage() {
         [effectiveConfig.model, effectiveConfig.textModel, message],
     );
 
-    const captureVideoLastFrame = useCallback(
-        async (node: CanvasNodeData) => {
-            if (node.type !== CanvasNodeType.Video || !node.metadata?.content) {
-                message.warning("视频节点为空，无法截帧");
-                return;
-            }
-
-            const hide = message.loading("正在截取最后一帧...", 0);
+    const createImageFromVideoFrame = useCallback(
+        async (node: CanvasNodeData, dataUrl: string) => {
             try {
-                const player = videoPlayerRef.current.get(node.id);
-                const dataUrl = player
-                    ? await player.captureLastFrame()
-                    : await captureLastFrameFromPlaybackSource({
-                          config,
-                          content: node.metadata.content,
-                          storageKey: node.metadata.storageKey,
-                          mimeType: node.metadata.mimeType,
-                          taskId: node.metadata.videoTaskId,
-                          provider: node.metadata.videoProvider,
-                          model: node.metadata.model,
-                      });
                 const image = await uploadImage(dataUrl);
                 const gap = 96;
                 const size = fitNodeSize(image.width, image.height);
@@ -1954,7 +1942,7 @@ function InfiniteCanvasPage() {
                 const child: CanvasNodeData = {
                     id: childId,
                     type: CanvasNodeType.Image,
-                    title: `${node.title || "视频"} 末帧`,
+                    title: `${node.title || "视频"} 截帧`,
                     position: { x: node.position.x + node.width + gap, y: node.position.y + node.height / 2 - size.height / 2 },
                     width: size.width,
                     height: size.height,
@@ -1968,15 +1956,14 @@ function InfiniteCanvasPage() {
                 setSelectedNodeIds(new Set([childId]));
                 setSelectedConnectionId(null);
                 setDialogNodeId(childId);
+                setVideoFrameNodeId(null);
                 setContextMenu(null);
-                message.success("已截取最后一帧");
+                message.success("已生成图片节点");
             } catch (error) {
-                message.error(error instanceof Error ? error.message : "截帧失败");
-            } finally {
-                hide();
+                message.error(error instanceof Error ? error.message : "生成图片节点失败");
             }
         },
-        [config, message],
+        [message],
     );
 
     const cropImageNode = useCallback(async (node: CanvasNodeData, crop: CanvasImageCropRect) => {
@@ -3347,9 +3334,17 @@ function InfiniteCanvasPage() {
                             onHoverStart={(nodeId) => {
                                 if (nodeDraggingRef.current) return;
                                 setHoveredNodeId(nodeId);
+                                const node = nodesRef.current.find((item) => item.id === nodeId);
+                                if (node?.type === CanvasNodeType.Video && node.metadata?.content) {
+                                    keepNodeToolbar(nodeId);
+                                }
                             }}
                             onHoverEnd={(nodeId) => {
                                 setHoveredNodeId((current) => (current === nodeId ? null : current));
+                                const node = nodesRef.current.find((item) => item.id === nodeId);
+                                if (node?.type === CanvasNodeType.Video && node.metadata?.content) {
+                                    hideNodeToolbar();
+                                }
                             }}
                             onConnectStart={handleConnectStart}
                             onConnectMenu={openConnectionMenu}
@@ -3396,6 +3391,10 @@ function InfiniteCanvasPage() {
                     node={isNodeDragging || nodeImageSettingsOpen ? null : toolbarNode}
                     viewport={viewport}
                     onClose={() => setToolbarNodeId(null)}
+                    onPointerEnter={() => {
+                        if (toolbarNode) keepNodeToolbar(toolbarNode.id);
+                    }}
+                    onPointerLeave={() => hideNodeToolbar()}
                     onInfo={(node) => setInfoNodeId(node.id)}
                     onEditText={openTextEditor}
                     onDecreaseFont={(node) => handleFontSizeChange(node.id, Math.max(10, (node.metadata?.fontSize || 14) - 2))}
@@ -3413,7 +3412,13 @@ function InfiniteCanvasPage() {
                     onAngle={(node) => setAngleNodeId(node.id)}
                     onViewImage={(node) => setPreviewNodeId(node.id)}
                     onReversePrompt={createImageReversePromptNodes}
-                    onCaptureVideoFrame={(node) => void captureVideoLastFrame(node)}
+                    onCaptureVideoFrame={(node) => {
+                        if (!node.metadata?.content) {
+                            message.warning("视频节点为空，无法选帧");
+                            return;
+                        }
+                        setVideoFrameNodeId(node.id);
+                    }}
                     onRetry={(node) => void handleRetryNode(node)}
                     onToggleFreeResize={(node) => toggleNodeFreeResize(node.id)}
                     onDelete={(node) => deleteNodes(new Set([node.id]))}
@@ -3560,6 +3565,15 @@ function InfiniteCanvasPage() {
                 <CanvasNodeInfoModal node={infoNode} open={Boolean(infoNode)} onClose={() => setInfoNodeId(null)} />
 
                 {cropNode?.metadata?.content ? <CanvasNodeCropDialog dataUrl={cropNode.metadata.content} open={Boolean(cropNode)} onClose={() => setCropNodeId(null)} onConfirm={(crop) => void cropImageNode(cropNode!, crop)} /> : null}
+                {videoFrameNode?.metadata?.content ? (
+                    <CanvasNodeVideoFrameDialog
+                        node={videoFrameNode}
+                        open={Boolean(videoFrameNode)}
+                        initialPlayUrl={videoPlayerRef.current.get(videoFrameNode.id)?.getPlayUrl() || ""}
+                        onClose={() => setVideoFrameNodeId(null)}
+                        onConfirm={(dataUrl) => void createImageFromVideoFrame(videoFrameNode, dataUrl)}
+                    />
+                ) : null}
 
                 {maskEditNode?.metadata?.content ? <CanvasNodeMaskEditDialog dataUrl={maskEditNode.metadata.content} open={Boolean(maskEditNode)} onClose={() => setMaskEditNodeId(null)} onConfirm={(payload) => void maskEditImageNode(maskEditNode!, payload)} /> : null}
 
@@ -3574,20 +3588,35 @@ function InfiniteCanvasPage() {
                 {angleNode?.metadata?.content ? <CanvasNodeAngleDialog dataUrl={angleNode.metadata.content} open={Boolean(angleNode)} onClose={() => setAngleNodeId(null)} onConfirm={(params) => void generateAngleNode(angleNode!, params)} /> : null}
 
                 <Modal
-                    title="图片详情"
+                    title={previewNode?.type === CanvasNodeType.Video ? "视频预览" : "图片详情"}
                     open={Boolean(previewNode?.metadata?.content)}
                     centered
+                    destroyOnClose
                     onCancel={() => setPreviewNodeId(null)}
                     footer={null}
                     width="auto"
-                    styles={{ body: { padding: 0, display: "flex", justifyContent: "center", alignItems: "center", maxHeight: "80vh" } }}
+                    styles={{ body: { padding: previewNode?.type === CanvasNodeType.Video ? 12 : 0, display: "flex", justifyContent: "center", alignItems: "center", maxHeight: "85vh" } }}
                 >
                     {previewNode?.metadata?.content ? (
-                        <img
-                            src={previewNode.metadata.content}
-                            alt={previewNode.title || "图片"}
-                            style={{ maxWidth: "100%", maxHeight: "80vh", objectFit: "contain" }}
-                        />
+                        previewNode.type === CanvasNodeType.Video ? (
+                            <div className="w-[min(96vw,1080px)]" style={{ height: "min(85vh, 640px)" }}>
+                                <CanvasVideoPlayer
+                                    variant="preview"
+                                    content={previewNode.metadata.content}
+                                    storageKey={previewNode.metadata.storageKey}
+                                    mimeType={previewNode.metadata.mimeType}
+                                    taskId={previewNode.metadata.videoTaskId}
+                                    provider={previewNode.metadata.videoProvider}
+                                    model={previewNode.metadata.model}
+                                />
+                            </div>
+                        ) : (
+                            <img
+                                src={previewNode.metadata.content}
+                                alt={previewNode.title || "图片"}
+                                style={{ maxWidth: "100%", maxHeight: "80vh", objectFit: "contain" }}
+                            />
+                        )
                     ) : null}
                 </Modal>
 

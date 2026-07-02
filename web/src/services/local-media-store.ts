@@ -184,5 +184,22 @@ export function revokeLocalMediaUrl(storageKey: string) {
 
 export async function sourceToBlob(source: Blob | string) {
     if (source instanceof Blob) return source;
-    return fetch(source).then((response) => response.blob());
+    if (source.startsWith("data:")) {
+        const match = /^data:([^;,]+)?(?:;base64)?,(.*)$/s.exec(source);
+        if (!match) throw new Error("无效的图片数据");
+        const mime = match[1] || "application/octet-stream";
+        const body = match[2];
+        if (source.includes(";base64,")) {
+            const binary = atob(body);
+            const bytes = new Uint8Array(binary.length);
+            for (let index = 0; index < binary.length; index += 1) {
+                bytes[index] = binary.charCodeAt(index);
+            }
+            return new Blob([bytes], { type: mime });
+        }
+        return new Blob([decodeURIComponent(body)], { type: mime });
+    }
+    const response = await fetch(source);
+    if (!response.ok) throw new Error("读取文件失败");
+    return response.blob();
 }

@@ -343,6 +343,11 @@ export const CanvasNode = React.memo(function CanvasNode({
                         onViewImage?.(data);
                         return;
                     }
+                    if (data.type === CanvasNodeType.Video && hasVideoContent) {
+                        event.stopPropagation();
+                        onViewImage?.(data);
+                        return;
+                    }
                     if (data.type !== CanvasNodeType.Text) return;
                     event.stopPropagation();
                     setIsEditingContent(true);
@@ -609,6 +614,7 @@ function VideoNodeContent({ node, theme, onVideoPersisted, onRegisterVideoContro
     return (
         <div className="relative h-full w-full overflow-hidden">
             <CanvasVideoPlayer
+                variant="node"
                 content={node.metadata.content}
                 storageKey={node.metadata.storageKey}
                 mimeType={node.metadata.mimeType}

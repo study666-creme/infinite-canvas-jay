@@ -1368,13 +1368,8 @@ function InfiniteCanvasPage() {
         dragRef.current.hasMoved = false;
         dragRef.current.initialSelectedNodes = [];
         if (wasClick && clickedNodeId) {
+            keepNodeToolbar(clickedNodeId);
             const clickedNode = nodesRef.current.find((node) => node.id === clickedNodeId);
-            const isVideoWithContent = clickedNode?.type === CanvasNodeType.Video && Boolean(clickedNode.metadata?.content);
-            if (isVideoWithContent) {
-                keepNodeToolbar(clickedNodeId);
-            } else {
-                setToolbarNodeId((current) => (current === clickedNodeId ? null : clickedNodeId));
-            }
             if (clickedNode?.type === CanvasNodeType.Text) {
                 setDialogNodeId((current) => (current === clickedNodeId ? current : null));
             } else {
@@ -3361,17 +3356,11 @@ function InfiniteCanvasPage() {
                             onHoverStart={(nodeId) => {
                                 if (nodeDraggingRef.current) return;
                                 setHoveredNodeId(nodeId);
-                                const node = nodesRef.current.find((item) => item.id === nodeId);
-                                if (node?.type === CanvasNodeType.Video && node.metadata?.content) {
-                                    keepNodeToolbar(nodeId);
-                                }
+                                keepNodeToolbar(nodeId);
                             }}
                             onHoverEnd={(nodeId) => {
                                 setHoveredNodeId((current) => (current === nodeId ? null : current));
-                                const node = nodesRef.current.find((item) => item.id === nodeId);
-                                if (node?.type === CanvasNodeType.Video && node.metadata?.content) {
-                                    hideNodeToolbar();
-                                }
+                                hideNodeToolbar();
                             }}
                             onConnectStart={handleConnectStart}
                             onConnectMenu={openConnectionMenu}

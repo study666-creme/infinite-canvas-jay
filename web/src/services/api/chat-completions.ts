@@ -230,12 +230,28 @@ function finalizeToolDrafts(state: ChatStreamState) {
 }
 
 async function requestChatCompletions(config: AiConfig, body: Record<string, unknown>, onDelta?: (text: string) => void, options?: RequestOptions): Promise<ToolResponseResult> {
-    const response = await fetch(buildQianfanChatCompletionsUrl(config.baseUrl, config.model), {
-        method: "POST",
-        headers: { ...aiHeaders(config), Accept: "text/event-stream" },
-        body: JSON.stringify({ ...body, stream: true }),
-        signal: options?.signal,
-    });
+    const targetUrl = buildQianfanChatCompletionsUrl(config.baseUrl, config.model);
+    const payload = JSON.stringify({ ...body, stream: true });
+    const headers = { ...aiHeaders(config), Accept: "text/event-stream", "Content-Type": "application/json" };
+    const response =
+        typeof window !== "undefined"
+            ? await fetch("/api/qianfan-proxy", {
+                  method: "POST",
+                  headers: {
+                      Accept: "text/event-stream",
+                      "Content-Type": "application/json",
+                      "x-qianfan-target": targetUrl,
+                      "x-qianfan-authorization": headers.Authorization,
+                  },
+                  body: payload,
+                  signal: options?.signal,
+              })
+            : await fetch(targetUrl, {
+                  method: "POST",
+                  headers,
+                  body: payload,
+                  signal: options?.signal,
+              });
     if (!response.ok) throw new Error(await readFetchError(response, "千帆文本请求失败"));
 
     if (!response.body) {

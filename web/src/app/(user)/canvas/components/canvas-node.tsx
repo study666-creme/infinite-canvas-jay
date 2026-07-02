@@ -195,8 +195,8 @@ export const CanvasNode = React.memo(function CanvasNode({
             const minHeight = 160;
             const handle = resizeRef.current.handle;
             const isCorner = handle.includes("-");
-            const fromLeft = handle.includes("left");
-            const fromTop = handle.includes("top");
+            const fromLeft = handle === "left" || handle.endsWith("-left");
+            const fromTop = handle === "top" || handle.startsWith("top-");
             const fromRight = handle === "right" || handle.endsWith("-right");
             const fromBottom = handle === "bottom" || handle.endsWith("-bottom");
             const startRight = resizeRef.current.startLeft + resizeRef.current.startWidth;
@@ -354,7 +354,7 @@ export const CanvasNode = React.memo(function CanvasNode({
                 }}
             >
                 <div
-                    className={`relative flex h-full w-full items-center justify-center rounded-[inherit] ${isBatchRoot ? "overflow-visible" : "overflow-hidden"}`}
+                    className={`relative flex h-full w-full rounded-[inherit] ${isBatchRoot ? "overflow-visible" : "overflow-hidden"} ${data.type === CanvasNodeType.Text ? "items-stretch" : "items-center justify-center"}`}
                     style={
                         {
                             background: hasImageContent || hasVideoContent ? "transparent" : theme.node.fill,
@@ -784,7 +784,7 @@ function ResizeHandle({ handle, onPointerDown }: { handle: ResizeHandle; onPoint
     return (
         <div
             data-resize-handle
-            className={`absolute z-[60] touch-none ${positionClass}`}
+            className={`absolute z-[90] touch-none ${positionClass}`}
             onPointerDown={(event) => {
                 event.stopPropagation();
                 onPointerDown(event, handle);

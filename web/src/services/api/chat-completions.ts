@@ -230,7 +230,7 @@ function finalizeToolDrafts(state: ChatStreamState) {
 }
 
 async function requestChatCompletions(config: AiConfig, body: Record<string, unknown>, onDelta?: (text: string) => void, options?: RequestOptions): Promise<ToolResponseResult> {
-    const response = await fetch(buildQianfanChatCompletionsUrl(config.baseUrl), {
+    const response = await fetch(buildQianfanChatCompletionsUrl(config.baseUrl, config.model), {
         method: "POST",
         headers: { ...aiHeaders(config), Accept: "text/event-stream" },
         body: JSON.stringify({ ...body, stream: true }),

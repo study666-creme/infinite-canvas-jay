@@ -26,9 +26,15 @@ export function normalizeQianfanBaseUrl(baseUrl: string) {
     return trimmed || QIANFAN_DEFAULT_BASE_URL;
 }
 
-export function buildQianfanChatCompletionsUrl(baseUrl: string) {
-    const normalized = normalizeQianfanBaseUrl(baseUrl);
-    const lower = normalized.toLowerCase();
-    if (lower.endsWith("/chat/completions")) return normalized;
-    return `${normalized}/chat/completions`;
+export function resolveQianfanApiRoot(baseUrl: string, model = "") {
+    const useCoding = isQianfanCodingEndpoint(baseUrl, model);
+    let root = normalizeQianfanBaseUrl(baseUrl).replace(/\/chat\/completions\/?$/i, "").replace(/\/coding\/?$/i, "");
+    return useCoding ? `${root}/coding` : root;
+}
+
+export function buildQianfanChatCompletionsUrl(baseUrl: string, model = "") {
+    const root = resolveQianfanApiRoot(baseUrl, model);
+    const lower = root.toLowerCase();
+    if (lower.endsWith("/chat/completions")) return root;
+    return `${root}/chat/completions`;
 }

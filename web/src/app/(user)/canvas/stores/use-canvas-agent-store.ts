@@ -56,7 +56,7 @@ export const useCanvasAgentStore = create<CanvasAgentStore>((set) => ({
     workspacePath: "",
     loadingThreads: false,
     activeTab: "setup",
-    creativeMode: typeof window === "undefined" ? "general" : localStorage.getItem("canvas-agent-creative-mode") === "short_drama" ? "short_drama" : "general",
+    creativeMode: "general",
     confirmTools: true,
     activity: "就绪",
     connectError: "",

@@ -52,3 +52,7 @@ export function applyShortDramaAgentMode(prompt: string, mode: CanvasAgentCreati
     const text = prompt.trim();
     return `${SHORT_DRAMA_AGENT_MODE_CONTEXT}\n\n用户本轮需求：${text || SHORT_DRAMA_AGENT_PROMPT}`;
 }
+
+export function isShortDramaAgentPresetPrompt(prompt: string) {
+    return prompt.trim() === SHORT_DRAMA_AGENT_PROMPT.trim();
+}

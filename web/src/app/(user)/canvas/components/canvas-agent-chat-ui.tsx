@@ -1,11 +1,12 @@
 "use client";
 
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ClipboardEvent, type KeyboardEvent, type ReactNode } from "react";
 import { Button, Tooltip } from "antd";
-import { ArrowUp, CheckCircle2, CircleAlert, ImagePlus, LoaderCircle, UserRound, Wrench, X, XCircle } from "lucide-react";
+import { ArrowUp, CheckCircle2, CircleAlert, ImagePlus, LoaderCircle, Maximize2, UserRound, Wrench, X, XCircle } from "lucide-react";
 
 import { canvasThemes } from "@/lib/canvas-theme";
 import type { LocalUser } from "@/stores/use-user-store";
+import { CanvasTextFullscreenOverlay } from "./canvas-text-fullscreen-overlay";
 
 export type CanvasAgentChatAttachment = { id: string; name: string; url: string };
 export type CanvasAgentMode = "online" | "local";
@@ -171,62 +172,106 @@ export function AgentChatComposer({
     left?: ReactNode;
 }) {
     const fileInputRef = useRef<HTMLInputElement>(null);
+    const fullscreenTextareaRef = useRef<HTMLTextAreaElement>(null);
+    const [fullscreenOpen, setFullscreenOpen] = useState(false);
     const canSubmit = !disabled && !sending && Boolean(prompt.trim() || attachments.length);
+
+    useEffect(() => {
+        if (!fullscreenOpen) return;
+        const frame = requestAnimationFrame(() => fullscreenTextareaRef.current?.focus());
+        return () => cancelAnimationFrame(frame);
+    }, [fullscreenOpen]);
+
+    const handlePasteImages = (event: ClipboardEvent<HTMLTextAreaElement>) => {
+        if (!onAddFiles) return;
+        const images = Array.from(event.clipboardData.files).filter((file) => file.type.startsWith("image/"));
+        if (!images.length) return;
+        event.preventDefault();
+        void onAddFiles(images);
+    };
+
+    const handleSubmitKey = (event: KeyboardEvent<HTMLTextAreaElement>, closeFullscreen = false) => {
+        if (event.key !== "Enter" || event.shiftKey || event.ctrlKey || event.metaKey) return;
+        event.preventDefault();
+        if (!canSubmit) return;
+        if (closeFullscreen) setFullscreenOpen(false);
+        void onSubmit();
+    };
+
     return (
-        <div className="px-2 pb-2 pt-2" onWheelCapture={(event) => event.stopPropagation()}>
-            <div className="rounded-[24px] border px-3 pb-3 pt-3 shadow-lg" style={{ background: theme.toolbar.panel, borderColor: theme.node.stroke }}>
-                {attachments.length ? (
-                    <div className="thin-scrollbar mb-2 flex gap-2 overflow-x-auto pb-1">
-                        {attachments.map((item) => (
-                            <div key={item.id} className="group relative size-14 shrink-0 overflow-hidden rounded-xl border" style={{ borderColor: theme.node.stroke }} title={item.name}>
-                                <img src={item.url} alt={item.name} className="size-full object-cover" />
-                                {onRemoveAttachment ? (
-                                    <button type="button" className="absolute right-1 top-1 grid size-5 place-items-center rounded-full border opacity-0 shadow-sm transition group-hover:opacity-100" style={{ background: theme.toolbar.panel, borderColor: theme.node.stroke, color: theme.node.text }} onClick={() => onRemoveAttachment(item.id)} aria-label="移除图片">
-                                        <X className="size-3" />
-                                    </button>
-                                ) : null}
-                            </div>
-                        ))}
+        <>
+            <div className="px-2 pb-2 pt-2" onWheelCapture={(event) => event.stopPropagation()}>
+                <div className="rounded-[24px] border px-3 pb-3 pt-3 shadow-lg" style={{ background: theme.toolbar.panel, borderColor: theme.node.stroke }}>
+                    {attachments.length ? (
+                        <div className="thin-scrollbar mb-2 flex gap-2 overflow-x-auto pb-1">
+                            {attachments.map((item) => (
+                                <div key={item.id} className="group relative size-14 shrink-0 overflow-hidden rounded-xl border" style={{ borderColor: theme.node.stroke }} title={item.name}>
+                                    <img src={item.url} alt={item.name} className="size-full object-cover" />
+                                    {onRemoveAttachment ? (
+                                        <button type="button" className="absolute right-1 top-1 grid size-5 place-items-center rounded-full border opacity-0 shadow-sm transition group-hover:opacity-100" style={{ background: theme.toolbar.panel, borderColor: theme.node.stroke, color: theme.node.text }} onClick={() => onRemoveAttachment(item.id)} aria-label="移除图片">
+                                            <X className="size-3" />
+                                        </button>
+                                    ) : null}
+                                </div>
+                            ))}
+                        </div>
+                    ) : null}
+                    <textarea
+                        value={prompt}
+                        onChange={(event) => onPromptChange(event.target.value)}
+                        onPaste={handlePasteImages}
+                        onKeyDown={(event) => handleSubmitKey(event)}
+                        className="thin-scrollbar max-h-[42vh] min-h-28 w-full resize-y overflow-auto border-0 bg-transparent px-1 py-1 text-sm leading-5 outline-none placeholder:opacity-45"
+                        style={{ color: theme.node.text }}
+                        placeholder={placeholder}
+                    />
+                    <div className="mt-2 flex items-center justify-between gap-2">
+                        <div className="flex min-w-0 items-center gap-1">
+                            {onAddFiles ? (
+                                <>
+                                    <input ref={fileInputRef} hidden type="file" accept="image/*" multiple onChange={(event) => {
+                                        void onAddFiles(event.target.files);
+                                        event.target.value = "";
+                                    }} />
+                                    <Tooltip title="上传图片">
+                                        <Button type="text" shape="circle" className="!h-9 !w-9 !min-w-9" disabled={sending} style={{ color: theme.node.muted }} icon={<ImagePlus className="size-4" />} onClick={() => fileInputRef.current?.click()} />
+                                    </Tooltip>
+                                </>
+                            ) : null}
+                            {left}
+                        </div>
+                        <div className="flex shrink-0 items-center gap-1">
+                            <Tooltip title="全屏编辑">
+                                <Button type="text" shape="circle" className="!h-9 !w-9 !min-w-9" style={{ color: theme.node.muted }} icon={<Maximize2 className="size-4" />} onClick={() => setFullscreenOpen(true)} aria-label="全屏编辑" />
+                            </Tooltip>
+                            <Button type="primary" shape="circle" className="!h-10 !w-10 !min-w-10" disabled={!canSubmit} icon={sending ? <LoaderCircle className="size-4 animate-spin" /> : <ArrowUp className="size-4" />} onClick={() => void onSubmit()} aria-label="发送" />
+                        </div>
                     </div>
-                ) : null}
-                <textarea
-                    value={prompt}
-                    onChange={(event) => onPromptChange(event.target.value)}
-                    onPaste={(event) => {
-                        if (!onAddFiles) return;
-                        const images = Array.from(event.clipboardData.files).filter((file) => file.type.startsWith("image/"));
-                        if (!images.length) return;
-                        event.preventDefault();
-                        void onAddFiles(images);
-                    }}
-                    onKeyDown={(event) => {
-                        if (event.key !== "Enter" || event.shiftKey || event.ctrlKey || event.metaKey) return;
-                        event.preventDefault();
-                        void onSubmit();
-                    }}
-                    className="thin-scrollbar max-h-32 min-h-20 w-full resize-none border-0 bg-transparent px-1 py-1 text-sm leading-5 outline-none placeholder:opacity-45"
-                    style={{ color: theme.node.text }}
-                    placeholder={placeholder}
-                />
-                <div className="mt-2 flex items-center justify-between gap-2">
-                    <div className="flex min-w-0 items-center gap-1">
-                        {onAddFiles ? (
-                            <>
-                                <input ref={fileInputRef} hidden type="file" accept="image/*" multiple onChange={(event) => {
-                                    void onAddFiles(event.target.files);
-                                    event.target.value = "";
-                                }} />
-                                <Tooltip title="上传图片">
-                                    <Button type="text" shape="circle" className="!h-9 !w-9 !min-w-9" disabled={sending} style={{ color: theme.node.muted }} icon={<ImagePlus className="size-4" />} onClick={() => fileInputRef.current?.click()} />
-                                </Tooltip>
-                            </>
-                        ) : null}
-                        {left}
-                    </div>
-                    <Button type="primary" shape="circle" className="!h-10 !w-10 !min-w-10" disabled={!canSubmit} icon={sending ? <LoaderCircle className="size-4 animate-spin" /> : <ArrowUp className="size-4" />} onClick={() => void onSubmit()} aria-label="发送" />
                 </div>
             </div>
-        </div>
+            <CanvasTextFullscreenOverlay open={fullscreenOpen} title="Agent 输入" onClose={() => setFullscreenOpen(false)}>
+                <div className="flex h-full min-h-[70vh] flex-col gap-3">
+                    <textarea
+                        ref={fullscreenTextareaRef}
+                        value={prompt}
+                        onChange={(event) => onPromptChange(event.target.value)}
+                        onPaste={handlePasteImages}
+                        onKeyDown={(event) => handleSubmitKey(event, true)}
+                        onWheel={(event) => event.stopPropagation()}
+                        className="thin-scrollbar min-h-0 flex-1 resize-none rounded-xl border px-4 py-3 text-base leading-7 outline-none placeholder:opacity-45"
+                        style={{ background: theme.node.fill, borderColor: theme.node.stroke, color: theme.node.text }}
+                        placeholder={placeholder}
+                    />
+                    <div className="flex shrink-0 items-center justify-end">
+                        <Button type="primary" shape="circle" className="!h-10 !w-10 !min-w-10" disabled={!canSubmit} icon={sending ? <LoaderCircle className="size-4 animate-spin" /> : <ArrowUp className="size-4" />} onClick={() => {
+                            if (!canSubmit) return;
+                            setFullscreenOpen(false);
+                            void onSubmit();
+                        }} aria-label="发送" />
+                    </div>
+                </div>
+            </CanvasTextFullscreenOverlay>
+        </>
     );
 }
 

@@ -25,7 +25,7 @@ import { NODE_DEFAULT_SIZE } from "../constants";
 import { CanvasNodeType, type CanvasAssistantMessage, type CanvasAssistantReference, type CanvasAssistantSession, type CanvasNodeData } from "../types";
 import { useCanvasAgentStore, type CanvasAgentCreativeMode } from "../stores/use-canvas-agent-store";
 import { summarizeCanvasAgentOps, type CanvasAgentOp, type CanvasAgentSnapshot } from "../utils/canvas-agent-ops";
-import { SHORT_DRAMA_AGENT_PROMPT, SHORT_DRAMA_AGENT_MODE_CONTEXT } from "../utils/short-drama-agent-prompt";
+import { isShortDramaAgentPresetPrompt, SHORT_DRAMA_AGENT_PROMPT, SHORT_DRAMA_AGENT_MODE_CONTEXT } from "../utils/short-drama-agent-prompt";
 
 export const CANVAS_AGENT_PANEL_MOTION_MS = 500;
 const PANEL_MOTION_SECONDS = CANVAS_AGENT_PANEL_MOTION_MS / 1000;
@@ -120,7 +120,7 @@ const ONLINE_AGENT_TOOLS: ResponseFunctionTool[] = [
 type OnlineAgentTab = "setup" | "chat" | "history" | "log";
 type OnlineAgentLog = { id: string; time: string; title: string; data?: unknown };
 type OnlineAgentLogContext = { model: string; running: boolean; confirmTools: boolean; messages: number; nodes: number; connections: number };
-type OnlineLoopContext = { step: number };
+type OnlineLoopContext = { step: number; creativeMode?: CanvasAgentCreativeMode };
 type OnlineToolResult = { ok: true; message: string; data?: unknown } | { ok: false; message: string };
 type OnlineExecutedToolCall = { toolCallId: string; name: string; result: OnlineToolResult };
 type PendingOnlineToolContext = { messages: ResponseInputMessage[]; toolCalls: ResponseToolCall[]; assistantId: string; step: number };
@@ -271,16 +271,18 @@ export function CanvasAssistantPanel({ nodes, selectedNodeIds, snapshot, session
         const assistantId = nanoid();
         appendMessage(session.id, userMessage);
         addOnlineLog("发送请求", { text, selectedNodeIds: snapshotRef.current.selectedNodeIds, nodeCount: snapshotRef.current.nodes.length, connectionCount: snapshotRef.current.connections.length });
+        const requestCreativeMode: CanvasAgentCreativeMode = isShortDramaAgentPresetPrompt(text) ? "short_drama" : creativeMode;
+        if (requestCreativeMode !== creativeMode) setAgentState({ creativeMode: requestCreativeMode });
         setPrompt("");
         setIsRunning(true);
-        void runOnlineAgentStep(session.id, assistantId, history, userMessage, { step: 1 });
+        void runOnlineAgentStep(session.id, assistantId, history, userMessage, { step: 1, creativeMode: requestCreativeMode });
     };
 
     const runOnlineAgentStep = async (sessionId: string, assistantId: string, history: CanvasAssistantMessage[], userMessage: CanvasAssistantMessage, loop: OnlineLoopContext) => {
         const requestConfig = { ...effectiveConfig, model: effectiveConfig.textModel || effectiveConfig.model };
         try {
             setIsRunning(true);
-            const messages = await buildToolAgentMessages(snapshotRef.current, history, userMessage, creativeMode);
+            const messages = await buildToolAgentMessages(snapshotRef.current, history, userMessage, loop.creativeMode || creativeMode);
             addOnlineLog(`Agent Tool Loop ${loop.step} 开始`, { toolChoice: "required" });
             let streamed = "";
             const result = await requestToolResponse({ ...requestConfig, systemPrompt: "" }, messages, ONLINE_AGENT_TOOLS, "required", (text) => {
@@ -455,10 +457,12 @@ export function CanvasAssistantPanel({ nodes, selectedNodeIds, snapshot, session
     };
 
     const toggleShortDramaMode = (active: boolean) => {
-        const nextMode: CanvasAgentCreativeMode = active ? "short_drama" : "general";
-        localStorage.setItem("canvas-agent-creative-mode", nextMode);
-        setAgentState({ creativeMode: nextMode });
-        if (active && !prompt.trim()) setPrompt(SHORT_DRAMA_AGENT_PROMPT);
+        if (active) {
+            setPrompt(SHORT_DRAMA_AGENT_PROMPT);
+            return;
+        }
+        if (creativeMode !== "general") setAgentState({ creativeMode: "general" });
+        if (isShortDramaAgentPresetPrompt(prompt)) setPrompt("");
     };
 
     const addImagesToCanvas = (files: FileList | File[] | null) => {
@@ -591,7 +595,7 @@ export function CanvasAssistantPanel({ nodes, selectedNodeIds, snapshot, session
                         onAddFiles={addImagesToCanvas}
                         left={
                             <>
-                                <ShortDramaAgentPresetButton active={creativeMode === "short_drama"} disabled={isRunning} onToggle={toggleShortDramaMode} />
+                                <ShortDramaAgentPresetButton active={creativeMode === "short_drama"} presetInserted={isShortDramaAgentPresetPrompt(prompt)} disabled={isRunning} onToggle={toggleShortDramaMode} />
                                 <CanvasPromptLibrary onSelect={setPrompt} />
                                 <AgentTextModelPicker config={effectiveConfig} value={effectiveConfig.textModel} onChange={(model) => updateConfig("textModel", model)} />
                             </>

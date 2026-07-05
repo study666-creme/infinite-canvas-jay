@@ -124,8 +124,8 @@ export function CanvasNodeHoverToolbar({
     if (!node) return null;
 
     const left = viewport.x + (node.position.x + node.width / 2) * viewport.k;
-    const toolbarBridgeHeight = 16;
-    const toolbarVisualGap = 4;
+    const toolbarBridgeHeight = 36;
+    const toolbarVisualGap = 0;
     const top = viewport.y + node.position.y * viewport.k + toolbarBridgeHeight - toolbarVisualGap;
     const isImage = node.type === CanvasNodeType.Image;
     const isVideo = node.type === CanvasNodeType.Video;
@@ -229,7 +229,7 @@ export function CanvasNodeHoverToolbar({
                     ))}
                     {hasImage ? <ToolbarAction id="more" title="配置快捷工具" label="更多" icon={<Ellipsis className="size-4" />} active={imageToolSettingsOpen} suppressTooltip={imageToolSettingsOpen} onClick={openImageToolSettings} showLabel={showImageToolLabels} theme={theme} /> : null}
                 </div>
-                <div aria-hidden className="h-4 w-full" />
+                <div aria-hidden className="h-9 w-full" />
             </div>
             {hasImage ? (
                 <ImageToolSettingsModal

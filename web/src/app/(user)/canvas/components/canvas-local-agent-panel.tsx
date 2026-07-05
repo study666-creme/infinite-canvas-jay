@@ -12,7 +12,7 @@ import { useThemeStore } from "@/stores/use-theme-store";
 import { useUserStore } from "@/stores/use-user-store";
 import { useCanvasAgentStore, type AgentAttachment, type AgentChatItem, type AgentEventLog, type AgentPanelTab, type AgentPendingToolCall, type AgentThreadSummary, type CanvasAgentCreativeMode } from "../stores/use-canvas-agent-store";
 import { summarizeCanvasAgentOps, type CanvasAgentOp, type CanvasAgentSnapshot } from "../utils/canvas-agent-ops";
-import { applyShortDramaAgentMode, SHORT_DRAMA_AGENT_PROMPT } from "../utils/short-drama-agent-prompt";
+import { applyShortDramaAgentMode, isShortDramaAgentPresetPrompt, SHORT_DRAMA_AGENT_PROMPT } from "../utils/short-drama-agent-prompt";
 import { AgentChatComposer, AgentChatMessage, AgentPanelTabs, AgentPendingToolCard, AgentWorkingMessage, type CanvasAgentChatAttachment } from "./canvas-agent-chat-ui";
 import { ShortDramaAgentPresetButton } from "./short-drama-agent-preset-button";
 
@@ -173,13 +173,14 @@ export function CanvasLocalAgentPanel({ snapshot, canUndoOps, collapsed, embedde
     const sendPrompt = async () => {
         const text = prompt.trim();
         const files = attachments;
-        const requestPrompt = promptWithAttachments(applyShortDramaAgentMode(text, creativeMode), files);
+        const requestCreativeMode: CanvasAgentCreativeMode = isShortDramaAgentPresetPrompt(text) ? "short_drama" : creativeMode;
+        const requestPrompt = promptWithAttachments(applyShortDramaAgentMode(text, requestCreativeMode), files);
         if (!connected || !requestPrompt || sending || waiting) return;
         if (attachmentPayloadBytes(files) > MAX_ATTACHMENT_PAYLOAD_BYTES) {
             addMessage({ role: "error", title: "图片过大", text: "图片附件超过 30MB，请删减后再发送。" });
             return;
         }
-        setAgentState({ activity: "发送中", sending: true, waiting: true });
+        setAgentState({ activity: "发送中", sending: true, waiting: true, ...(requestCreativeMode !== creativeMode ? { creativeMode: requestCreativeMode } : {}) });
         addMessage({ role: "user", text: text || "发送了图片", attachments: files });
         addEventLog("用户发送", { text, attachments: files.map(({ name, type, size }) => ({ name, type, size })) });
         try {
@@ -238,9 +239,11 @@ export function CanvasLocalAgentPanel({ snapshot, canUndoOps, collapsed, embedde
     };
 
     const toggleShortDramaMode = (active: boolean) => {
-        const nextMode: CanvasAgentCreativeMode = active ? "short_drama" : "general";
-        localStorage.setItem("canvas-agent-creative-mode", nextMode);
-        setAgentState({ creativeMode: nextMode, activeTab: "chat", ...(active && !prompt.trim() ? { prompt: SHORT_DRAMA_AGENT_PROMPT } : {}) });
+        if (active) {
+            setAgentState({ activeTab: "chat", prompt: SHORT_DRAMA_AGENT_PROMPT });
+            return;
+        }
+        setAgentState({ activeTab: "chat", creativeMode: "general", ...(isShortDramaAgentPresetPrompt(prompt) ? { prompt: "" } : {}) });
     };
 
     const handleToolCall = async (endpoint: string, token: string, payload: AgentPendingToolCall) => {
@@ -567,7 +570,7 @@ export function CanvasLocalAgentPanel({ snapshot, canUndoOps, collapsed, embedde
                         onRemoveAttachment={removeAttachment}
                         left={
                             <>
-                                <ShortDramaAgentPresetButton active={creativeMode === "short_drama"} disabled={sending || waiting} onToggle={toggleShortDramaMode} />
+                                <ShortDramaAgentPresetButton active={creativeMode === "short_drama"} presetInserted={isShortDramaAgentPresetPrompt(prompt)} disabled={sending || waiting} onToggle={toggleShortDramaMode} />
                                 {attachments.length ? <span className="text-[11px]" style={{ color: theme.node.muted }}>{formatBytes(attachmentPayloadBytes(attachments))} / 30MB</span> : null}
                             </>
                         }

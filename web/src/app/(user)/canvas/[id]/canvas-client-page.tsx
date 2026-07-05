@@ -702,7 +702,7 @@ function InfiniteCanvasPage() {
             if (toolbarImageSettingsOpenRef.current) return;
             setToolbarNodeId(null);
             toolbarHideTimerRef.current = null;
-        }, 120);
+        }, 360);
     }, []);
 
     const keepGroupToolbar = useCallback((rootId: string) => {

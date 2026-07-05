@@ -1,53 +1,66 @@
 "use client";
 
-import { Layers } from "lucide-react";
+import type { MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent } from "react";
 
-import { canvasThemes } from "@/lib/canvas-theme";
-import { useThemeStore } from "@/stores/use-theme-store";
-import type { NodeGroupBounds } from "../utils/canvas-node-groups";
+import { DEFAULT_GROUP_COLOR, type NodeGroupBounds } from "../utils/canvas-node-groups";
 
-type CanvasNodeGroupFrameProps = {
+type CanvasNodeGroupBackdropProps = {
     bounds: NodeGroupBounds;
     selected: boolean;
-    onMouseDown: (event: React.MouseEvent, rootId: string) => void;
+    onMouseDown: (event: ReactMouseEvent, rootId: string) => void;
+    onPointerEnter?: (rootId: string) => void;
+    onPointerLeave?: () => void;
 };
 
-export function CanvasNodeGroupFrame({ bounds, selected, onMouseDown }: CanvasNodeGroupFrameProps) {
-    const theme = canvasThemes[useThemeStore((state) => state.theme)];
+function hexToRgba(hex: string, alpha: number) {
+    if (hex.startsWith("rgba(") || hex.startsWith("rgb(")) return hex;
+    const normalized = hex.replace("#", "");
+    const value = normalized.length === 3 ? normalized.split("").map((char) => char + char).join("") : normalized;
+    const int = Number.parseInt(value, 16);
+    if (Number.isNaN(int)) return `rgba(203, 213, 225, ${alpha})`;
+    const r = (int >> 16) & 255;
+    const g = (int >> 8) & 255;
+    const b = int & 255;
+    return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+}
+
+function stopCanvasPointer(event: ReactPointerEvent | ReactMouseEvent) {
+    event.stopPropagation();
+}
+
+export function CanvasNodeGroupBackdrop({ bounds, selected, onMouseDown, onPointerEnter, onPointerLeave }: CanvasNodeGroupBackdropProps) {
+    const accent = bounds.color || DEFAULT_GROUP_COLOR;
 
     return (
         <div
-            className="pointer-events-none absolute"
+            data-group-frame="backdrop"
+            className="absolute"
             style={{
                 left: bounds.x,
                 top: bounds.y,
                 width: bounds.width,
                 height: bounds.height,
-                zIndex: selected ? 8 : 2,
+                zIndex: selected ? 6 : 1,
             }}
+            onPointerEnter={() => onPointerEnter?.(bounds.rootId)}
+            onPointerLeave={() => onPointerLeave?.()}
         >
             <div
-                className="pointer-events-none absolute inset-0 rounded-[28px] border"
+                data-group-frame-body
+                className="absolute inset-0 cursor-grab rounded-[28px] border transition-[box-shadow,background,border-color] duration-200 active:cursor-grabbing"
                 style={{
-                    borderColor: selected ? theme.node.activeStroke : `${theme.node.stroke}cc`,
-                    background: selected ? `${theme.node.panel}66` : `${theme.node.panel}40`,
-                    boxShadow: selected ? `0 0 0 1px ${theme.node.activeStroke}55` : "0 12px 32px rgba(15,23,42,.10)",
+                    borderColor: selected ? hexToRgba(accent, 0.82) : hexToRgba(accent, 0.38),
+                    background: selected ? hexToRgba(accent, selected && accent === DEFAULT_GROUP_COLOR ? 0.14 : 0.16) : hexToRgba(accent, 0.08),
+                    boxShadow: selected
+                        ? `0 0 0 1px ${hexToRgba(accent, 0.55)}, 0 0 28px ${hexToRgba(accent, 0.22)}, inset 0 1px 0 rgba(255,255,255,.08)`
+                        : `0 10px 28px ${hexToRgba(accent, 0.08)}`,
+                }}
+                onPointerDown={stopCanvasPointer}
+                onMouseDown={(event) => {
+                    stopCanvasPointer(event);
+                    onMouseDown(event, bounds.rootId);
                 }}
             />
-            <button
-                type="button"
-                data-group-drag-handle
-                className="pointer-events-auto absolute left-3 top-2.5 inline-flex h-7 max-w-[calc(100%-24px)] cursor-grab items-center gap-1.5 rounded-full border px-2.5 text-[11px] font-medium backdrop-blur-sm transition hover:opacity-90 active:cursor-grabbing"
-                style={{
-                    borderColor: selected ? `${theme.node.activeStroke}88` : theme.node.stroke,
-                    background: `${theme.toolbar.panel}ee`,
-                    color: theme.node.text,
-                }}
-                onMouseDown={(event) => onMouseDown(event, bounds.rootId)}
-            >
-                <Layers className="size-3.5 shrink-0 opacity-70" />
-                <span className="truncate">组合 · {bounds.memberIds.length}</span>
-            </button>
         </div>
     );
 }

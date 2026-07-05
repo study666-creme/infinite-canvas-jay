@@ -8,6 +8,7 @@ import { JimengToolbarButton } from "@/components/jimeng-settings-primitives";
 import { canvasThemes } from "@/lib/canvas-theme";
 import { useThemeStore } from "@/stores/use-theme-store";
 import type { CanvasResourceReference } from "../utils/canvas-resource-references";
+import { hideReferenceHoverPreview, showReferenceHoverPreview } from "./canvas-reference-hover-preview";
 
 type Props = {
     references: CanvasResourceReference[];
@@ -122,6 +123,8 @@ function MentionPickerMenu({
                     type="button"
                     className="flex w-full min-w-0 items-center gap-2 rounded-xl px-2 py-2 text-left text-xs transition"
                     style={{ background: index === activeIndex ? theme.toolbar.activeBg : "transparent", color: index === activeIndex ? theme.toolbar.activeText : theme.node.text }}
+                    onMouseEnter={(event) => showReferenceHoverPreview(reference, event.clientX, event.clientY)}
+                    onMouseLeave={() => hideReferenceHoverPreview()}
                     onMouseDown={(event) => {
                         event.preventDefault();
                         event.stopPropagation();
@@ -145,11 +148,11 @@ function MentionPickerMenu({
 }
 
 function ReferencePreview({ reference }: { reference: CanvasResourceReference }) {
-    if (reference.kind === "image" && reference.previewUrl) return <img src={reference.previewUrl} alt="" className="size-10 rounded-lg object-cover" />;
-    if (reference.kind === "video" && reference.previewUrl) return <video src={reference.previewUrl} className="size-10 rounded-lg bg-black object-cover" muted preload="metadata" />;
+    if (reference.kind === "image" && reference.previewUrl) return <img src={reference.previewUrl} alt="" className="size-12 rounded-lg object-cover" />;
+    if (reference.kind === "video" && reference.previewUrl) return <video src={reference.previewUrl} className="size-12 rounded-lg bg-black object-cover" muted preload="metadata" playsInline />;
     const Icon = reference.kind === "audio" ? Music2 : reference.kind === "video" ? Video : reference.kind === "image" ? ImageIcon : FileText;
     return (
-        <span className="grid size-10 shrink-0 place-items-center rounded-lg bg-black/10">
+        <span className="grid size-12 shrink-0 place-items-center rounded-lg bg-black/10">
             <Icon className="size-4" />
         </span>
     );

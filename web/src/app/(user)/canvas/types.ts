@@ -62,12 +62,14 @@ export type CanvasNodeMetadata = {
     isGroupRoot?: boolean;
     groupRootId?: string;
     groupMemberIds?: string[];
+    groupColor?: string;
+    groupName?: string;
     storageKey?: string;
     mimeType?: string;
     bytes?: number;
     durationMs?: number;
     videoTaskId?: string;
-    videoProvider?: "openai" | "seedance";
+    videoProvider?: "openai" | "seedance" | "xai";
     generationProgress?: number;
     generationStage?: string;
 };

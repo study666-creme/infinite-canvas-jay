@@ -10,9 +10,11 @@ import { motion } from "motion/react";
 import { canvasThemes } from "@/lib/canvas-theme";
 import { useThemeStore } from "@/stores/use-theme-store";
 import { useUserStore } from "@/stores/use-user-store";
-import { useCanvasAgentStore, type AgentAttachment, type AgentChatItem, type AgentEventLog, type AgentPanelTab, type AgentPendingToolCall, type AgentThreadSummary } from "../stores/use-canvas-agent-store";
+import { useCanvasAgentStore, type AgentAttachment, type AgentChatItem, type AgentEventLog, type AgentPanelTab, type AgentPendingToolCall, type AgentThreadSummary, type CanvasAgentCreativeMode } from "../stores/use-canvas-agent-store";
 import { summarizeCanvasAgentOps, type CanvasAgentOp, type CanvasAgentSnapshot } from "../utils/canvas-agent-ops";
+import { applyShortDramaAgentMode, SHORT_DRAMA_AGENT_PROMPT } from "../utils/short-drama-agent-prompt";
 import { AgentChatComposer, AgentChatMessage, AgentPanelTabs, AgentPendingToolCard, AgentWorkingMessage, type CanvasAgentChatAttachment } from "./canvas-agent-chat-ui";
+import { ShortDramaAgentPresetButton } from "./short-drama-agent-preset-button";
 
 const PANEL_MOTION_SECONDS = 0.5;
 const MAX_ATTACHMENTS = 6;
@@ -46,7 +48,7 @@ export function CanvasLocalAgentPanel({ snapshot, canUndoOps, collapsed, embedde
     const user = useUserStore((state) => state.user);
     const { message, modal } = App.useApp();
     const searchParams = useSearchParams();
-    const { width, url, token, connected, enabled, prompt, attachments, sending, waiting, messages, eventLogs, threads, activeThreadId, workspacePath, loadingThreads, activeTab, confirmTools, activity, connectError, pendingTool, setAgentState, addMessage: pushMessage, addEventLog: pushEventLog, clearEventLogs } = useCanvasAgentStore();
+    const { width, url, token, connected, enabled, prompt, attachments, sending, waiting, messages, eventLogs, threads, activeThreadId, workspacePath, loadingThreads, activeTab, creativeMode, confirmTools, activity, connectError, pendingTool, setAgentState, addMessage: pushMessage, addEventLog: pushEventLog, clearEventLogs } = useCanvasAgentStore();
     const [resizing, setResizing] = useState(false);
     const listRef = useRef<HTMLDivElement>(null);
     const snapshotRef = useRef(snapshot);
@@ -171,7 +173,7 @@ export function CanvasLocalAgentPanel({ snapshot, canUndoOps, collapsed, embedde
     const sendPrompt = async () => {
         const text = prompt.trim();
         const files = attachments;
-        const requestPrompt = promptWithAttachments(text, files);
+        const requestPrompt = promptWithAttachments(applyShortDramaAgentMode(text, creativeMode), files);
         if (!connected || !requestPrompt || sending || waiting) return;
         if (attachmentPayloadBytes(files) > MAX_ATTACHMENT_PAYLOAD_BYTES) {
             addMessage({ role: "error", title: "图片过大", text: "图片附件超过 30MB，请删减后再发送。" });
@@ -233,6 +235,12 @@ export function CanvasLocalAgentPanel({ snapshot, canUndoOps, collapsed, embedde
             attachmentUrlsRef.current.delete(removed.url);
         }
         setAgentState({ attachments: attachments.filter((item) => item.id !== id) });
+    };
+
+    const toggleShortDramaMode = (active: boolean) => {
+        const nextMode: CanvasAgentCreativeMode = active ? "short_drama" : "general";
+        localStorage.setItem("canvas-agent-creative-mode", nextMode);
+        setAgentState({ creativeMode: nextMode, activeTab: "chat", ...(active && !prompt.trim() ? { prompt: SHORT_DRAMA_AGENT_PROMPT } : {}) });
     };
 
     const handleToolCall = async (endpoint: string, token: string, payload: AgentPendingToolCall) => {
@@ -557,7 +565,12 @@ export function CanvasLocalAgentPanel({ snapshot, canUndoOps, collapsed, embedde
                         onSubmit={sendPrompt}
                         onAddFiles={addAttachments}
                         onRemoveAttachment={removeAttachment}
-                        left={attachments.length ? <span className="text-[11px]" style={{ color: theme.node.muted }}>{formatBytes(attachmentPayloadBytes(attachments))} / 30MB</span> : null}
+                        left={
+                            <>
+                                <ShortDramaAgentPresetButton active={creativeMode === "short_drama"} disabled={sending || waiting} onToggle={toggleShortDramaMode} />
+                                {attachments.length ? <span className="text-[11px]" style={{ color: theme.node.muted }}>{formatBytes(attachmentPayloadBytes(attachments))} / 30MB</span> : null}
+                            </>
+                        }
                     />
                 </>
             )}

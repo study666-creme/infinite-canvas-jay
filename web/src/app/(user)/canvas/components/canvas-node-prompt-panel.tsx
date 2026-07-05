@@ -179,6 +179,8 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
 
             <CanvasResourceMentionTextarea
                 ref={promptInputRef}
+                enableFullscreen
+                fullscreenTitle={node.type === CanvasNodeType.Text ? "文本节点提示词" : "生成提示词"}
                 value={prompt}
                 references={mentionReferences}
                 onChange={updatePrompt}

@@ -34,8 +34,10 @@ export const CANVAS_SHORTCUT_SECTIONS: ShortcutSection[] = [
         rows: [
             { keys: ["Shift", "拖动 / 点击"], value: "追加或取消选择节点" },
             { keys: ["Ctrl / Cmd", "A"], value: "全选节点" },
-            { keys: ["点击组内节点"], value: "选中整组并一起拖动" },
-            { keys: ["Ctrl / Cmd", "点击组内节点"], value: "仅选中该节点" },
+            { keys: ["点击组内节点"], value: "直接选中该节点并拖动" },
+            { keys: ["鼠标移入组边框/空白"], value: "显示组合功能栏（与节点工具栏相同）" },
+            { keys: ["组功能栏 · 名称"], value: "点击重命名组合" },
+            { keys: ["组功能栏 · 解组"], value: "确认后解散组合" },
             { keys: ["Esc"], value: "取消选择并关闭浮层" },
         ],
     },

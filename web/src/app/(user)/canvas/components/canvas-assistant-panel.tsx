@@ -20,10 +20,12 @@ import { Select, SelectContent, SelectItem, SelectTrigger } from "@/components/u
 import { CanvasPromptLibrary } from "./canvas-prompt-library";
 import { AgentChatComposer, AgentChatMessage, AgentModeSwitch, AgentPanelTabs, AgentWorkingMessage, type CanvasAgentChatMessage, type CanvasAgentMode } from "./canvas-agent-chat-ui";
 import { CanvasLocalAgentPanel } from "./canvas-local-agent-panel";
+import { ShortDramaAgentPresetButton } from "./short-drama-agent-preset-button";
 import { NODE_DEFAULT_SIZE } from "../constants";
 import { CanvasNodeType, type CanvasAssistantMessage, type CanvasAssistantReference, type CanvasAssistantSession, type CanvasNodeData } from "../types";
-import { useCanvasAgentStore } from "../stores/use-canvas-agent-store";
+import { useCanvasAgentStore, type CanvasAgentCreativeMode } from "../stores/use-canvas-agent-store";
 import { summarizeCanvasAgentOps, type CanvasAgentOp, type CanvasAgentSnapshot } from "../utils/canvas-agent-ops";
+import { SHORT_DRAMA_AGENT_PROMPT, SHORT_DRAMA_AGENT_MODE_CONTEXT } from "../utils/short-drama-agent-prompt";
 
 export const CANVAS_AGENT_PANEL_MOTION_MS = 500;
 const PANEL_MOTION_SECONDS = CANVAS_AGENT_PANEL_MOTION_MS / 1000;
@@ -151,6 +153,7 @@ export function CanvasAssistantPanel({ nodes, selectedNodeIds, snapshot, session
     const openConfigDialog = useConfigStore((state) => state.openConfigDialog);
     const updateConfig = useConfigStore((state) => state.updateConfig);
     const confirmTools = useCanvasAgentStore((state) => state.confirmTools);
+    const creativeMode = useCanvasAgentStore((state) => state.creativeMode);
     const setAgentState = useCanvasAgentStore((state) => state.setAgentState);
     const [width, setWidth] = useState(520);
     const [view, setView] = useState<OnlineAgentTab>("chat");
@@ -277,7 +280,7 @@ export function CanvasAssistantPanel({ nodes, selectedNodeIds, snapshot, session
         const requestConfig = { ...effectiveConfig, model: effectiveConfig.textModel || effectiveConfig.model };
         try {
             setIsRunning(true);
-            const messages = await buildToolAgentMessages(snapshotRef.current, history, userMessage);
+            const messages = await buildToolAgentMessages(snapshotRef.current, history, userMessage, creativeMode);
             addOnlineLog(`Agent Tool Loop ${loop.step} 开始`, { toolChoice: "required" });
             let streamed = "";
             const result = await requestToolResponse({ ...requestConfig, systemPrompt: "" }, messages, ONLINE_AGENT_TOOLS, "required", (text) => {
@@ -451,6 +454,13 @@ export function CanvasAssistantPanel({ nodes, selectedNodeIds, snapshot, session
         await sendMessage(text, messages);
     };
 
+    const toggleShortDramaMode = (active: boolean) => {
+        const nextMode: CanvasAgentCreativeMode = active ? "short_drama" : "general";
+        localStorage.setItem("canvas-agent-creative-mode", nextMode);
+        setAgentState({ creativeMode: nextMode });
+        if (active && !prompt.trim()) setPrompt(SHORT_DRAMA_AGENT_PROMPT);
+    };
+
     const addImagesToCanvas = (files: FileList | File[] | null) => {
         const file = Array.from(files || []).find((item) => item.type.startsWith("image/"));
         if (file) onPasteImage(file);
@@ -581,6 +591,7 @@ export function CanvasAssistantPanel({ nodes, selectedNodeIds, snapshot, session
                         onAddFiles={addImagesToCanvas}
                         left={
                             <>
+                                <ShortDramaAgentPresetButton active={creativeMode === "short_drama"} disabled={isRunning} onToggle={toggleShortDramaMode} />
                                 <CanvasPromptLibrary onSelect={setPrompt} />
                                 <AgentTextModelPicker config={effectiveConfig} value={effectiveConfig.textModel} onChange={(model) => updateConfig("textModel", model)} />
                             </>
@@ -1261,10 +1272,11 @@ function buildAssistantReferences(nodes: CanvasNodeData[], selectedNodeIds: Set<
         .filter((item): item is CanvasAssistantReference => Boolean(item));
 }
 
-async function buildToolAgentMessages(snapshot: CanvasAgentSnapshot, history: CanvasAssistantMessage[], userMessage: CanvasAssistantMessage): Promise<ResponseInputMessage[]> {
+async function buildToolAgentMessages(snapshot: CanvasAgentSnapshot, history: CanvasAssistantMessage[], userMessage: CanvasAssistantMessage, creativeMode: CanvasAgentCreativeMode): Promise<ResponseInputMessage[]> {
     const refs = userMessage.references || [];
+    const systemPrompt = [ONLINE_AGENT_PROMPT, creativeMode === "short_drama" ? SHORT_DRAMA_AGENT_MODE_CONTEXT : ""].filter(Boolean).join("\n\n");
     return [
-        { role: "system", content: ONLINE_AGENT_PROMPT },
+        { role: "system", content: systemPrompt },
         ...history
             .filter((message) => message.role === "user" || message.role === "assistant" || message.role === "system")
             .slice(-8)

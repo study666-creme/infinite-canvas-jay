@@ -8,8 +8,16 @@ import { buildApiUrl, modelOptionName, resolveModelRequestConfig, type AiConfig 
 import type { ReferenceImage } from "@/types/image";
 import type { ReferenceAudio, ReferenceVideo } from "@/types/media";
 
-type VideoResponse = { id: string; status?: string; error?: { message?: string } };
+type VideoResponse = { id?: string; request_id?: string; task_id?: string; status?: string; state?: string; error?: { message?: string } | string | null; video?: { url?: string } | null; url?: string; video_url?: string; output?: unknown; result?: unknown; data?: unknown; content?: unknown };
 type ApiVideoResponse = VideoResponse | { code?: number; data?: VideoResponse | null; msg?: string };
+type XaiVideoTask = {
+    request_id?: string;
+    id?: string;
+    status?: string;
+    error?: { code?: string; message?: string } | string | null;
+    video?: { url?: string; duration?: number } | null;
+    progress?: number;
+};
 type SeedanceTask = {
     id: string;
     status?: "queued" | "running" | "succeeded" | "failed" | "cancelled" | "expired";
@@ -27,8 +35,9 @@ export type VideoGenerationProgress = {
     message: string;
 };
 
-export type VideoGenerationResult = { blob?: Blob; url?: string; mimeType?: string; taskId?: string; provider?: "openai" | "seedance"; model?: string };
-export type VideoGenerationTask = { id: string; provider: "openai" | "seedance"; model: string };
+export type VideoGenerationProvider = "openai" | "seedance" | "xai";
+export type VideoGenerationResult = { blob?: Blob; url?: string; mimeType?: string; taskId?: string; provider?: VideoGenerationProvider; model?: string };
+export type VideoGenerationTask = { id: string; provider: VideoGenerationProvider; model: string };
 export type VideoGenerationTaskState = { status: "pending" } | { status: "completed"; result: VideoGenerationResult } | { status: "failed"; error: string };
 
 function aiApiUrl(config: AiConfig, path: string) {
@@ -71,6 +80,12 @@ export async function createVideoGenerationTask(config: AiConfig, prompt: string
     if (isSeedanceVideoConfig(requestConfig)) {
         return createSeedanceTask(requestConfig, selectedModel, prompt, references, videoReferences, audioReferences, options);
     }
+    if (isXaiVideoModel(selectedModel) && isOfficialXaiBaseUrl(requestConfig.baseUrl)) {
+        if (videoReferences.length || audioReferences.length) {
+            throw new Error("Grok Imagine 视频接口暂不支持画布参考视频或参考音频，请移除参考素材");
+        }
+        return createXaiVideoTask(requestConfig, selectedModel, prompt, references, options);
+    }
     if (videoReferences.length || audioReferences.length) {
         throw new Error("当前视频接口不支持参考视频或参考音频，请切换到 Seedance 2.0 / 火山 Agent Plan 模型，或移除参考素材");
     }
@@ -80,7 +95,9 @@ export async function createVideoGenerationTask(config: AiConfig, prompt: string
 export async function pollVideoGenerationTask(config: AiConfig, task: VideoGenerationTask, options?: RequestOptions): Promise<VideoGenerationTaskState> {
     const requestConfig = resolveModelRequestConfig(config, task.model);
     assertVideoConfig(requestConfig, requestConfig.model);
-    return task.provider === "seedance" ? pollSeedanceTask(requestConfig, task, options) : pollOpenAIVideoTask(requestConfig, task, options);
+    if (task.provider === "seedance") return pollSeedanceTask(requestConfig, task, options);
+    if (task.provider === "xai") return pollXaiVideoTask(requestConfig, task, options);
+    return pollOpenAIVideoTask(requestConfig, task, options);
 }
 
 export async function storeGeneratedVideo(result: VideoGenerationResult, config?: AiConfig): Promise<UploadedFile> {
@@ -125,13 +142,13 @@ export async function storeGeneratedVideo(result: VideoGenerationResult, config?
 
 export type VideoPlaybackResult = { kind: "url"; url: string } | { kind: "file"; url: string; file: UploadedFile } | { kind: "error"; message: string };
 
-type VideoPlaybackInput = {
+export type VideoPlaybackInput = {
     config: AiConfig;
     content?: string;
     storageKey?: string;
     mimeType?: string;
     taskId?: string;
-    provider?: "openai" | "seedance";
+    provider?: VideoGenerationProvider;
     model?: string;
     ignoreStorageKey?: boolean;
 };
@@ -150,7 +167,8 @@ async function isPlayableMediaUrl(url: string) {
 
 export async function resolveVideoPlayback(input: VideoPlaybackInput): Promise<VideoPlaybackResult> {
     const { config, content = "", storageKey, mimeType = "video/mp4", taskId, provider, model, ignoreStorageKey = false } = input;
-    const hasApi = Boolean(config.baseUrl.trim() && config.apiKey.trim());
+    const requestConfig = model ? resolveModelRequestConfig(config, model) : config;
+    const hasApi = Boolean(requestConfig.baseUrl.trim() && requestConfig.apiKey.trim());
 
     if (storageKey && !ignoreStorageKey) {
         const blob = await getMediaBlob(storageKey);
@@ -183,7 +201,7 @@ export async function resolveVideoPlayback(input: VideoPlaybackInput): Promise<V
         }
         if (taskId && provider && model && hasApi) {
             try {
-                const blob = normalizeVideoBlob(await downloadTaskContentBlob(config, { id: taskId, provider, model }), mimeType);
+                const blob = normalizeVideoBlob(await downloadTaskContentBlob(requestConfig, { id: taskId, provider, model }), mimeType);
                 const file = await uploadMediaFile(blob, "video");
                 return { kind: "file", url: file.url, file };
             } catch {
@@ -195,7 +213,7 @@ export async function resolveVideoPlayback(input: VideoPlaybackInput): Promise<V
 
     if (taskId && provider && model && hasApi) {
         try {
-            const blob = normalizeVideoBlob(await downloadTaskContentBlob(config, { id: taskId, provider, model }), mimeType);
+            const blob = normalizeVideoBlob(await downloadTaskContentBlob(requestConfig, { id: taskId, provider, model }), mimeType);
             const file = await uploadMediaFile(blob, "video");
             return { kind: "file", url: file.url, file };
         } catch {
@@ -205,11 +223,14 @@ export async function resolveVideoPlayback(input: VideoPlaybackInput): Promise<V
 
     if (/^https?:\/\//i.test(content) && hasApi) {
         try {
-            const blob = normalizeVideoBlob(await downloadRemoteVideoBlob(config, content), mimeType);
+            const blob = normalizeVideoBlob(await downloadRemoteVideoBlob(requestConfig, content), mimeType);
             const file = await uploadMediaFile(blob, "video");
             return { kind: "file", url: file.url, file };
         } catch (error) {
             const message = error instanceof Error ? error.message : "视频代理下载失败";
+            if (/404|405|not found|not allowed/i.test(message)) {
+                return { kind: "url", url: content };
+            }
             if (/failed to fetch|network error/i.test(message)) {
                 return { kind: "error", message: "无法连接视频网关，请确认 Base URL 在本机可访问（127.0.0.1 仅在本机浏览器有效）" };
             }
@@ -238,6 +259,11 @@ async function blobFromDataUrl(dataUrl: string) {
 }
 
 export async function downloadTaskContentBlob(config: AiConfig, task: VideoGenerationTask, options?: RequestOptions) {
+    if (task.provider === "xai") {
+        const state = await pollXaiVideoTask(config, task, options);
+        if (state.status !== "completed" || !state.result.url) throw new Error("Grok 视频任务尚未返回可下载地址");
+        return downloadRemoteVideoBlob(config, state.result.url, options);
+    }
     const url = task.provider === "seedance" ? seedanceContentApiUrl(config, task.id) : aiApiUrl(config, `/videos/${task.id}/content`);
     const response = await axios.get<Blob>(url, { headers: aiHeaders(config), responseType: "blob", signal: options?.signal, timeout: VIDEO_REQUEST_TIMEOUT_MS });
     await assertVideoBlob(response.data);
@@ -269,23 +295,66 @@ async function createOpenAIVideoTask(config: AiConfig, model: string, prompt: st
     files.forEach((file) => body.append("input_reference[]", file));
     try {
         const created = unwrapVideoResponse((await axios.post<ApiVideoResponse>(aiApiUrl(config, "/videos"), body, { headers: aiHeaders(config), signal: options?.signal, timeout: VIDEO_REQUEST_TIMEOUT_MS })).data);
-        if (!created.id) throw new Error("视频接口没有返回任务 ID");
-        return { id: created.id, provider: "openai", model };
+        const id = extractVideoId(created);
+        if (!id) throw new Error("视频接口没有返回任务 ID");
+        return { id, provider: "openai", model };
     } catch (error) {
         throw new Error(readAxiosError(error, "视频任务创建失败"));
+    }
+}
+
+async function createXaiVideoTask(config: AiConfig, model: string, prompt: string, references: ReferenceImage[], options?: RequestOptions): Promise<VideoGenerationTask> {
+    const payload: Record<string, unknown> = {
+        model: modelOptionName(model),
+        prompt,
+        duration: normalizeXaiVideoDuration(config.videoSeconds),
+        aspect_ratio: normalizeXaiAspectRatio(config.size),
+        resolution: normalizeXaiResolution(config.vquality, model),
+    };
+    const firstReference = references[0];
+    if (firstReference) {
+        payload.image = { url: await imageToDataUrl(firstReference) };
+    }
+    try {
+        const created = unwrapXaiVideoTask((await axios.post<ApiEnvelope<XaiVideoTask>>(aiApiUrl(config, "/videos/generations"), payload, { headers: aiHeaders(config, "application/json"), signal: options?.signal, timeout: VIDEO_REQUEST_TIMEOUT_MS })).data);
+        const id = created.request_id || created.id;
+        if (!id) throw new Error("Grok 视频接口没有返回 request_id");
+        return { id, provider: "xai", model };
+    } catch (error) {
+        throw new Error(readAxiosError(error, "Grok 视频任务创建失败"));
     }
 }
 
 async function pollOpenAIVideoTask(config: AiConfig, task: VideoGenerationTask, options?: RequestOptions): Promise<VideoGenerationTaskState> {
     try {
         const video = unwrapVideoResponse((await axios.get<ApiVideoResponse>(aiApiUrl(config, `/videos/${task.id}`), { headers: aiHeaders(config), signal: options?.signal, timeout: VIDEO_REQUEST_TIMEOUT_MS })).data);
-        if (video.status === "completed") {
-            return { status: "completed", result: { taskId: task.id, provider: task.provider, model: task.model, mimeType: "video/mp4" } };
+        const status = extractVideoStatus(video);
+        if (status === "completed" || status === "succeeded" || status === "done") {
+            const url = extractVideoUrl(video);
+            return { status: "completed", result: { url, taskId: task.id, provider: task.provider, model: task.model, mimeType: "video/mp4" } };
         }
-        if (video.status === "failed" || video.status === "cancelled") return { status: "failed", error: video.error?.message || "视频生成失败" };
+        if (status === "failed" || status === "cancelled" || status === "expired") return { status: "failed", error: videoTaskError(video) || "视频生成失败" };
+        const url = extractVideoUrl(video);
+        if (url && !status) return { status: "completed", result: { url, taskId: task.id, provider: task.provider, model: task.model, mimeType: "video/mp4" } };
         return { status: "pending" };
     } catch (error) {
         throw new Error(readAxiosError(error, "视频任务查询失败"));
+    }
+}
+
+async function pollXaiVideoTask(config: AiConfig, task: VideoGenerationTask, options?: RequestOptions): Promise<VideoGenerationTaskState> {
+    try {
+        const state = unwrapXaiVideoTask((await axios.get<ApiEnvelope<XaiVideoTask>>(aiApiUrl(config, `/videos/${task.id}`), { headers: aiHeaders(config), signal: options?.signal, timeout: VIDEO_REQUEST_TIMEOUT_MS })).data);
+        const status = String(state.status || "").toLowerCase();
+        if (status === "done" || status === "succeeded" || status === "completed") {
+            const url = extractVideoUrl(state);
+            if (!url) return { status: "failed", error: "Grok 视频任务完成但没有返回视频 URL" };
+            return { status: "completed", result: { url, taskId: task.id, provider: task.provider, model: task.model, mimeType: "video/mp4" } };
+        }
+        if (status === "failed" || status === "cancelled" || status === "expired") return { status: "failed", error: xaiTaskError(state) || `Grok 视频生成${status === "expired" ? "超时" : "失败"}` };
+        return { status: "pending" };
+    } catch (error) {
+        throw new Error(readAxiosError(error, "Grok 视频任务查询失败"));
     }
 }
 
@@ -432,12 +501,65 @@ function normalizeVideoResolution(value: string) {
     return `${resolution}p`;
 }
 
+function extractVideoId(payload: unknown): string | undefined {
+    return firstStringAt(payload, ["id", "request_id", "task_id", "video.id", "video.request_id", "data.id", "data.request_id", "data.task_id", "result.id", "result.request_id", "result.task_id"]);
+}
+
+function extractVideoStatus(payload: unknown) {
+    return (firstStringAt(payload, ["status", "state", "task_status", "data.status", "data.state", "result.status", "result.state", "video.status"]) || "").toLowerCase();
+}
+
+function extractVideoUrl(payload: unknown): string | undefined {
+    const direct = firstStringAt(payload, ["video.url", "url", "video_url", "download_url", "output.url", "result.url", "result.video_url", "data.url", "data.video_url", "data.video.url", "content.url", "content.video_url", "file.url"]);
+    if (isVideoUrlValue(direct)) return direct;
+    if (Array.isArray(payload)) {
+        for (const item of payload) {
+            const url = extractVideoUrl(item);
+            if (url) return url;
+        }
+        return undefined;
+    }
+    if (!isRecord(payload)) return undefined;
+    for (const key of ["data", "result", "results", "output", "outputs", "video", "videos", "content", "contents"]) {
+        const url = extractVideoUrl(payload[key]);
+        if (url) return url;
+    }
+    return undefined;
+}
+
+function firstStringAt(payload: unknown, paths: string[]) {
+    for (const path of paths) {
+        const value = valueAtPath(payload, path);
+        if (typeof value === "string" && value.trim()) return value.trim();
+    }
+    return undefined;
+}
+
+function valueAtPath(payload: unknown, path: string): unknown {
+    return path.split(".").reduce<unknown>((current, key) => {
+        if (Array.isArray(current)) return current.map((item) => (isRecord(item) ? item[key] : undefined)).find((value) => value !== undefined);
+        return isRecord(current) ? current[key] : undefined;
+    }, payload);
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+    return Boolean(value && typeof value === "object");
+}
+
+function isVideoUrlValue(value: unknown): value is string {
+    return typeof value === "string" && /^(https?:|blob:|data:video\/)/i.test(value.trim());
+}
+
 function unwrapVideoResponse(payload: ApiVideoResponse) {
     return unwrapEnvelope(payload, "接口没有返回视频任务");
 }
 
 function unwrapSeedanceTask(payload: ApiEnvelope<SeedanceTask>) {
     return unwrapEnvelope(payload, "Seedance 接口没有返回任务");
+}
+
+function unwrapXaiVideoTask(payload: ApiEnvelope<XaiVideoTask>) {
+    return unwrapEnvelope(payload, "Grok 视频接口没有返回任务");
 }
 
 function unwrapEnvelope<T>(payload: ApiEnvelope<T>, emptyMessage: string): T {
@@ -450,11 +572,69 @@ function unwrapEnvelope<T>(payload: ApiEnvelope<T>, emptyMessage: string): T {
     return payload as T;
 }
 
+function isXaiVideoModel(model: string) {
+    return modelOptionName(model).toLowerCase().includes("grok-imagine-video");
+}
+
+function isOfficialXaiBaseUrl(baseUrl: string) {
+    try {
+        const hostname = new URL(baseUrl).hostname.toLowerCase();
+        return hostname === "api.x.ai" || hostname.endsWith(".x.ai");
+    } catch {
+        return false;
+    }
+}
+
+function normalizeXaiVideoDuration(value: string) {
+    const seconds = Math.floor(Number(value) || 6);
+    return Math.max(1, Math.min(15, seconds));
+}
+
+function normalizeXaiAspectRatio(value: string) {
+    if (["1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3"].includes(value)) return value;
+    const match = value.match(/^(\d+)x(\d+)$/);
+    if (!match) return "16:9";
+    const width = Number(match[1]);
+    const height = Number(match[2]);
+    if (!width || !height) return "16:9";
+    const ratio = width / height;
+    const options = [
+        { value: "1:1", ratio: 1 },
+        { value: "16:9", ratio: 16 / 9 },
+        { value: "9:16", ratio: 9 / 16 },
+        { value: "4:3", ratio: 4 / 3 },
+        { value: "3:4", ratio: 3 / 4 },
+        { value: "3:2", ratio: 3 / 2 },
+        { value: "2:3", ratio: 2 / 3 },
+    ];
+    return options.reduce((best, item) => (Math.abs(item.ratio - ratio) < Math.abs(best.ratio - ratio) ? item : best), options[0]).value;
+}
+
+function normalizeXaiResolution(value: string, model: string) {
+    const normalized = normalizeVideoResolution(value);
+    if (normalized === "1080p" && !modelOptionName(model).toLowerCase().includes("1.5")) return "720p";
+    return ["480p", "720p", "1080p"].includes(normalized) ? normalized : "480p";
+}
+
+function xaiTaskError(state: XaiVideoTask) {
+    if (!state.error) return "";
+    if (typeof state.error === "string") return state.error;
+    return [state.error.code, state.error.message].filter(Boolean).join("：");
+}
+
+function videoTaskError(state: unknown) {
+    if (!isRecord(state)) return "";
+    const error = state.error;
+    if (!error) return "";
+    if (typeof error === "string") return error;
+    return isRecord(error) && typeof error.message === "string" ? error.message : "";
+}
+
 function readAxiosError(error: unknown, fallback: string) {
     if (axios.isCancel(error)) return "请求已取消";
-    if (axios.isAxiosError<{ error?: { message?: string }; msg?: string; code?: number }>(error)) {
+    if (axios.isAxiosError<{ error?: { code?: string; message?: string } | string; msg?: string; code?: number }>(error)) {
         const responseData = error.response?.data;
-        return responseData?.msg || responseData?.error?.message || statusMessage(error.response?.status, fallback);
+        return responseData?.msg || (typeof responseData?.error === "string" ? responseData.error : responseData?.error?.message) || statusMessage(error.response?.status, fallback);
     }
     if (error instanceof DOMException && error.name === "AbortError") return "请求已取消";
     return error instanceof Error ? error.message : fallback;

@@ -2,12 +2,13 @@
 
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
-import { ChevronRight, Image as ImageIcon, Music2, Plus, RefreshCw, Star, Video } from "lucide-react";
+import { ChevronRight, Image as ImageIcon, Maximize2, Music2, Plus, RefreshCw, Star, Video } from "lucide-react";
 
 import { canvasThemes } from "@/lib/canvas-theme";
 import { formatBytes } from "@/lib/image-utils";
 import { useThemeStore } from "@/stores/use-theme-store";
 import { CanvasResourceMentionTextarea, placeCaretAtEnd, type CanvasResourceMentionTextareaHandle } from "./canvas-resource-mention-textarea";
+import { CanvasTextFullscreenOverlay } from "./canvas-text-fullscreen-overlay";
 import { CanvasNodeLoadingState } from "./canvas-node-loading-state";
 import { CanvasVideoPlayer, type CanvasVideoPlayerHandle } from "./canvas-video-player";
 import { CanvasNodeType, type CanvasNodeData, type ConnectionHandle, type Position } from "../types";
@@ -77,6 +78,9 @@ type NodeContentRendererProps = {
     onSetBatchPrimary?: () => void;
     onVideoPersisted?: (file: { url: string; storageKey: string; bytes: number; mimeType: string; width?: number; height?: number; durationMs?: number }) => void;
     onRegisterVideoControl?: (handle: CanvasVideoPlayerHandle | null) => void;
+    hovered?: boolean;
+    textFullscreenOpen?: boolean;
+    onTextFullscreenChange?: (open: boolean) => void;
 };
 
 export const CanvasNode = React.memo(function CanvasNode({
@@ -123,6 +127,7 @@ export const CanvasNode = React.memo(function CanvasNode({
     const [hovered, setHovered] = useState(false);
     const [connectHover, setConnectHover] = useState<"left" | "right" | null>(null);
     const [isEditingContent, setIsEditingContent] = useState(false);
+    const [textFullscreenOpen, setTextFullscreenOpen] = useState(false);
     const hasImageContent = data.type === CanvasNodeType.Image && Boolean(data.metadata?.content);
     const hasVideoContent = data.type === CanvasNodeType.Video && Boolean(data.metadata?.content);
     const hasAudioContent = data.type === CanvasNodeType.Audio && Boolean(data.metadata?.content);
@@ -143,6 +148,7 @@ export const CanvasNode = React.memo(function CanvasNode({
         keepRatio: false,
         ratio: 1,
     });
+    const lastResizeEmitRef = useRef<{ width: number; height: number; x: number; y: number } | null>(null);
 
     useEffect(() => {
         const textarea = textareaRef.current?.getEditorElement();
@@ -229,10 +235,22 @@ export const CanvasNode = React.memo(function CanvasNode({
                 }
             }
 
-            onResize(data.id, width, height, {
+            const nextPosition = {
                 x: fromLeft ? startRight - width : resizeRef.current.startLeft,
                 y: fromTop ? startBottom - height : resizeRef.current.startTop,
-            });
+            };
+            const last = lastResizeEmitRef.current;
+            if (
+                last &&
+                Math.abs(last.width - width) < 0.5 &&
+                Math.abs(last.height - height) < 0.5 &&
+                Math.abs(last.x - nextPosition.x) < 0.5 &&
+                Math.abs(last.y - nextPosition.y) < 0.5
+            ) {
+                return;
+            }
+            lastResizeEmitRef.current = { width, height, x: nextPosition.x, y: nextPosition.y };
+            onResize(data.id, width, height, nextPosition);
         },
         [data.id, onResize, scale],
     );
@@ -240,6 +258,7 @@ export const CanvasNode = React.memo(function CanvasNode({
     const handleResizeUp = useCallback(() => {
         if (!resizeRef.current.isResizing) return;
         resizeRef.current.isResizing = false;
+        lastResizeEmitRef.current = null;
         onResizeActiveChange?.(false);
         window.removeEventListener("pointermove", handleResizeMove);
         window.removeEventListener("pointerup", handleResizeUp);
@@ -250,6 +269,7 @@ export const CanvasNode = React.memo(function CanvasNode({
         event.stopPropagation();
         event.preventDefault();
         onResizeActiveChange?.(true);
+        lastResizeEmitRef.current = null;
         resizeRef.current = {
             isResizing: true,
             handle,
@@ -294,7 +314,8 @@ export const CanvasNode = React.memo(function CanvasNode({
             data-node-id={data.id}
             className={`node-element absolute flex select-none flex-col transition-shadow duration-200 ${showSelectionChrome ? "z-50" : "z-10"}`}
             style={{
-                transform: `translate(${data.position.x}px, ${data.position.y}px)`,
+                left: data.position.x,
+                top: data.position.y,
                 width: data.width,
                 height: data.height,
                 transition: "box-shadow 200ms ease",
@@ -350,7 +371,7 @@ export const CanvasNode = React.memo(function CanvasNode({
                     }
                     if (data.type !== CanvasNodeType.Text) return;
                     event.stopPropagation();
-                    setIsEditingContent(true);
+                    setTextFullscreenOpen(true);
                 }}
             >
                 <div
@@ -387,6 +408,9 @@ export const CanvasNode = React.memo(function CanvasNode({
                         onSetBatchPrimary={() => onSetBatchPrimary?.(data)}
                         onVideoPersisted={onVideoPersisted ? (file) => onVideoPersisted(data.id, file) : undefined}
                         onRegisterVideoControl={onRegisterVideoControl ? (handle) => onRegisterVideoControl(data.id, handle) : undefined}
+                        hovered={hovered}
+                        textFullscreenOpen={textFullscreenOpen}
+                        onTextFullscreenChange={setTextFullscreenOpen}
                     />
                 </div>
 
@@ -411,8 +435,8 @@ export const CanvasNode = React.memo(function CanvasNode({
                 ) : null}
             </div>
 
-            <ConnectionHandlePlus side="left" visible={hovered || connectHover === "left" || leftHandleActive} emphasized={leftHandleActive} onHoverChange={(active) => setConnectHover(active ? "left" : connectHover === "left" ? null : connectHover)} onConnectStart={(event) => onConnectStart(event, data.id, "target")} onConnectMenu={onConnectMenu ? () => onConnectMenu(data.id, "target") : undefined} />
-            <ConnectionHandlePlus side="right" visible={data.type !== CanvasNodeType.Config && (hovered || connectHover === "right" || rightHandleActive)} emphasized={rightHandleActive} onHoverChange={(active) => setConnectHover(active ? "right" : connectHover === "right" ? null : connectHover)} onConnectStart={(event) => onConnectStart(event, data.id, "source")} onConnectMenu={onConnectMenu ? () => onConnectMenu(data.id, "source") : undefined} />
+            <ConnectionHandlePlus side="left" visible={showSelectionChrome || hovered || connectHover === "left" || leftHandleActive} emphasized={leftHandleActive} onHoverChange={(active) => setConnectHover(active ? "left" : connectHover === "left" ? null : connectHover)} onConnectStart={(event) => onConnectStart(event, data.id, "target")} onConnectMenu={onConnectMenu ? () => onConnectMenu(data.id, "target") : undefined} />
+            <ConnectionHandlePlus side="right" visible={data.type !== CanvasNodeType.Config && (showSelectionChrome || hovered || connectHover === "right" || rightHandleActive)} emphasized={rightHandleActive} onHoverChange={(active) => setConnectHover(active ? "right" : connectHover === "right" ? null : connectHover)} onConnectStart={(event) => onConnectStart(event, data.id, "source")} onConnectMenu={onConnectMenu ? () => onConnectMenu(data.id, "source") : undefined} />
 
             {showPanel && renderPanel ? <div className="absolute left-1/2 top-full z-[70] w-[min(640px,calc(100vw-48px))] -translate-x-1/2 pt-4">{renderPanel(data)}</div> : null}
         </div>
@@ -449,8 +473,7 @@ function ErrorContent({ node, theme, onRetry }: Pick<NodeContentRendererProps, "
     return (
         <div className="flex max-w-[260px] flex-col items-center gap-3 px-5 text-center">
             <div className="text-xs leading-5 text-red-300">{node.metadata?.errorDetails || "生成失败"}</div>
-            <button
-                type="button"
+            <span
                 className="inline-flex h-8 items-center gap-1.5 rounded-full border px-3 text-xs font-medium transition hover:scale-[1.02]"
                 style={{ background: theme.toolbar.panel, borderColor: theme.toolbar.border, color: theme.node.text }}
                 onClick={(event) => {
@@ -461,7 +484,7 @@ function ErrorContent({ node, theme, onRetry }: Pick<NodeContentRendererProps, "
             >
                 <RefreshCw className="size-3.5" />
                 重试
-            </button>
+            </span>
         </div>
     );
 }
@@ -474,55 +497,104 @@ function UnknownNodeContent({ theme }: Pick<NodeContentRendererProps, "theme">) 
     );
 }
 
-function TextContent({ node, theme, isEditingContent, textareaRef, mentionReferences, onContentChange, onStopEditing, onGenerateImage }: NodeContentRendererProps) {
+function TextContent({ node, theme, isEditingContent, textareaRef, mentionReferences, onContentChange, onStopEditing, onGenerateImage, hovered = false, textFullscreenOpen = false, onTextFullscreenChange }: NodeContentRendererProps) {
     const fontSize = node.metadata?.fontSize || 14;
     const textStyle = { fontSize: `${fontSize}px`, lineHeight: `${Math.round(fontSize * 1.65)}px`, color: theme.node.text, boxSizing: "border-box" } as React.CSSProperties;
+    const fullscreenEditorRef = useRef<CanvasResourceMentionTextareaHandle | null>(null);
+    const previewRef = useRef<HTMLDivElement | null>(null);
+
+    useEffect(() => {
+        if (!textFullscreenOpen) return;
+        const frame = requestAnimationFrame(() => fullscreenEditorRef.current?.focusEditor());
+        return () => cancelAnimationFrame(frame);
+    }, [textFullscreenOpen]);
+
+    useEffect(() => {
+        const preview = previewRef.current;
+        if (!preview || isEditingContent) return;
+        const handleWheel = (event: WheelEvent) => event.stopPropagation();
+        preview.addEventListener("wheel", handleWheel, { passive: false });
+        return () => preview.removeEventListener("wheel", handleWheel);
+    }, [isEditingContent, node.metadata?.content]);
+
+    const openFullscreen = (event?: React.MouseEvent | React.PointerEvent) => {
+        event?.stopPropagation();
+        onTextFullscreenChange?.(true);
+    };
 
     return (
-        <div className="flex h-full w-full flex-col overflow-hidden pt-8">
-            <button
-                type="button"
-                className="absolute right-3 top-3 z-20 inline-flex h-8 items-center gap-1 rounded-full border px-2.5 text-xs font-medium opacity-85 backdrop-blur-md transition hover:scale-[1.02] hover:opacity-100"
-                style={{ background: `${theme.toolbar.panel}dd`, borderColor: theme.node.stroke, color: theme.node.text }}
-                onClick={(event) => {
-                    event.stopPropagation();
-                    onGenerateImage?.(node);
-                }}
-                onMouseDown={(event) => event.stopPropagation()}
-                onPointerDown={(event) => event.stopPropagation()}
-                title="用文本生图"
-                aria-label="用文本生图"
-            >
-                <ImageIcon className="size-3.5" />
-                生图
-            </button>
-            {isEditingContent ? (
+        <>
+            <div className="flex h-full w-full min-h-0 flex-col overflow-hidden pt-8" data-canvas-no-zoom>
+                <div className="absolute right-3 top-3 z-20 flex flex-col items-end gap-1.5">
+                    <button
+                        type="button"
+                        className="inline-flex h-8 items-center gap-1 rounded-full border px-2.5 text-xs font-medium opacity-85 backdrop-blur-md transition hover:scale-[1.02] hover:opacity-100"
+                        style={{ background: `${theme.toolbar.panel}dd`, borderColor: theme.node.stroke, color: theme.node.text }}
+                        onClick={(event) => {
+                            event.stopPropagation();
+                            onGenerateImage?.(node);
+                        }}
+                        onMouseDown={(event) => event.stopPropagation()}
+                        onPointerDown={(event) => event.stopPropagation()}
+                        title="用文本生图"
+                        aria-label="用文本生图"
+                    >
+                        <ImageIcon className="size-3.5" />
+                        生图
+                    </button>
+                    <button
+                        type="button"
+                        className={`grid size-8 place-items-center rounded-full border backdrop-blur-md transition ${hovered ? "pointer-events-auto opacity-100" : "pointer-events-none opacity-0"}`}
+                        style={{ background: `${theme.toolbar.panel}dd`, borderColor: theme.node.stroke, color: theme.node.text }}
+                        title="全屏阅读/编辑"
+                        aria-label="全屏阅读/编辑"
+                        onMouseDown={(event) => event.stopPropagation()}
+                        onPointerDown={(event) => event.stopPropagation()}
+                        onClick={openFullscreen}
+                    >
+                        <Maximize2 className="size-3.5" />
+                    </button>
+                </div>
+                {isEditingContent ? (
+                    <CanvasResourceMentionTextarea
+                        ref={textareaRef}
+                        className="thin-scrollbar block min-h-0 flex-1 w-full resize-none overflow-y-auto whitespace-pre-wrap break-words border-none bg-transparent pl-4 pr-4 pt-0 pb-4 m-0 font-mono outline-none select-text appearance-none"
+                        style={textStyle}
+                        value={node.metadata?.content || ""}
+                        references={mentionReferences}
+                        highlightLabels={false}
+                        onChange={(value) => onContentChange(node.id, value)}
+                        onBlur={onStopEditing}
+                        onKeyDown={(event) => {
+                            if (event.key === "Escape") onStopEditing();
+                        }}
+                        onMouseDown={(event) => event.stopPropagation()}
+                        onPointerDown={(event) => event.stopPropagation()}
+                        onWheel={(event) => event.stopPropagation()}
+                    />
+                ) : (
+                    <div ref={previewRef} className="thin-scrollbar block min-h-0 flex-1 w-full overflow-y-auto whitespace-pre-wrap break-words bg-transparent pl-4 pr-4 pt-0 pb-4 font-mono" style={textStyle}>
+                        {node.metadata?.content || <span style={{ color: theme.node.placeholder }}>双击全屏查看</span>}
+                    </div>
+                )}
+            </div>
+            <CanvasTextFullscreenOverlay open={textFullscreenOpen} title={node.title || "文本节点"} onClose={() => onTextFullscreenChange?.(false)}>
                 <CanvasResourceMentionTextarea
-                    ref={textareaRef}
-                    className="thin-scrollbar block h-full w-full resize-none overflow-y-auto whitespace-pre-wrap break-words border-none bg-transparent pl-4 pr-14 pt-0 pb-4 m-0 font-mono outline-none select-text appearance-none"
-                    style={textStyle}
+                    ref={fullscreenEditorRef}
+                    nestedFullscreen
                     value={node.metadata?.content || ""}
                     references={mentionReferences}
                     highlightLabels={false}
+                    className="thin-scrollbar h-full min-h-[70vh] w-full overflow-y-auto whitespace-pre-wrap break-words rounded-xl border px-4 py-3 font-mono outline-none"
+                    style={{ ...textStyle, fontSize: `${Math.max(fontSize, 16)}px`, lineHeight: `${Math.round(Math.max(fontSize, 16) * 1.65)}px`, background: theme.node.fill, borderColor: theme.node.stroke }}
+                    containerClassName="h-full"
                     onChange={(value) => onContentChange(node.id, value)}
-                    onBlur={onStopEditing}
-                    onKeyDown={(event) => {
-                        if (event.key === "Escape") onStopEditing();
-                    }}
                     onMouseDown={(event) => event.stopPropagation()}
                     onPointerDown={(event) => event.stopPropagation()}
                     onWheel={(event) => event.stopPropagation()}
                 />
-            ) : (
-                <div
-                    className="thin-scrollbar block h-full w-full overflow-y-auto whitespace-pre-wrap break-words bg-transparent pl-4 pr-14 pt-0 pb-4 font-mono"
-                    style={textStyle}
-                    onWheel={(event) => event.stopPropagation()}
-                >
-                    {node.metadata?.content || <span style={{ color: theme.node.placeholder }}>双击编辑文字</span>}
-                </div>
-            )}
-        </div>
+            </CanvasTextFullscreenOverlay>
+        </>
     );
 }
 
@@ -818,6 +890,7 @@ function ConnectionHandlePlus({
 
     const handlePointerDown = (event: React.PointerEvent<HTMLButtonElement>) => {
         event.stopPropagation();
+        event.preventDefault();
         pointerRef.current = { x: event.clientX, y: event.clientY, dragging: false };
         event.currentTarget.setPointerCapture(event.pointerId);
     };
@@ -838,21 +911,26 @@ function ConnectionHandlePlus({
     };
 
     return (
-        <div
-            className={`absolute top-1/2 z-30 flex size-16 -translate-y-1/2 items-center justify-center transition-opacity duration-150 ${
-                side === "left" ? "-left-8" : "-right-8"
+        <button
+            type="button"
+            aria-label={side === "left" ? "添加输入或拖拽连线" : "添加节点或拖拽连线"}
+            className={`absolute top-1/2 z-[110] flex size-20 -translate-y-1/2 items-center justify-center rounded-full transition-opacity duration-150 ${
+                side === "left" ? "-left-10" : "-right-10"
             } ${visible ? "pointer-events-auto opacity-100" : "pointer-events-none opacity-0"}`}
-            onMouseEnter={() => {
+            onPointerEnter={() => {
                 setHot(true);
                 onHoverChange?.(true);
             }}
-            onMouseLeave={() => {
+            onPointerLeave={() => {
                 setHot(false);
                 onHoverChange?.(false);
             }}
+            onPointerDown={handlePointerDown}
+            onPointerMove={handlePointerMove}
+            onPointerUp={handlePointerUp}
+            onPointerCancel={resetPointer}
         >
-            <button
-                type="button"
+            <span
                 className="grid size-9 place-items-center rounded-full border transition duration-200 hover:scale-105 active:scale-95"
                 style={{
                     background: hot || emphasized ? "rgba(255,255,255,.96)" : theme.node.panel,
@@ -865,13 +943,9 @@ function ConnectionHandlePlus({
                           : "0 4px 14px rgba(0,0,0,.18)",
                 }}
                 title={side === "left" ? "点击添加输入 · 按住拖拽连线" : "点击添加节点 · 按住拖拽连线"}
-                onPointerDown={handlePointerDown}
-                onPointerMove={handlePointerMove}
-                onPointerUp={handlePointerUp}
-                onPointerCancel={resetPointer}
             >
                 <Plus className="size-4" strokeWidth={2.5} />
-            </button>
-        </div>
+            </span>
+        </button>
     );
 }

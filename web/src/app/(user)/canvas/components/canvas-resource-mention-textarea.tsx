@@ -3,11 +3,13 @@
 import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
 import type { CSSProperties, HTMLAttributes, KeyboardEvent, MouseEvent, PointerEvent } from "react";
 import { createPortal } from "react-dom";
-import { FileText, Image as ImageIcon, Music2, Video } from "lucide-react";
+import { FileText, Image as ImageIcon, Maximize2, Music2, Video } from "lucide-react";
 
 import { canvasThemes } from "@/lib/canvas-theme";
 import { useThemeStore } from "@/stores/use-theme-store";
 import type { CanvasResourceReference } from "../utils/canvas-resource-references";
+import { attachReferenceHoverPreview, hideReferenceHoverPreview, showReferenceHoverPreview } from "./canvas-reference-hover-preview";
+import { CanvasTextFullscreenOverlay } from "./canvas-text-fullscreen-overlay";
 
 type MentionState = {
     query: string;
@@ -21,6 +23,9 @@ type Props = Omit<HTMLAttributes<HTMLDivElement>, "onChange" | "value"> & {
     containerClassName?: string;
     highlightLabels?: boolean;
     placeholder?: string;
+    enableFullscreen?: boolean;
+    fullscreenTitle?: string;
+    nestedFullscreen?: boolean;
 };
 
 export type CanvasResourceMentionTextareaHandle = {
@@ -29,12 +34,17 @@ export type CanvasResourceMentionTextareaHandle = {
     getEditorElement: () => HTMLDivElement | null;
 };
 
-export const CanvasResourceMentionTextarea = forwardRef<CanvasResourceMentionTextareaHandle, Props>(function CanvasResourceMentionTextarea({ value, references, onChange, onSubmit, onKeyDown, className, containerClassName, style, highlightLabels = true, placeholder, ...props }, forwardedRef) {
+export const CanvasResourceMentionTextarea = forwardRef<CanvasResourceMentionTextareaHandle, Props>(function CanvasResourceMentionTextarea(
+    { value, references, onChange, onSubmit, onKeyDown, className, containerClassName, style, highlightLabels = true, placeholder, enableFullscreen = false, fullscreenTitle = "全屏编辑", nestedFullscreen = false, ...props },
+    forwardedRef,
+) {
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const editorRef = useRef<HTMLDivElement | null>(null);
+    const fullscreenEditorRef = useRef<CanvasResourceMentionTextareaHandle | null>(null);
     const [mention, setMention] = useState<MentionState | null>(null);
     const [activeIndex, setActiveIndex] = useState(0);
     const [isEmpty, setIsEmpty] = useState(!value.trim());
+    const [fullscreenOpen, setFullscreenOpen] = useState(false);
 
     const activeReferences = useMemo(() => references.filter((item) => item.active), [references]);
     const activeLabels = useMemo(
@@ -170,47 +180,96 @@ export const CanvasResourceMentionTextarea = forwardRef<CanvasResourceMentionTex
         onKeyDown?.(event);
     };
 
+    useEffect(() => {
+        if (!fullscreenOpen) return;
+        const frame = requestAnimationFrame(() => fullscreenEditorRef.current?.focusEditor());
+        return () => cancelAnimationFrame(frame);
+    }, [fullscreenOpen]);
+
     const menu = mention && candidates.length && editorRef.current ? <MentionMenu anchor={editorRef.current} references={candidates} activeIndex={Math.min(activeIndex, candidates.length - 1)} theme={theme} onSelect={insertReference} /> : null;
+    const fullscreenClassName = `${className || ""} h-full min-h-[70vh] w-full`.trim();
 
     return (
-        <div
-            className={`relative w-full cursor-text ${containerClassName || ""}`}
-            onMouseDown={(event) => {
-                event.stopPropagation();
-                if (editorRef.current?.contains(event.target as Node)) return;
-                event.preventDefault();
-                editorRef.current?.focus();
-                placeCaretAtEnd(editorRef.current);
-            }}
-        >
-            {isEmpty && placeholder ? (
-                <div className={`${className || ""} pointer-events-none absolute inset-0 overflow-hidden whitespace-pre-wrap break-words opacity-45`} style={{ ...style, color: theme.node.text }}>
-                    {placeholder}
-                </div>
-            ) : null}
+        <>
             <div
-                {...props}
-                ref={(node) => {
-                    editorRef.current = node;
+                className={`relative w-full cursor-text ${containerClassName || ""}`}
+                onMouseDown={(event) => {
+                    event.stopPropagation();
+                    if (editorRef.current?.contains(event.target as Node)) return;
+                    event.preventDefault();
+                    editorRef.current?.focus();
+                    placeCaretAtEnd(editorRef.current);
                 }}
-                role="textbox"
-                aria-multiline="true"
-                contentEditable
-                suppressContentEditableWarning
-                className={`${className || ""} relative z-10 cursor-text outline-none`}
-                style={style as CSSProperties}
-                onInput={() => emitChange()}
-                onKeyDown={handleKeyDown}
-                onKeyUp={() => syncMentionFromEditor()}
-                onPointerUp={() => syncMentionFromEditor()}
-                onBlur={(event) => {
-                    window.setTimeout(closeMention, 120);
-                    props.onBlur?.(event);
-                }}
-                onFocus={(event) => props.onFocus?.(event)}
-            />
-            {menu}
-        </div>
+            >
+                {enableFullscreen && !nestedFullscreen ? (
+                    <button
+                        type="button"
+                        className="absolute right-1 top-1 z-20 grid size-7 place-items-center rounded-full border opacity-70 transition hover:opacity-100"
+                        style={{ borderColor: theme.node.stroke, background: `${theme.toolbar.panel}ee`, color: theme.node.text }}
+                        title="全屏编辑"
+                        aria-label="全屏编辑"
+                        onMouseDown={(event) => event.stopPropagation()}
+                        onPointerDown={(event) => event.stopPropagation()}
+                        onClick={(event) => {
+                            event.stopPropagation();
+                            setFullscreenOpen(true);
+                        }}
+                    >
+                        <Maximize2 className="size-3.5" />
+                    </button>
+                ) : null}
+                {isEmpty && placeholder ? (
+                    <div className={`${className || ""} pointer-events-none absolute inset-0 overflow-hidden whitespace-pre-wrap break-words opacity-45`} style={{ ...style, color: theme.node.text }}>
+                        {placeholder}
+                    </div>
+                ) : null}
+                <div
+                    {...props}
+                    ref={(node) => {
+                        editorRef.current = node;
+                    }}
+                    role="textbox"
+                    aria-multiline="true"
+                    contentEditable
+                    suppressContentEditableWarning
+                    className={`${className || ""} relative z-10 cursor-text outline-none`}
+                    style={style as CSSProperties}
+                    onInput={() => emitChange()}
+                    onKeyDown={handleKeyDown}
+                    onKeyUp={() => syncMentionFromEditor()}
+                    onPointerUp={() => syncMentionFromEditor()}
+                    onBlur={(event) => {
+                        window.setTimeout(closeMention, 120);
+                        props.onBlur?.(event);
+                    }}
+                    onFocus={(event) => props.onFocus?.(event)}
+                />
+                {menu}
+            </div>
+            {enableFullscreen && !nestedFullscreen ? (
+                <CanvasTextFullscreenOverlay open={fullscreenOpen} title={fullscreenTitle} onClose={() => setFullscreenOpen(false)}>
+                    <CanvasResourceMentionTextarea
+                        ref={fullscreenEditorRef}
+                        nestedFullscreen
+                        value={value}
+                        references={references}
+                        onChange={onChange}
+                        onSubmit={onSubmit}
+                        highlightLabels={highlightLabels}
+                        placeholder={placeholder}
+                        className={fullscreenClassName}
+                        style={style}
+                        containerClassName="h-full"
+                        onKeyDown={onKeyDown}
+                        onBlur={props.onBlur}
+                        onFocus={props.onFocus}
+                        onMouseDown={props.onMouseDown}
+                        onPointerDown={props.onPointerDown}
+                        onWheel={props.onWheel}
+                    />
+                </CanvasTextFullscreenOverlay>
+            ) : null}
+        </>
     );
 });
 
@@ -259,28 +318,28 @@ function createChipElement(label: string, reference: CanvasResourceReference | u
     const chip = document.createElement("span");
     chip.contentEditable = "false";
     chip.dataset.mentionLabel = label;
-    chip.className = "mx-0.5 inline-flex max-w-[132px] translate-y-[1px] items-center gap-1.5 rounded-lg border px-1.5 py-0.5 align-middle shadow-sm select-none";
+    chip.className = "mx-0.5 inline-flex max-w-[148px] translate-y-[1px] items-center gap-1.5 rounded-lg border px-1.5 py-0.5 align-middle shadow-sm select-none cursor-default";
     chip.style.borderColor = `${theme.node.stroke}aa`;
     chip.style.background = theme.toolbar.activeBg;
     chip.style.color = theme.node.text;
 
     const preview = document.createElement("span");
-    preview.className = "grid size-5 shrink-0 overflow-hidden rounded-md ring-1 ring-black/10";
+    preview.className = "grid size-6 shrink-0 overflow-hidden rounded-md ring-1 ring-black/10";
     if (reference?.kind === "image" && reference.previewUrl) {
         const img = document.createElement("img");
         img.src = reference.previewUrl;
         img.alt = "";
-        img.className = "size-full object-cover";
+        img.className = "size-full object-contain";
         preview.appendChild(img);
     } else if (reference?.kind === "video" && reference.previewUrl) {
         const video = document.createElement("video");
         video.src = reference.previewUrl;
         video.muted = true;
         video.preload = "metadata";
-        video.className = "size-full bg-black object-cover";
+        video.className = "size-full bg-black object-contain";
         preview.appendChild(video);
     } else {
-        preview.className = "grid size-5 shrink-0 place-items-center rounded-md bg-black/20 ring-1 ring-black/10";
+        preview.className = "grid size-6 shrink-0 place-items-center rounded-md bg-black/20 ring-1 ring-black/10";
         preview.textContent = reference?.kind === "audio" ? "♪" : reference?.kind === "video" ? "▶" : "图";
     }
 
@@ -290,6 +349,7 @@ function createChipElement(label: string, reference: CanvasResourceReference | u
 
     chip.appendChild(preview);
     chip.appendChild(text);
+    attachReferenceHoverPreview(chip, reference);
     return chip;
 }
 
@@ -399,14 +459,19 @@ function MentionMenu({ anchor, references, activeIndex, theme, onSelect }: { anc
                 <button
                     key={reference.id}
                     type="button"
+                    data-reference-hover-preview-source
                     className="flex w-full min-w-0 items-center gap-2 rounded-lg px-2 py-1.5 text-left text-xs transition"
                     style={{ background: index === activeIndex ? theme.toolbar.activeBg : "transparent", color: index === activeIndex ? theme.toolbar.activeText : theme.node.text }}
+                    onMouseEnter={(event) => showReferenceHoverPreview(reference, event.clientX, event.clientY)}
+                    onMouseLeave={() => hideReferenceHoverPreview()}
                     onPointerDown={(event) => {
+                        hideReferenceHoverPreview();
                         event.preventDefault();
                         event.stopPropagation();
                         selectReference(reference);
                     }}
                     onClick={(event) => {
+                        hideReferenceHoverPreview();
                         event.preventDefault();
                         event.stopPropagation();
                         selectReference(reference);
@@ -425,11 +490,11 @@ function MentionMenu({ anchor, references, activeIndex, theme, onSelect }: { anc
 }
 
 function ReferencePreview({ reference }: { reference: CanvasResourceReference }) {
-    if (reference.kind === "image" && reference.previewUrl) return <img src={reference.previewUrl} alt="" className="size-9 rounded-md object-cover" />;
-    if (reference.kind === "video" && reference.previewUrl) return <video src={reference.previewUrl} className="size-9 rounded-md bg-black object-cover" muted preload="metadata" />;
+    if (reference.kind === "image" && reference.previewUrl) return <img src={reference.previewUrl} alt="" className="size-11 rounded-md object-contain bg-black/10" />;
+    if (reference.kind === "video" && reference.previewUrl) return <video src={reference.previewUrl} className="size-11 rounded-md bg-black object-contain" muted preload="metadata" playsInline />;
     const Icon = reference.kind === "audio" ? Music2 : reference.kind === "video" ? Video : reference.kind === "image" ? ImageIcon : FileText;
     return (
-        <span className="grid size-9 shrink-0 place-items-center rounded-md bg-black/10">
+        <span className="grid size-11 shrink-0 place-items-center rounded-md bg-black/10">
             <Icon className="size-4" />
         </span>
     );

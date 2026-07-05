@@ -124,7 +124,9 @@ export function CanvasNodeHoverToolbar({
     if (!node) return null;
 
     const left = viewport.x + (node.position.x + node.width / 2) * viewport.k;
-    const top = viewport.y + node.position.y * viewport.k - 14;
+    const toolbarBridgeHeight = 16;
+    const toolbarVisualGap = 4;
+    const top = viewport.y + node.position.y * viewport.k + toolbarBridgeHeight - toolbarVisualGap;
     const isImage = node.type === CanvasNodeType.Image;
     const isVideo = node.type === CanvasNodeType.Video;
     const isAudio = node.type === CanvasNodeType.Audio;
@@ -203,24 +205,31 @@ export function CanvasNodeHoverToolbar({
         <>
             <div
                 data-canvas-node-toolbar
-                className="absolute z-[70] flex max-w-[96vw] -translate-x-1/2 -translate-y-full flex-nowrap items-center gap-0.5 rounded-full border px-1 py-0.5 backdrop-blur-md"
+                className="absolute z-[70] flex max-w-[96vw] -translate-x-1/2 -translate-y-full flex-col items-center"
                 style={{
                     left,
                     top,
-                    background: `${theme.toolbar.panel}f2`,
-                    borderColor: `${theme.toolbar.border}88`,
                     color: theme.node.text,
-                    boxShadow: "0 8px 24px rgba(0,0,0,.24)",
                 }}
                 onMouseDown={(event) => event.stopPropagation()}
                 onPointerDown={(event) => event.stopPropagation()}
                 onPointerEnter={onPointerEnter}
                 onPointerLeave={onPointerLeave}
             >
-                {toolbarTools.map((tool) => (
-                    <ToolbarAction key={tool.id} {...tool} showLabel={showImageToolLabels} theme={theme} />
-                ))}
-                {hasImage ? <ToolbarAction id="more" title="配置快捷工具" label="更多" icon={<Ellipsis className="size-4" />} active={imageToolSettingsOpen} suppressTooltip={imageToolSettingsOpen} onClick={openImageToolSettings} showLabel={showImageToolLabels} theme={theme} /> : null}
+                <div
+                    className="flex flex-nowrap items-center gap-0.5 rounded-full border px-1 py-0.5 backdrop-blur-md"
+                    style={{
+                        background: `${theme.toolbar.panel}f2`,
+                        borderColor: `${theme.toolbar.border}88`,
+                        boxShadow: "0 8px 24px rgba(0,0,0,.24)",
+                    }}
+                >
+                    {toolbarTools.map((tool) => (
+                        <ToolbarAction key={tool.id} {...tool} showLabel={showImageToolLabels} theme={theme} />
+                    ))}
+                    {hasImage ? <ToolbarAction id="more" title="配置快捷工具" label="更多" icon={<Ellipsis className="size-4" />} active={imageToolSettingsOpen} suppressTooltip={imageToolSettingsOpen} onClick={openImageToolSettings} showLabel={showImageToolLabels} theme={theme} /> : null}
+                </div>
+                <div aria-hidden className="h-4 w-full" />
             </div>
             {hasImage ? (
                 <ImageToolSettingsModal

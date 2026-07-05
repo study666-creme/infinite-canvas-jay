@@ -1,7 +1,7 @@
 "use client";
 
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from "react";
-import { Play, RefreshCw } from "lucide-react";
+import { Pause, Play, RefreshCw } from "lucide-react";
 
 import { useConfigStore } from "@/stores/use-config-store";
 import { resolveVideoPlayback, type VideoPlaybackResult } from "@/services/api/video";
@@ -16,7 +16,7 @@ type CanvasVideoPlayerProps = {
     storageKey?: string;
     mimeType?: string;
     taskId?: string;
-    provider?: "openai" | "seedance";
+    provider?: "openai" | "seedance" | "xai";
     model?: string;
     variant?: "node" | "preview";
     onPersisted?: (file: UploadedFile) => void;
@@ -44,7 +44,7 @@ export const CanvasVideoPlayer = forwardRef<CanvasVideoPlayerHandle, CanvasVideo
     const retryCountRef = useRef(0);
     const persistedRef = useRef(false);
     const pendingFileRef = useRef<UploadedFile | null>(null);
-    const skipStorageKeyRef = useRef<string | undefined>();
+    const skipStorageKeyRef = useRef<string | undefined>(undefined);
     const objectUrlRef = useRef("");
     const hydratingRef = useRef(false);
 
@@ -245,9 +245,9 @@ export const CanvasVideoPlayer = forwardRef<CanvasVideoPlayerHandle, CanvasVideo
     }
 
     return (
-        <div className="relative h-full w-full overflow-hidden rounded-[18px]">
+        <div className="group/video relative h-full w-full overflow-hidden rounded-[18px]">
             {phase === "loading" ? (
-                <div className="absolute inset-0 z-10">
+                <div className="pointer-events-none absolute inset-0 z-10">
                     <CanvasNodeLoadingState variant="video" />
                 </div>
             ) : null}
@@ -274,18 +274,17 @@ export const CanvasVideoPlayer = forwardRef<CanvasVideoPlayerHandle, CanvasVideo
                     type="button"
                     data-canvas-interactive
                     data-canvas-no-zoom
-                    className={`absolute inset-0 flex items-center justify-center transition ${paused ? "bg-black/20" : "bg-transparent hover:bg-black/10"}`}
-                    onPointerDown={(event) => {
+                    className={`absolute left-1/2 top-1/2 z-10 grid size-12 -translate-x-1/2 -translate-y-1/2 place-items-center rounded-full border text-white/90 shadow-lg backdrop-blur-sm transition hover:scale-[1.03] ${
+                        paused ? "border-white/20 bg-black/45 opacity-100" : "pointer-events-none border-white/15 bg-black/40 opacity-0 group-hover/video:pointer-events-auto group-hover/video:opacity-100"
+                    }`}
+                    onPointerDown={(event) => event.stopPropagation()}
+                    onClick={(event) => {
                         event.stopPropagation();
                         togglePlayback();
                     }}
                     aria-label={paused ? "播放视频" : "暂停视频"}
                 >
-                    {paused ? (
-                        <div className="grid size-12 place-items-center rounded-full border border-white/20 bg-black/45 text-white/90 shadow-lg backdrop-blur-sm">
-                            <Play className="ml-0.5 size-5 fill-current" />
-                        </div>
-                    ) : null}
+                    {paused ? <Play className="ml-0.5 size-5 fill-current" /> : <Pause className="size-5 fill-current" />}
                 </button>
             ) : null}
         </div>

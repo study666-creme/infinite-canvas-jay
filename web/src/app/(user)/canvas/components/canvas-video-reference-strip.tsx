@@ -3,6 +3,7 @@
 import { AtSign, Image as ImageIcon, Music2, Video, X } from "lucide-react";
 
 import type { CanvasVideoReferenceAsset } from "../utils/canvas-video-references";
+import { hideReferenceHoverPreview, showReferenceHoverPreview } from "./canvas-reference-hover-preview";
 
 type Variant = "panel" | "node" | "overlay";
 
@@ -47,9 +48,11 @@ export function CanvasVideoReferenceStrip({ references, variant = "panel", class
                     >
                         <button
                             type="button"
+                            data-reference-hover-preview-source
                             className={`relative size-full overflow-hidden ${clickable ? "cursor-pointer transition hover:scale-[1.02] active:scale-[0.98]" : "cursor-default"}`}
                             title={clickable ? `点击插入 ${reference.label}` : reference.title}
                             onPointerDown={(event) => {
+                                hideReferenceHoverPreview();
                                 event.preventDefault();
                                 event.stopPropagation();
                             }}
@@ -57,7 +60,26 @@ export function CanvasVideoReferenceStrip({ references, variant = "panel", class
                                 event.preventDefault();
                                 event.stopPropagation();
                             }}
-                            onClick={() => onInsertReference?.(reference.label)}
+                            onMouseEnter={(event) =>
+                                showReferenceHoverPreview(
+                                    {
+                                        id: reference.nodeId,
+                                        nodeId: reference.nodeId,
+                                        kind: reference.kind,
+                                        label: reference.label,
+                                        title: reference.title,
+                                        previewUrl: reference.previewUrl,
+                                        active: true,
+                                    },
+                                    event.clientX,
+                                    event.clientY,
+                                )
+                            }
+                            onMouseLeave={() => hideReferenceHoverPreview()}
+                            onClick={() => {
+                                hideReferenceHoverPreview();
+                                onInsertReference?.(reference.label);
+                            }}
                             disabled={!clickable}
                         >
                             <ReferencePreview reference={reference} />
@@ -76,6 +98,7 @@ export function CanvasVideoReferenceStrip({ references, variant = "panel", class
                                 className="absolute right-1 top-1 z-20 grid size-5 place-items-center rounded-full bg-black/58 text-white/92 shadow-md backdrop-blur-sm transition hover:bg-black/78"
                                 title={`断开 ${reference.label}`}
                                 onPointerDown={(event) => {
+                                    hideReferenceHoverPreview();
                                     event.preventDefault();
                                     event.stopPropagation();
                                 }}
@@ -84,6 +107,7 @@ export function CanvasVideoReferenceStrip({ references, variant = "panel", class
                                     event.stopPropagation();
                                 }}
                                 onClick={(event) => {
+                                    hideReferenceHoverPreview();
                                     event.stopPropagation();
                                     onRemoveReference?.(reference.nodeId, reference.label);
                                 }}

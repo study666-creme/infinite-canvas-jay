@@ -9,6 +9,7 @@ export type AgentEventLog = { id: string; time: string; title: string; text: str
 export type AgentPendingToolCall = { requestId: string; name: string; input?: { ops?: CanvasAgentOp[] } };
 export type AgentThreadSummary = { id: string; preview: string; name?: string | null; cwd?: string; status?: string; source?: unknown; createdAt?: number; updatedAt?: number };
 export type AgentPanelTab = "chat" | "setup" | "history" | "log";
+export type CanvasAgentCreativeMode = "general" | "short_drama";
 
 type CanvasAgentStore = {
     width: number;
@@ -27,6 +28,7 @@ type CanvasAgentStore = {
     workspacePath: string;
     loadingThreads: boolean;
     activeTab: AgentPanelTab;
+    creativeMode: CanvasAgentCreativeMode;
     confirmTools: boolean;
     activity: string;
     connectError: string;
@@ -54,6 +56,7 @@ export const useCanvasAgentStore = create<CanvasAgentStore>((set) => ({
     workspacePath: "",
     loadingThreads: false,
     activeTab: "setup",
+    creativeMode: typeof window === "undefined" ? "general" : localStorage.getItem("canvas-agent-creative-mode") === "short_drama" ? "short_drama" : "general",
     confirmTools: true,
     activity: "就绪",
     connectError: "",

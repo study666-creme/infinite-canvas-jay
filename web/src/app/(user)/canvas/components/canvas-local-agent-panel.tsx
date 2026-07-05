@@ -12,7 +12,7 @@ import { useThemeStore } from "@/stores/use-theme-store";
 import { useUserStore } from "@/stores/use-user-store";
 import { useCanvasAgentStore, type AgentAttachment, type AgentChatItem, type AgentEventLog, type AgentPanelTab, type AgentPendingToolCall, type AgentThreadSummary, type CanvasAgentCreativeMode } from "../stores/use-canvas-agent-store";
 import { summarizeCanvasAgentOps, type CanvasAgentOp, type CanvasAgentSnapshot } from "../utils/canvas-agent-ops";
-import { applyShortDramaAgentMode, isShortDramaAgentPresetPrompt, SHORT_DRAMA_AGENT_PROMPT } from "../utils/short-drama-agent-prompt";
+import { applyShortDramaAgentMode, isShortDramaAgentPresetPrompt } from "../utils/short-drama-agent-prompt";
 import { AgentChatComposer, AgentChatMessage, AgentPanelTabs, AgentPendingToolCard, AgentWorkingMessage, type CanvasAgentChatAttachment } from "./canvas-agent-chat-ui";
 import { ShortDramaAgentPresetButton } from "./short-drama-agent-preset-button";
 
@@ -239,11 +239,18 @@ export function CanvasLocalAgentPanel({ snapshot, canUndoOps, collapsed, embedde
     };
 
     const toggleShortDramaMode = (active: boolean) => {
-        if (active) {
-            setAgentState({ activeTab: "chat", prompt: SHORT_DRAMA_AGENT_PROMPT });
-            return;
-        }
-        setAgentState({ activeTab: "chat", creativeMode: "general", ...(isShortDramaAgentPresetPrompt(prompt) ? { prompt: "" } : {}) });
+        const nextMode: CanvasAgentCreativeMode = active ? "short_drama" : "general";
+        pendingToolRef.current = null;
+        setAgentState({
+            activeTab: "chat",
+            creativeMode: nextMode,
+            activeThreadId: "",
+            pendingTool: null,
+            waiting: false,
+            sending: false,
+            activity: active ? "短剧创作总监" : "就绪",
+            ...(isShortDramaAgentPresetPrompt(prompt) ? { prompt: "" } : {}),
+        });
     };
 
     const handleToolCall = async (endpoint: string, token: string, payload: AgentPendingToolCall) => {
@@ -570,7 +577,7 @@ export function CanvasLocalAgentPanel({ snapshot, canUndoOps, collapsed, embedde
                         onRemoveAttachment={removeAttachment}
                         left={
                             <>
-                                <ShortDramaAgentPresetButton active={creativeMode === "short_drama"} presetInserted={isShortDramaAgentPresetPrompt(prompt)} disabled={sending || waiting} onToggle={toggleShortDramaMode} />
+                                <ShortDramaAgentPresetButton active={creativeMode === "short_drama"} disabled={sending || waiting} onToggle={toggleShortDramaMode} />
                                 {attachments.length ? <span className="text-[11px]" style={{ color: theme.node.muted }}>{formatBytes(attachmentPayloadBytes(attachments))} / 30MB</span> : null}
                             </>
                         }

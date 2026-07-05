@@ -113,6 +113,7 @@ export type CanvasAssistantMessage = {
     text: string;
     meta?: string;
     detail?: unknown;
+    creativeMode?: "general" | "short_drama";
     references?: CanvasAssistantReference[];
 };
 

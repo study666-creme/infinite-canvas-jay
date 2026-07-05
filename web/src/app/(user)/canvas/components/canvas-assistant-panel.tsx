@@ -25,7 +25,7 @@ import { NODE_DEFAULT_SIZE } from "../constants";
 import { CanvasNodeType, type CanvasAssistantMessage, type CanvasAssistantReference, type CanvasAssistantSession, type CanvasNodeData } from "../types";
 import { useCanvasAgentStore, type CanvasAgentCreativeMode } from "../stores/use-canvas-agent-store";
 import { summarizeCanvasAgentOps, type CanvasAgentOp, type CanvasAgentSnapshot } from "../utils/canvas-agent-ops";
-import { isShortDramaAgentPresetPrompt, SHORT_DRAMA_AGENT_PROMPT, SHORT_DRAMA_AGENT_MODE_CONTEXT } from "../utils/short-drama-agent-prompt";
+import { isShortDramaAgentPresetPrompt, SHORT_DRAMA_AGENT_MODE_CONTEXT } from "../utils/short-drama-agent-prompt";
 
 export const CANVAS_AGENT_PANEL_MOTION_MS = 500;
 const PANEL_MOTION_SECONDS = CANVAS_AGENT_PANEL_MOTION_MS / 1000;
@@ -123,7 +123,7 @@ type OnlineAgentLogContext = { model: string; running: boolean; confirmTools: bo
 type OnlineLoopContext = { step: number; creativeMode?: CanvasAgentCreativeMode };
 type OnlineToolResult = { ok: true; message: string; data?: unknown } | { ok: false; message: string };
 type OnlineExecutedToolCall = { toolCallId: string; name: string; result: OnlineToolResult };
-type PendingOnlineToolContext = { messages: ResponseInputMessage[]; toolCalls: ResponseToolCall[]; assistantId: string; step: number };
+type PendingOnlineToolContext = { messages: ResponseInputMessage[]; toolCalls: ResponseToolCall[]; assistantId: string; step: number; creativeMode: CanvasAgentCreativeMode };
 
 type CanvasAssistantPanelProps = {
     nodes: CanvasNodeData[];
@@ -267,11 +267,11 @@ export function CanvasAssistantPanel({ nodes, selectedNodeIds, snapshot, session
         }
 
         const refs = savedReferences || selectedReferences;
-        const userMessage: CanvasAssistantMessage = { id: nanoid(), role: "user", text, references: refs };
+        const requestCreativeMode: CanvasAgentCreativeMode = isShortDramaAgentPresetPrompt(text) ? "short_drama" : creativeMode;
+        const userMessage: CanvasAssistantMessage = { id: nanoid(), role: "user", text, references: refs, creativeMode: requestCreativeMode };
         const assistantId = nanoid();
         appendMessage(session.id, userMessage);
-        addOnlineLog("发送请求", { text, selectedNodeIds: snapshotRef.current.selectedNodeIds, nodeCount: snapshotRef.current.nodes.length, connectionCount: snapshotRef.current.connections.length });
-        const requestCreativeMode: CanvasAgentCreativeMode = isShortDramaAgentPresetPrompt(text) ? "short_drama" : creativeMode;
+        addOnlineLog("发送请求", { text, creativeMode: requestCreativeMode, selectedNodeIds: snapshotRef.current.selectedNodeIds, nodeCount: snapshotRef.current.nodes.length, connectionCount: snapshotRef.current.connections.length });
         if (requestCreativeMode !== creativeMode) setAgentState({ creativeMode: requestCreativeMode });
         setPrompt("");
         setIsRunning(true);
@@ -280,42 +280,43 @@ export function CanvasAssistantPanel({ nodes, selectedNodeIds, snapshot, session
 
     const runOnlineAgentStep = async (sessionId: string, assistantId: string, history: CanvasAssistantMessage[], userMessage: CanvasAssistantMessage, loop: OnlineLoopContext) => {
         const requestConfig = { ...effectiveConfig, model: effectiveConfig.textModel || effectiveConfig.model };
+        const requestCreativeMode = loop.creativeMode || creativeMode;
         try {
             setIsRunning(true);
-            const messages = await buildToolAgentMessages(snapshotRef.current, history, userMessage, loop.creativeMode || creativeMode);
+            const messages = await buildToolAgentMessages(snapshotRef.current, history, userMessage, requestCreativeMode);
             addOnlineLog(`Agent Tool Loop ${loop.step} 开始`, { toolChoice: "required" });
             let streamed = "";
             const result = await requestToolResponse({ ...requestConfig, systemPrompt: "" }, messages, ONLINE_AGENT_TOOLS, "required", (text) => {
                 streamed = text;
-                if (text.trim()) upsertMessage(sessionId, { id: assistantId, role: "assistant", text });
+                if (text.trim()) upsertMessage(sessionId, { id: assistantId, role: "assistant", text, creativeMode: requestCreativeMode });
             });
             addOnlineLog("模型工具回复", result);
             if (result.toolCalls.length) {
                 const writableCalls = result.toolCalls.filter(isWritableToolCall);
                 if (confirmTools && writableCalls.length) {
-                    upsertMessage(sessionId, { id: assistantId, role: "assistant", text: result.content || streamed || "准备执行工具，等待确认。" });
+                    upsertMessage(sessionId, { id: assistantId, role: "assistant", text: result.content || streamed || "准备执行工具，等待确认。", creativeMode: requestCreativeMode });
                     const toolMessageId = nanoid();
-                    pendingToolContextRef.current.set(toolMessageId, { messages, toolCalls: result.toolCalls, assistantId, step: loop.step });
-                    const toolMessage: CanvasAssistantMessage = { id: toolMessageId, role: "tool", title: "确认工具调用", text: summarizeToolCalls(result.toolCalls), detail: { status: "pending", step: loop.step, toolCalls: result.toolCalls } };
+                    pendingToolContextRef.current.set(toolMessageId, { messages, toolCalls: result.toolCalls, assistantId, step: loop.step, creativeMode: requestCreativeMode });
+                    const toolMessage: CanvasAssistantMessage = { id: toolMessageId, role: "tool", title: "确认工具调用", text: summarizeToolCalls(result.toolCalls), detail: { status: "pending", step: loop.step, toolCalls: result.toolCalls }, creativeMode: requestCreativeMode };
                     appendMessage(sessionId, toolMessage);
                     addOnlineLog("等待用户确认", result.toolCalls);
                     return;
                 }
-                await continueOnlineToolLoop(sessionId, assistantId, messages, result, loop.step);
+                await continueOnlineToolLoop(sessionId, assistantId, messages, result, loop.step, requestCreativeMode);
             } else {
                 if (!result.content.trim()) throw new Error("模型没有返回工具调用，画布操作未执行。");
-                upsertMessage(sessionId, { id: assistantId, role: "assistant", text: result.content || streamed || "没有返回内容。" });
+                upsertMessage(sessionId, { id: assistantId, role: "assistant", text: result.content || streamed || "没有返回内容。", creativeMode: requestCreativeMode });
                 addOnlineLog(`Agent Tool Loop ${loop.step} 结束`, { reply: result.content });
             }
         } catch (error) {
             addOnlineLog("请求失败", error instanceof Error ? error.message : error);
-            appendMessage(sessionId, { id: nanoid(), role: "error", title: "操作失败", text: error instanceof Error ? error.message : "操作失败" });
+            appendMessage(sessionId, { id: nanoid(), role: "error", title: "操作失败", text: error instanceof Error ? error.message : "操作失败", creativeMode: requestCreativeMode });
         } finally {
             setIsRunning(false);
         }
     };
 
-    const continueOnlineToolLoop = async (sessionId: string, assistantId: string, messages: ResponseInputMessage[], result: { content: string; toolCalls: ResponseToolCall[] }, step: number) => {
+    const continueOnlineToolLoop = async (sessionId: string, assistantId: string, messages: ResponseInputMessage[], result: { content: string; toolCalls: ResponseToolCall[] }, step: number, requestCreativeMode: CanvasAgentCreativeMode) => {
         const toolResults = executeOnlineToolCalls(result.toolCalls);
         addOnlineLog("工具执行结果", toolResults);
         appendMessage(sessionId, {
@@ -324,18 +325,19 @@ export function CanvasAssistantPanel({ nodes, selectedNodeIds, snapshot, session
             title: "工具自动执行完成",
             text: toolResults.map((item) => toolResultText(item.result)).join("\n"),
             detail: { status: "completed", step, toolCalls: result.toolCalls, results: toolResults },
+            creativeMode: requestCreativeMode,
         });
-        await continueOnlineToolLoopAfterResults(sessionId, assistantId, messages, result.toolCalls, toolResults, step);
+        await continueOnlineToolLoopAfterResults(sessionId, assistantId, messages, result.toolCalls, toolResults, step, requestCreativeMode);
     };
 
-    const continueOnlineToolLoopAfterResults = async (sessionId: string, assistantId: string, messages: ResponseInputMessage[], toolCalls: ResponseToolCall[], toolResults: OnlineExecutedToolCall[], step: number) => {
+    const continueOnlineToolLoopAfterResults = async (sessionId: string, assistantId: string, messages: ResponseInputMessage[], toolCalls: ResponseToolCall[], toolResults: OnlineExecutedToolCall[], step: number, requestCreativeMode: CanvasAgentCreativeMode) => {
         const nextMessages: ResponseInputMessage[] = [
             ...messages,
             ...toolCalls.map(toolCallToResponseInput),
             ...toolResults.map((item) => ({ role: "tool" as const, tool_call_id: item.toolCallId, content: JSON.stringify(item.result) })),
         ];
         if (step >= ONLINE_AGENT_MAX_STEPS) {
-            upsertMessage(sessionId, { id: assistantId, role: "assistant", text: toolResults.map((item) => toolResultText(item.result)).join("\n") || "工具已执行。" });
+            upsertMessage(sessionId, { id: assistantId, role: "assistant", text: toolResults.map((item) => toolResultText(item.result)).join("\n") || "工具已执行。", creativeMode: requestCreativeMode });
             addOnlineLog("Agent Tool Loop 达到步数上限", { maxSteps: ONLINE_AGENT_MAX_STEPS });
             return;
         }
@@ -343,23 +345,23 @@ export function CanvasAssistantPanel({ nodes, selectedNodeIds, snapshot, session
         let streamed = "";
         const next = await requestToolResponse({ ...requestConfig, systemPrompt: "" }, nextMessages, ONLINE_AGENT_TOOLS, "auto", (text) => {
             streamed = text;
-            if (text.trim()) upsertMessage(sessionId, { id: assistantId, role: "assistant", text });
+            if (text.trim()) upsertMessage(sessionId, { id: assistantId, role: "assistant", text, creativeMode: requestCreativeMode });
         });
         addOnlineLog(`Agent Tool Loop ${step + 1} 回复`, next);
         if (next.toolCalls.length) {
             const writableCalls = next.toolCalls.filter(isWritableToolCall);
             if (confirmTools && writableCalls.length) {
-                upsertMessage(sessionId, { id: assistantId, role: "assistant", text: next.content || streamed || "准备执行工具，等待确认。" });
+                upsertMessage(sessionId, { id: assistantId, role: "assistant", text: next.content || streamed || "准备执行工具，等待确认。", creativeMode: requestCreativeMode });
                 const toolMessageId = nanoid();
-                pendingToolContextRef.current.set(toolMessageId, { messages: nextMessages, toolCalls: next.toolCalls, assistantId, step: step + 1 });
-                appendMessage(sessionId, { id: toolMessageId, role: "tool", title: "确认工具调用", text: summarizeToolCalls(next.toolCalls), detail: { status: "pending", step: step + 1, toolCalls: next.toolCalls } });
+                pendingToolContextRef.current.set(toolMessageId, { messages: nextMessages, toolCalls: next.toolCalls, assistantId, step: step + 1, creativeMode: requestCreativeMode });
+                appendMessage(sessionId, { id: toolMessageId, role: "tool", title: "确认工具调用", text: summarizeToolCalls(next.toolCalls), detail: { status: "pending", step: step + 1, toolCalls: next.toolCalls }, creativeMode: requestCreativeMode });
                 addOnlineLog("等待用户确认", next.toolCalls);
                 return;
             }
-            await continueOnlineToolLoop(sessionId, assistantId, nextMessages, next, step + 1);
+            await continueOnlineToolLoop(sessionId, assistantId, nextMessages, next, step + 1, requestCreativeMode);
             return;
         }
-        upsertMessage(sessionId, { id: assistantId, role: "assistant", text: next.content || streamed || toolResults.map((item) => toolResultText(item.result)).join("\n") || "工具已执行。" });
+        upsertMessage(sessionId, { id: assistantId, role: "assistant", text: next.content || streamed || toolResults.map((item) => toolResultText(item.result)).join("\n") || "工具已执行。", creativeMode: requestCreativeMode });
     };
 
     const executeOps = (ops: CanvasAgentOp[]) => {
@@ -420,6 +422,7 @@ export function CanvasAssistantPanel({ nodes, selectedNodeIds, snapshot, session
         const pendingContext = pendingToolContextRef.current.get(messageId);
         const toolCalls = pendingContext?.toolCalls || toolCallsFromDetail(detail);
         const previousMessages = pendingContext?.messages || [];
+        const requestCreativeMode = pendingContext?.creativeMode || creativeMode;
         const session = safeSessions.find((session) => session.messages.some((item) => item.id === messageId));
         addOnlineLog("批准工具", { messageId, toolCalls });
         const assistantId = pendingContext?.assistantId || "";
@@ -432,12 +435,12 @@ export function CanvasAssistantPanel({ nodes, selectedNodeIds, snapshot, session
             setIsRunning(true);
             const results = executeOnlineToolCalls(toolCalls);
             addOnlineLog("工具执行结果", results);
-            upsertMessage(session.id, { id: messageId, role: "tool", title: "工具执行完成", text: results.map((item) => toolResultText(item.result)).join("\n"), detail: { ...detail, results, status: "completed" } });
+            upsertMessage(session.id, { id: messageId, role: "tool", title: "工具执行完成", text: results.map((item) => toolResultText(item.result)).join("\n"), detail: { ...detail, results, status: "completed" }, creativeMode: requestCreativeMode });
             pendingToolContextRef.current.delete(messageId);
-            await continueOnlineToolLoopAfterResults(session.id, assistantId, previousMessages, toolCalls, results, pendingContext?.step || Number(detail.step) || 1);
+            await continueOnlineToolLoopAfterResults(session.id, assistantId, previousMessages, toolCalls, results, pendingContext?.step || Number(detail.step) || 1, requestCreativeMode);
         } catch (error) {
             addOnlineLog("工具续跑失败", error instanceof Error ? error.message : error);
-            appendMessage(session.id, { id: nanoid(), role: "error", title: "操作失败", text: error instanceof Error ? error.message : "操作失败" });
+            appendMessage(session.id, { id: nanoid(), role: "error", title: "操作失败", text: error instanceof Error ? error.message : "操作失败", creativeMode: requestCreativeMode });
         } finally {
             setIsRunning(false);
         }
@@ -457,11 +460,8 @@ export function CanvasAssistantPanel({ nodes, selectedNodeIds, snapshot, session
     };
 
     const toggleShortDramaMode = (active: boolean) => {
-        if (active) {
-            setPrompt(SHORT_DRAMA_AGENT_PROMPT);
-            return;
-        }
-        if (creativeMode !== "general") setAgentState({ creativeMode: "general" });
+        const nextMode: CanvasAgentCreativeMode = active ? "short_drama" : "general";
+        if (creativeMode !== nextMode) setAgentState({ creativeMode: nextMode });
         if (isShortDramaAgentPresetPrompt(prompt)) setPrompt("");
     };
 
@@ -595,7 +595,7 @@ export function CanvasAssistantPanel({ nodes, selectedNodeIds, snapshot, session
                         onAddFiles={addImagesToCanvas}
                         left={
                             <>
-                                <ShortDramaAgentPresetButton active={creativeMode === "short_drama"} presetInserted={isShortDramaAgentPresetPrompt(prompt)} disabled={isRunning} onToggle={toggleShortDramaMode} />
+                                <ShortDramaAgentPresetButton active={creativeMode === "short_drama"} disabled={isRunning} onToggle={toggleShortDramaMode} />
                                 <CanvasPromptLibrary onSelect={setPrompt} />
                                 <AgentTextModelPicker config={effectiveConfig} value={effectiveConfig.textModel} onChange={(model) => updateConfig("textModel", model)} />
                             </>
@@ -1279,9 +1279,10 @@ function buildAssistantReferences(nodes: CanvasNodeData[], selectedNodeIds: Set<
 async function buildToolAgentMessages(snapshot: CanvasAgentSnapshot, history: CanvasAssistantMessage[], userMessage: CanvasAssistantMessage, creativeMode: CanvasAgentCreativeMode): Promise<ResponseInputMessage[]> {
     const refs = userMessage.references || [];
     const systemPrompt = [ONLINE_AGENT_PROMPT, creativeMode === "short_drama" ? SHORT_DRAMA_AGENT_MODE_CONTEXT : ""].filter(Boolean).join("\n\n");
+    const scopedHistory = history.filter((message) => messageCreativeMode(message) === creativeMode);
     return [
         { role: "system", content: systemPrompt },
-        ...history
+        ...scopedHistory
             .filter((message): message is CanvasAssistantMessage & { role: "user" | "assistant" | "system" } => message.role === "user" || message.role === "assistant" || message.role === "system")
             .slice(-8)
             .map((message): ResponseInputMessage => ({ role: message.role, content: message.text })),
@@ -1294,6 +1295,10 @@ async function buildToolAgentMessages(snapshot: CanvasAgentSnapshot, history: Ca
             ],
         },
     ];
+}
+
+function messageCreativeMode(message: CanvasAssistantMessage): CanvasAgentCreativeMode {
+    return message.creativeMode === "short_drama" ? "short_drama" : "general";
 }
 
 function compactSnapshot(snapshot: CanvasAgentSnapshot) {

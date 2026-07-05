@@ -808,15 +808,15 @@ function InfiniteCanvasPage() {
         [screenToCanvas],
     );
 
+    const nodeById = useMemo(() => new Map(nodes.map((node) => [node.id, node])), [nodes]);
     const visibleNodes = useMemo(() => {
         const rect = containerRef.current?.getBoundingClientRect();
         const width = rect?.width || size.width;
         const height = rect?.height || size.height;
         const bounds = getCanvasViewBounds(viewport, width, height);
-        return nodes.filter((node) => !isHiddenBatchChild(node, nodes, collapsingBatchIds) && isNodeInView(node, bounds));
-    }, [collapsingBatchIds, nodes, size.height, size.width, viewport.k, viewport.x, viewport.y]);
+        return nodes.filter((node) => !isHiddenBatchChild(node, nodeById, collapsingBatchIds) && isNodeInView(node, bounds));
+    }, [collapsingBatchIds, nodeById, nodes, size.height, size.width, viewport.k, viewport.x, viewport.y]);
 
-    const nodeById = useMemo(() => new Map(nodes.map((node) => [node.id, node])), [nodes]);
     const toolbarNode = toolbarNodeId ? nodeById.get(toolbarNodeId) || null : null;
     const infoNode = infoNodeId ? nodeById.get(infoNodeId) || null : null;
     const cropNode = cropNodeId ? nodeById.get(cropNodeId) || null : null;
@@ -874,11 +874,11 @@ function InfiniteCanvasPage() {
         return connections.filter((connection) => {
             const from = nodeById.get(connection.fromNodeId);
             const to = nodeById.get(connection.toNodeId);
-            if (!from || !to || isHiddenBatchConnectionEndpoint(from, nodes) || isHiddenBatchConnectionEndpoint(to, nodes)) return false;
+            if (!from || !to || isHiddenBatchConnectionEndpoint(from, nodeById) || isHiddenBatchConnectionEndpoint(to, nodeById)) return false;
             if (selectedConnectionId === connection.id || relatedHighlight.connectionIds.has(connection.id)) return true;
             return isConnectionInView(from, to, bounds);
         });
-    }, [connections, nodeById, nodes, relatedHighlight.connectionIds, selectedConnectionId, size.height, size.width, viewport.k, viewport.x, viewport.y]);
+    }, [connections, nodeById, relatedHighlight.connectionIds, selectedConnectionId, size.height, size.width, viewport.k, viewport.x, viewport.y]);
 
     const configInputsById = useMemo(() => {
         const map = new Map<string, NodeGenerationInput[]>();
@@ -1634,12 +1634,12 @@ function InfiniteCanvasPage() {
     }, []);
 
     const createTextNodeFromClipboard = useCallback(
-        (text: string) => {
+        (text: string, position?: Position) => {
             const trimmed = text.trim();
             if (!trimmed) return false;
 
             const node = {
-                ...createCanvasNode(CanvasNodeType.Text, getCanvasCenter(), { content: trimmed, status: NODE_STATUS_SUCCESS }),
+                ...createCanvasNode(CanvasNodeType.Text, position || getCanvasCenter(), { content: trimmed, status: NODE_STATUS_SUCCESS }),
                 title: trimmed.slice(0, 32) || "剪切板文本",
             };
 
@@ -3143,7 +3143,7 @@ function InfiniteCanvasPage() {
                     : buildImageGenerationMetadata(useReferenceImages ? "edit" : "generation", generationConfig, items.length, retryImages);
 
                 const isEmptyImageNode = node.type === CanvasNodeType.Image && !node.metadata?.content;
-                const usePromptTextHub = items.length > 1 && node.type === CanvasNodeType.Text;
+                const usePromptTextHub = false;
                 const usePromptSiblingHub = items.length > 1 && node.type === CanvasNodeType.Image && Boolean(node.metadata?.content);
 
                 if (usePromptTextHub || usePromptSiblingHub) {
@@ -3754,7 +3754,7 @@ function InfiniteCanvasPage() {
                             if (contextMenu.type === "node") {
                                 const ids = selectedNodeIds.size > 1 && selectedNodeIds.has(contextMenu.nodeId) ? selectedNodeIds : new Set([contextMenu.nodeId]);
                                 deleteNodes(ids);
-                            } else {
+                            } else if (contextMenu.type === "connection") {
                                 deleteConnection(contextMenu.connectionId);
                             }
                             setContextMenu(null);
@@ -4324,18 +4324,22 @@ function isAudioFile(file: File) {
     return file.type.startsWith("audio/") || /\.(mp3|wav)$/i.test(file.name);
 }
 
-function isHiddenBatchChild(node: CanvasNodeData, nodes: CanvasNodeData[], collapsingBatchIds?: Set<string>) {
+function findCanvasNode(nodes: CanvasNodeData[] | Map<string, CanvasNodeData>, id: string) {
+    return Array.isArray(nodes) ? nodes.find((item) => item.id === id) : nodes.get(id);
+}
+
+function isHiddenBatchChild(node: CanvasNodeData, nodes: CanvasNodeData[] | Map<string, CanvasNodeData>, collapsingBatchIds?: Set<string>) {
     const rootId = node.metadata?.batchRootId;
     if (!rootId) return false;
-    const root = nodes.find((item) => item.id === rootId);
+    const root = findCanvasNode(nodes, rootId);
     if (root && collapsingBatchIds?.has(rootId)) return false;
     return Boolean(root && !root.metadata?.imageBatchExpanded);
 }
 
-function isHiddenBatchConnectionEndpoint(node: CanvasNodeData, nodes: CanvasNodeData[]) {
+function isHiddenBatchConnectionEndpoint(node: CanvasNodeData, nodes: CanvasNodeData[] | Map<string, CanvasNodeData>) {
     const rootId = node.metadata?.batchRootId;
     if (!rootId) return false;
-    const root = nodes.find((item) => item.id === rootId);
+    const root = findCanvasNode(nodes, rootId);
     return Boolean(root && !root.metadata?.imageBatchExpanded);
 }
 

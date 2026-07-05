@@ -7,6 +7,17 @@ export type LocalMediaKind = "image" | "video" | "audio";
 export type LocalMediaSource = "upload" | "generated";
 export type LocalFolderKind = "image" | "video";
 
+type LocalDirectoryHandle = FileSystemDirectoryHandle & {
+    values: () => AsyncIterable<FileSystemHandle>;
+    queryPermission: (descriptor?: { mode?: "read" | "readwrite" }) => Promise<PermissionState>;
+    requestPermission: (descriptor?: { mode?: "read" | "readwrite" }) => Promise<PermissionState>;
+};
+
+type DirectoryPickerWindow = Window &
+    typeof globalThis & {
+        showDirectoryPicker?: (options?: { mode?: "read" | "readwrite" }) => Promise<LocalDirectoryHandle>;
+    };
+
 const handleStore = localforage.createInstance({ name: "infinite-canvas", storeName: "export_folders" });
 const recentStore = localforage.createInstance({ name: "infinite-canvas", storeName: "local_media_recent" });
 const objectUrls = new Map<string, string>();
@@ -14,7 +25,7 @@ const objectUrls = new Map<string, string>();
 const LOCAL_PREFIX = "local:";
 
 function supportsDirectoryPicker() {
-    return typeof window !== "undefined" && "showDirectoryPicker" in window;
+    return typeof window !== "undefined" && typeof (window as DirectoryPickerWindow).showDirectoryPicker === "function";
 }
 
 export function localMediaSupported() {
@@ -25,7 +36,7 @@ function folderKindForMedia(kind: LocalMediaKind): LocalFolderKind {
     return kind === "image" ? "image" : "video";
 }
 
-export function isLocalMediaKey(storageKey?: string): storageKey is string {
+export function isLocalMediaKey(storageKey?: string) {
     return Boolean(storageKey?.startsWith(LOCAL_PREFIX));
 }
 
@@ -40,7 +51,7 @@ export function buildLocalMediaKey(kind: LocalMediaKind, filename: string) {
 }
 
 export async function getFolderHandle(kind: LocalMediaKind) {
-    return handleStore.getItem<FileSystemDirectoryHandle>(folderKindForMedia(kind));
+    return handleStore.getItem<LocalDirectoryHandle>(folderKindForMedia(kind));
 }
 
 export async function hasLocalMediaFolder(kind: LocalMediaKind) {
@@ -49,13 +60,14 @@ export async function hasLocalMediaFolder(kind: LocalMediaKind) {
 
 export async function pickLocalMediaFolder(kind: LocalFolderKind) {
     if (!supportsDirectoryPicker()) throw new Error("当前浏览器不支持选择本地文件夹，请使用 Chrome 或 Edge");
-    const handle = await window.showDirectoryPicker({ mode: "readwrite" });
+    const handle = await (window as DirectoryPickerWindow).showDirectoryPicker?.({ mode: "readwrite" });
+    if (!handle) throw new Error("当前浏览器不支持选择本地文件夹，请使用 Chrome 或 Edge");
     await handleStore.setItem(kind, handle);
     return handle.name;
 }
 
 export async function getLocalMediaFolderName(kind: LocalFolderKind) {
-    const handle = await handleStore.getItem<FileSystemDirectoryHandle>(kind);
+    const handle = await handleStore.getItem<LocalDirectoryHandle>(kind);
     return handle?.name || "";
 }
 
@@ -66,7 +78,7 @@ export type LocalFolderStats = {
 };
 
 export async function getLocalFolderStats(kind: LocalFolderKind): Promise<LocalFolderStats | null> {
-    const handle = await handleStore.getItem<FileSystemDirectoryHandle>(kind);
+    const handle = await handleStore.getItem<LocalDirectoryHandle>(kind);
     if (!handle || !(await ensureWritePermission(handle))) return null;
     const recentFiles = await getRecentLocalMediaFiles(kind);
     const sampleFiles: string[] = [];
@@ -104,7 +116,7 @@ export async function clearLocalMediaFolder(kind: LocalFolderKind) {
     await recentStore.removeItem(`recent-${kind}`);
 }
 
-async function ensureWritePermission(handle: FileSystemDirectoryHandle) {
+async function ensureWritePermission(handle: LocalDirectoryHandle) {
     const current = await handle.queryPermission({ mode: "readwrite" });
     if (current === "granted") return true;
     return (await handle.requestPermission({ mode: "readwrite" })) === "granted";
@@ -185,7 +197,7 @@ export function revokeLocalMediaUrl(storageKey: string) {
 export async function sourceToBlob(source: Blob | string) {
     if (source instanceof Blob) return source;
     if (source.startsWith("data:")) {
-        const match = /^data:([^;,]+)?(?:;base64)?,(.*)$/s.exec(source);
+        const match = /^data:([^;,]+)?(?:;base64)?,([\s\S]*)$/.exec(source);
         if (!match) throw new Error("无效的图片数据");
         const mime = match[1] || "application/octet-stream";
         const body = match[2];

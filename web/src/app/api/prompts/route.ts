@@ -112,7 +112,7 @@ async function buildGptImage2Prompts() {
 }
 
 function collectGptImage2Cases(cases: Map<string, string>, markdown: string) {
-    for (const match of markdown.matchAll(/### Case \d+: \[[^\]]+]\(([^)]+)\).*?\*\*Prompt:\*\*\s*\r?\n\s*```[\w-]*\r?\n(.*?)\r?\n```/gs)) {
+    for (const match of markdown.matchAll(/### Case \d+: \[[^\]]+]\(([^)]+)\)[\s\S]*?\*\*Prompt:\*\*\s*\r?\n\s*```[\w-]*\r?\n([\s\S]*?)\r?\n```/g)) {
         cases.set(match[1], match[2].trim());
     }
 }
@@ -124,7 +124,7 @@ async function buildAwesomeGptImagePrompts() {
         const tags = tagsFromHeading(firstMatch(section, /^##\s+(.+)$/m));
         for (const block of splitBeforeHeading(section, "### ")) {
             const title = firstMatch(block, /^###\s+(.+)$/m).replace(/\[([^\]]+)]\([^)]+\)/g, "$1").trim();
-            const prompt = firstMatch(block, /\*\*提示词:\*\*\s*\r?\n\s*```[\w-]*\r?\n(.*?)\r?\n```/s).trim();
+            const prompt = firstMatch(block, /\*\*提示词:\*\*\s*\r?\n\s*```[\w-]*\r?\n([\s\S]*?)\r?\n```/).trim();
             if (!title || !prompt) continue;
             const images = extractMarkdownImages(awesomeGptImageRawBase, block);
             items.push(defaultPrompt(`awesome-gpt-image-${leftPad(items.length + 1)}`, title, prompt, images[0] || "", tags, markdownPreview(images)));
@@ -138,7 +138,7 @@ async function buildAwesomeGpt4oImagePrompts() {
     const items: Omit<Prompt, "category" | "githubUrl">[] = [];
     for (const block of splitBeforeHeading(markdown, "### ")) {
         const title = firstMatch(block, /^###\s+(.+)$/m).trim();
-        const prompt = firstMatch(block, /- \*\*提示词文本：\*\*\s*`(.*?)`/s).trim();
+        const prompt = firstMatch(block, /- \*\*提示词文本：\*\*\s*`([\s\S]*?)`/).trim();
         if (!title || !prompt) continue;
         const images = extractMarkdownImages(awesomeGpt4oImagePromptsBase, block);
         items.push(defaultPrompt(`awesome-gpt4o-image-prompts-${leftPad(items.length + 1)}`, title, prompt, images[0] || "", ["gpt4o"], markdownPreview(images)));
@@ -151,7 +151,7 @@ async function buildYouMindPrompts(baseUrl: string, idPrefix: string, modelTag: 
     const items: Omit<Prompt, "category" | "githubUrl">[] = [];
     for (const block of splitBeforeHeading(markdown, "### ")) {
         const title = firstMatch(block, /^###\s+No\.\s*\d+:\s*(.+)$/m).trim();
-        const prompt = firstMatch(block, /#### .*?提示词\s*\r?\n\s*```[\w-]*\r?\n(.*?)\r?\n```/s).trim();
+        const prompt = firstMatch(block, /#### [\s\S]*?提示词\s*\r?\n\s*```[\w-]*\r?\n([\s\S]*?)\r?\n```/).trim();
         if (!title || !prompt) continue;
         const images = extractMarkdownImages(baseUrl, block);
         items.push(defaultPrompt(`${idPrefix}-${leftPad(items.length + 1)}`, title, prompt, images[0] || "", youMindTags(title, modelTag), markdownPreview(images)));

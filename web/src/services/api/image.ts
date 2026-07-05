@@ -315,6 +315,11 @@ function withSystemMessage<T extends ResponseInputMessage>(config: AiConfig, mes
     return systemPrompt ? [{ role: "system" as const, content: systemPrompt }, ...messages] : messages;
 }
 
+function withAiSystemMessage(config: AiConfig, messages: AiTextMessage[]): AiTextMessage[] {
+    const systemPrompt = config.systemPrompt.trim();
+    return systemPrompt ? [{ role: "system", content: systemPrompt }, ...messages] : messages;
+}
+
 function toResponseInput(messages: ResponseInputMessage[]): ResponseInputItem[] {
     return messages.flatMap((message): ResponseInputItem[] => {
         if ("type" in message) return [message];
@@ -425,8 +430,9 @@ function consumeResponseStreamText(state: ResponseStreamState, text: string, onD
     for (;;) {
         const match = state.buffer.match(/\r?\n\r?\n/);
         if (!match) break;
-        consumeResponseStreamBlock(state.buffer.slice(0, match.index), state, onDelta);
-        state.buffer = state.buffer.slice(match.index + match[0].length);
+        const index = match.index ?? 0;
+        consumeResponseStreamBlock(state.buffer.slice(0, index), state, onDelta);
+        state.buffer = state.buffer.slice(index + match[0].length);
     }
     if (flush && state.buffer.trim()) {
         consumeResponseStreamBlock(state.buffer, state, onDelta);
@@ -573,8 +579,9 @@ function consumeGeminiStreamText(state: GeminiStreamState, text: string, onDelta
     for (;;) {
         const match = state.buffer.match(/\r?\n\r?\n/);
         if (!match) break;
-        consumeGeminiStreamBlock(state.buffer.slice(0, match.index), state, onDelta);
-        state.buffer = state.buffer.slice(match.index + match[0].length);
+        const index = match.index ?? 0;
+        consumeGeminiStreamBlock(state.buffer.slice(0, index), state, onDelta);
+        state.buffer = state.buffer.slice(index + match[0].length);
     }
     if (flush && state.buffer.trim()) {
         consumeGeminiStreamBlock(state.buffer, state, onDelta);
@@ -739,7 +746,7 @@ export async function requestImageQuestion(config: AiConfig, messages: AiTextMes
             return answer;
         }
         if (isQianfanTextConfig(requestConfig)) {
-            const answer = await requestQianfanText(requestConfig, withSystemMessage(requestConfig, messages), onDelta, options);
+            const answer = await requestQianfanText(requestConfig, withAiSystemMessage(requestConfig, messages), onDelta, options);
             if (answer === "没有返回内容") onDelta(answer);
             return answer;
         }

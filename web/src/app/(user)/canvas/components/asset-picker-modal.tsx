@@ -16,12 +16,19 @@ export type InsertAssetPayload =
 
 type Props = {
     open: boolean;
+    defaultTab?: "local" | "prompt-hub" | "my-assets";
     onInsert: (payload: InsertAssetPayload) => void;
     onClose: () => void;
 };
 
-export function AssetPickerModal({ open, onInsert, onClose }: Props) {
-    const [tab, setTab] = useState("local");
+export function AssetPickerModal({ open, defaultTab = "local", onInsert, onClose }: Props) {
+    const initialTab = defaultTab === "prompt-hub" ? "prompt-hub" : "local";
+    const [tab, setTab] = useState(initialTab);
+
+    useEffect(() => {
+        if (open) setTab(initialTab);
+    }, [initialTab, open]);
+
     return (
         <Modal title="选择素材" open={open} onCancel={onClose} footer={null} width={860} centered destroyOnHidden styles={{ body: { padding: "0 24px 24px", minHeight: 480 } }}>
             <Tabs

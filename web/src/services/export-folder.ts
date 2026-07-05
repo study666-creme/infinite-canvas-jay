@@ -16,7 +16,7 @@ import {
     type LocalMediaSource,
 } from "@/services/local-media-store";
 
-export type { LocalFolderStats } from "@/services/local-media-store";
+export type { LocalFolderKind, LocalFolderStats } from "@/services/local-media-store";
 
 export function exportFolderSupported() {
     return localMediaSupported();

@@ -8,6 +8,8 @@ export type CanvasVideoReferenceAsset = {
     title: string;
 };
 
+type VideoReferenceKind = CanvasVideoReferenceAsset["kind"];
+
 const REFERENCE_LABEL_PATTERN = /(?:^|[^\d])(图片\d+|视频\d+|音频\d+|文本\d+)(?=[^\d]|$)/g;
 
 export function extractMentionedReferenceLabels(prompt: string) {
@@ -35,7 +37,7 @@ export function removeReferenceLabelFromPrompt(prompt: string, label: string) {
 
 export function toVideoReferenceAssets(references: CanvasResourceReference[]): CanvasVideoReferenceAsset[] {
     return references
-        .filter((reference) => reference.kind === "image" || reference.kind === "video" || reference.kind === "audio")
+        .filter((reference): reference is CanvasResourceReference & { kind: VideoReferenceKind } => reference.kind === "image" || reference.kind === "video" || reference.kind === "audio")
         .map((reference) => ({
             kind: reference.kind,
             label: reference.label,

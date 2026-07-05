@@ -7,6 +7,7 @@ import { ChevronRight, Image as ImageIcon, Maximize2, Music2, Plus, RefreshCw, S
 import { canvasThemes } from "@/lib/canvas-theme";
 import { formatBytes } from "@/lib/image-utils";
 import { useThemeStore } from "@/stores/use-theme-store";
+import type { UploadedFile } from "@/services/file-storage";
 import { CanvasResourceMentionTextarea, placeCaretAtEnd, type CanvasResourceMentionTextareaHandle } from "./canvas-resource-mention-textarea";
 import { CanvasTextFullscreenOverlay } from "./canvas-text-fullscreen-overlay";
 import { CanvasNodeLoadingState } from "./canvas-node-loading-state";
@@ -53,7 +54,7 @@ type CanvasNodeProps = {
     onGenerateImage?: (node: CanvasNodeData) => void;
     onViewImage?: (node: CanvasNodeData) => void;
     onContextMenu: (event: React.MouseEvent, nodeId: string) => void;
-    onVideoPersisted?: (nodeId: string, file: { url: string; storageKey: string; bytes: number; mimeType: string; width?: number; height?: number; durationMs?: number }) => void;
+    onVideoPersisted?: (nodeId: string, file: UploadedFile) => void;
     onRegisterVideoControl?: (nodeId: string, handle: CanvasVideoPlayerHandle | null) => void;
 };
 
@@ -76,7 +77,7 @@ type NodeContentRendererProps = {
     onGenerateImage?: (node: CanvasNodeData) => void;
     onToggleBatch?: () => void;
     onSetBatchPrimary?: () => void;
-    onVideoPersisted?: (file: { url: string; storageKey: string; bytes: number; mimeType: string; width?: number; height?: number; durationMs?: number }) => void;
+    onVideoPersisted?: (file: UploadedFile) => void;
     onRegisterVideoControl?: (handle: CanvasVideoPlayerHandle | null) => void;
     hovered?: boolean;
     textFullscreenOpen?: boolean;
@@ -435,8 +436,10 @@ export const CanvasNode = React.memo(function CanvasNode({
                 ) : null}
             </div>
 
-            <ConnectionHandlePlus side="left" visible={showSelectionChrome || hovered || connectHover === "left" || leftHandleActive} emphasized={leftHandleActive} onHoverChange={(active) => setConnectHover(active ? "left" : connectHover === "left" ? null : connectHover)} onConnectStart={(event) => onConnectStart(event, data.id, "target")} onConnectMenu={onConnectMenu ? () => onConnectMenu(data.id, "target") : undefined} />
-            <ConnectionHandlePlus side="right" visible={data.type !== CanvasNodeType.Config && (showSelectionChrome || hovered || connectHover === "right" || rightHandleActive)} emphasized={rightHandleActive} onHoverChange={(active) => setConnectHover(active ? "right" : connectHover === "right" ? null : connectHover)} onConnectStart={(event) => onConnectStart(event, data.id, "source")} onConnectMenu={onConnectMenu ? () => onConnectMenu(data.id, "source") : undefined} />
+            <ConnectionHandlePlus side="left" visible={showSelectionChrome || hovered || connectHover === "left" || leftHandleActive} emphasized={leftHandleActive} onHoverChange={(active) => setConnectHover((current) => (active ? "left" : current === "left" ? null : current))} onConnectStart={(event) => onConnectStart(event, data.id, "target")} onConnectMenu={onConnectMenu ? () => onConnectMenu(data.id, "target") : undefined} />
+            {data.type !== CanvasNodeType.Config ? (
+                <ConnectionHandlePlus side="right" visible={showSelectionChrome || hovered || connectHover === "right" || rightHandleActive} emphasized={rightHandleActive} onHoverChange={(active) => setConnectHover((current) => (active ? "right" : current === "right" ? null : current))} onConnectStart={(event) => onConnectStart(event, data.id, "source")} onConnectMenu={onConnectMenu ? () => onConnectMenu(data.id, "source") : undefined} />
+            ) : null}
 
             {showPanel && renderPanel ? <div className="absolute left-1/2 top-full z-[70] w-[min(640px,calc(100vw-48px))] -translate-x-1/2 pt-4">{renderPanel(data)}</div> : null}
         </div>
@@ -916,7 +919,7 @@ function ConnectionHandlePlus({
             aria-label={side === "left" ? "添加输入或拖拽连线" : "添加节点或拖拽连线"}
             className={`absolute top-1/2 z-[110] flex size-20 -translate-y-1/2 items-center justify-center rounded-full transition-opacity duration-150 ${
                 side === "left" ? "-left-10" : "-right-10"
-            } ${visible ? "pointer-events-auto opacity-100" : "pointer-events-none opacity-0"}`}
+            } pointer-events-auto ${visible ? "opacity-100" : "opacity-0"}`}
             onPointerEnter={() => {
                 setHot(true);
                 onHoverChange?.(true);

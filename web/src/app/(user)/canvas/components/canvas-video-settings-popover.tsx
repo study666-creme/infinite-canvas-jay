@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState, type RefObject } from "react";
 import { createPortal } from "react-dom";
 
-import { JimengSummaryText } from "@/components/jimeng-settings-primitives";
+import { JimengSummaryText, JimengToolbarButton } from "@/components/jimeng-settings-primitives";
 import { VideoSettingsPanel, videoJimengRatioLabel, videoJimengResolutionLabel, videoResolutionLabel, videoSizeLabel } from "@/components/video-settings-panel";
 import { isSeedanceVideoConfig } from "@/lib/seedance-video";
 import { canvasThemes } from "@/lib/canvas-theme";

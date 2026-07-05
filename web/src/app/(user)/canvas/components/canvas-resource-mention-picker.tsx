@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, type MouseEvent, type PointerEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent } from "react";
 import { createPortal } from "react-dom";
 import { AtSign, FileText, Image as ImageIcon, Music2, Video } from "lucide-react";
 
@@ -27,7 +27,7 @@ export function CanvasResourceMentionPicker({ references, onSelect, disabled = f
 
     useEffect(() => {
         if (!open) return;
-        const closeOnOutsidePointer = (event: PointerEvent) => {
+        const closeOnOutsidePointer = (event: globalThis.PointerEvent) => {
             const target = event.target;
             if (!(target instanceof Node)) return;
             if (buttonRef.current?.contains(target) || panelRef.current?.contains(target)) return;
@@ -105,7 +105,7 @@ function MentionPickerMenu({
     const showAbove = anchorRect.bottom + gap + maxMenuHeight > window.innerHeight - margin;
     const top = showAbove ? Math.max(margin, anchorRect.top - gap - maxMenuHeight) : anchorRect.bottom + gap;
 
-    const stopCanvasInteraction = (event: PointerEvent | MouseEvent) => event.stopPropagation();
+    const stopCanvasInteraction = (event: ReactPointerEvent | ReactMouseEvent) => event.stopPropagation();
 
     return (
         <div

@@ -26,7 +26,7 @@ import type { ReferenceAudio, ReferenceVideo } from "@/types/media";
 type GeneratedVideo = {
     id: string;
     url: string;
-    storageKey: string;
+    storageKey?: string;
     durationMs: number;
     width: number;
     height: number;

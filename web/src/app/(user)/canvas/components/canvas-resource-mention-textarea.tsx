@@ -1,7 +1,7 @@
 "use client";
 
 import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
-import type { CSSProperties, HTMLAttributes, KeyboardEvent, MouseEvent, PointerEvent } from "react";
+import type { CSSProperties, HTMLAttributes, KeyboardEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent } from "react";
 import { createPortal } from "react-dom";
 import { FileText, Image as ImageIcon, Maximize2, Music2, Video } from "lucide-react";
 
@@ -34,7 +34,7 @@ export type CanvasResourceMentionTextareaHandle = {
     getEditorElement: () => HTMLDivElement | null;
 };
 
-export const CanvasResourceMentionTextarea = forwardRef<CanvasResourceMentionTextareaHandle, Props>(function CanvasResourceMentionTextarea(
+export const CanvasResourceMentionTextarea = forwardRef<CanvasResourceMentionTextareaHandle, Props>(function CanvasResourceMentionTextareaInner(
     { value, references, onChange, onSubmit, onKeyDown, className, containerClassName, style, highlightLabels = true, placeholder, enableFullscreen = false, fullscreenTitle = "全屏编辑", nestedFullscreen = false, ...props },
     forwardedRef,
 ) {
@@ -198,7 +198,7 @@ export const CanvasResourceMentionTextarea = forwardRef<CanvasResourceMentionTex
                     if (editorRef.current?.contains(event.target as Node)) return;
                     event.preventDefault();
                     editorRef.current?.focus();
-                    placeCaretAtEnd(editorRef.current);
+                    if (editorRef.current) placeCaretAtEnd(editorRef.current);
                 }}
             >
                 {enableFullscreen && !nestedFullscreen ? (
@@ -437,7 +437,7 @@ function MentionMenu({ anchor, references, activeIndex, theme, onSelect }: { anc
     const showAbove = rect.bottom + gap + maxMenuHeight > boundary.bottom && rect.top - gap - maxMenuHeight >= boundary.top;
     const top = clamp(showAbove ? rect.top - gap - maxMenuHeight : rect.bottom + gap, boundary.top + 8, boundary.bottom - maxMenuHeight - 8);
 
-    const stopCanvasInteraction = (event: PointerEvent | MouseEvent) => {
+    const stopCanvasInteraction = (event: ReactPointerEvent | ReactMouseEvent) => {
         event.stopPropagation();
     };
     const selectReference = (reference: CanvasResourceReference) => {

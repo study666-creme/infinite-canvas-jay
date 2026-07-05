@@ -72,10 +72,14 @@ export async function flushCanvasStore() {
 const canvasStorage: PersistStorage<CanvasStore> = {
     getItem: async (name) => {
         const value = await localForageStorage.getItem(name);
-        if (!value) return null;
-        const parsed = JSON.parse(value) as StorageValue<CanvasStore>;
-        queuedPersistState = parsed.state as PersistedCanvasState;
-        return parsed;
+        if (typeof value !== "string") return null;
+        try {
+            const parsed = JSON.parse(value) as StorageValue<CanvasStore>;
+            queuedPersistState = parsed.state as PersistedCanvasState;
+            return parsed;
+        } catch {
+            return null;
+        }
     },
     setItem: (name, value) => {
         const nextState = value.state as PersistedCanvasState;
@@ -92,7 +96,7 @@ const canvasStorage: PersistStorage<CanvasStore> = {
                 notifyPersistStatus(false);
                 return;
             }
-            void localForageStorage.setItem(name, payload).finally(() => notifyPersistStatus(false));
+            void Promise.resolve(localForageStorage.setItem(name, payload)).finally(() => notifyPersistStatus(false));
         }, 400);
     },
     removeItem: (name) => localForageStorage.removeItem(name),

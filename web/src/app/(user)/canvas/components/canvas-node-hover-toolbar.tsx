@@ -320,7 +320,7 @@ export function CanvasNodeInfoModal({ node, open, onClose }: { node: CanvasNodeD
 function ToolbarAction({ title, label, icon, onClick, showLabel, active = false, danger = false, suppressTooltip = false, theme }: ToolbarTool & { showLabel: boolean; suppressTooltip?: boolean; theme: (typeof canvasThemes)[keyof typeof canvasThemes] }) {
     const hasText = showLabel && Boolean(label);
     return (
-        <Tooltip open={suppressTooltip ? false : undefined} destroyOnHidden title={hasText ? title : label ? `${title}` : title} placement="top" mouseEnterDelay={0.2} color={theme.toolbar.panel} styles={{ body: { color: theme.node.text, boxShadow: "0 6px 18px rgba(0,0,0,.24)", fontSize: 11 } }}>
+        <Tooltip open={suppressTooltip ? false : undefined} destroyOnHidden title={hasText ? title : label ? `${title}` : title} placement="top" mouseEnterDelay={0.2} color={theme.toolbar.panel} styles={{ container: { color: theme.node.text, boxShadow: "0 6px 18px rgba(0,0,0,.24)", fontSize: 11 } }}>
             <button
                 type="button"
                 className={`group relative flex shrink-0 items-center ${danger ? "text-red-400" : ""}`}

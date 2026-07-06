@@ -2,6 +2,8 @@
 
 import { AtSign, Image as ImageIcon, Music2, Video, X } from "lucide-react";
 
+import { canvasThemes } from "@/lib/canvas-theme";
+import { useThemeStore } from "@/stores/use-theme-store";
 import type { CanvasVideoReferenceAsset } from "../utils/canvas-video-references";
 import { hideReferenceHoverPreview, showReferenceHoverPreview } from "./canvas-reference-hover-preview";
 
@@ -17,6 +19,8 @@ type Props = {
 };
 
 export function CanvasVideoReferenceStrip({ references, variant = "panel", className = "", onInsertReference, onRemoveReference, activeLabels = [] }: Props) {
+    const theme = canvasThemes[useThemeStore((state) => state.theme)];
+
     if (!references.length) return null;
 
     const activeLabelSet = new Set(activeLabels);
@@ -37,8 +41,8 @@ export function CanvasVideoReferenceStrip({ references, variant = "panel", class
                         style={{
                             boxShadow: isActive
                                 ? isNode
-                                    ? "0 10px 28px rgba(47,128,255,.22), 0 0 0 1.5px rgba(47,128,255,.55)"
-                                    : "0 8px 24px rgba(47,128,255,.18), 0 0 0 1.5px rgba(47,128,255,.5)"
+                                    ? `0 10px 28px ${theme.accent.soft}, 0 0 0 1.5px ${theme.accent.solid}`
+                                    : `0 8px 24px ${theme.accent.soft}, 0 0 0 1.5px ${theme.accent.solid}`
                                 : isNode
                                   ? "0 8px 20px rgba(0,0,0,.28), 0 0 0 1px rgba(255,255,255,.08)"
                                   : "0 6px 18px rgba(0,0,0,.16), 0 0 0 1px rgba(255,255,255,.06)",
@@ -87,7 +91,10 @@ export function CanvasVideoReferenceStrip({ references, variant = "panel", class
                                 <span className="block truncate text-[10px] font-medium tracking-wide text-white/95">{reference.label}</span>
                             </div>
                             {clickable && !removable ? (
-                                <span className="pointer-events-none absolute right-1 top-1 grid size-5 place-items-center rounded-full bg-[#2f80ff]/90 text-white opacity-0 shadow-lg transition group-hover:opacity-100">
+                                <span
+                                    className="pointer-events-none absolute right-1 top-1 grid size-5 place-items-center rounded-full opacity-0 shadow-lg transition group-hover:opacity-100"
+                                    style={{ background: theme.accent.solid, color: theme.accent.contrast }}
+                                >
                                     <AtSign className="size-3" />
                                 </span>
                             ) : null}

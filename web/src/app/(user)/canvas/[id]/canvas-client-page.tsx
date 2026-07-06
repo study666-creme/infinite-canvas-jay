@@ -2319,13 +2319,25 @@ function InfiniteCanvasPage() {
         setNodes((prev) =>
             prev.map((node) =>
                 node.id === nodeId
-                    ? {
-                          ...node,
-                          metadata: {
-                              ...node.metadata,
-                              ...videoMetadata(file),
-                          },
-                      }
+                    ? (() => {
+                          const media = videoNodeMedia(file, undefined, {
+                              width: node.metadata?.naturalWidth || node.width,
+                              height: node.metadata?.naturalHeight || node.height,
+                          });
+                          return {
+                              ...node,
+                              width: media.size.width,
+                              height: media.size.height,
+                              position: {
+                                  x: node.position.x + node.width / 2 - media.size.width / 2,
+                                  y: node.position.y + node.height / 2 - media.size.height / 2,
+                              },
+                              metadata: {
+                                  ...node.metadata,
+                                  ...media.metadata,
+                              },
+                          };
+                      })()
                     : node,
             ),
         );
@@ -2996,8 +3008,8 @@ function InfiniteCanvasPage() {
                             ),
                         );
                         const video = await storeGeneratedVideo(generated, generationConfig);
-                        const videoSize = fitNodeSize(video.width || spec.width, video.height || spec.height, VIDEO_NODE_MAX_WIDTH, VIDEO_NODE_MAX_HEIGHT);
-                        setNodes((prev) => prev.map((node) => (node.id === videoId ? { ...node, width: videoSize.width, height: videoSize.height, position: { x: node.position.x + node.width / 2 - videoSize.width / 2, y: node.position.y + node.height / 2 - videoSize.height / 2 }, metadata: { ...node.metadata, ...videoMetadata(video, generated), prompt: effectivePrompt, model: generationConfig.model, size: generationConfig.size, seconds: generationConfig.videoSeconds, vquality: generationConfig.vquality, generateAudio: generationConfig.videoGenerateAudio, watermark: generationConfig.videoWatermark, references: generationReferenceUrls(generationContext), videoReferenceAssets, generationProgress: undefined, generationStage: undefined } } : node)));
+                        const media = videoNodeMedia(video, generated, spec);
+                        setNodes((prev) => prev.map((node) => (node.id === videoId ? { ...node, width: media.size.width, height: media.size.height, position: { x: node.position.x + node.width / 2 - media.size.width / 2, y: node.position.y + node.height / 2 - media.size.height / 2 }, metadata: { ...node.metadata, ...media.metadata, prompt: effectivePrompt, model: generationConfig.model, size: generationConfig.size, seconds: generationConfig.videoSeconds, vquality: generationConfig.vquality, generateAudio: generationConfig.videoGenerateAudio, watermark: generationConfig.videoWatermark, references: generationReferenceUrls(generationContext), videoReferenceAssets, generationProgress: undefined, generationStage: undefined } } : node)));
                     } catch (error) {
                         if (isGenerationCanceled(error)) return;
                         const errorDetails = error instanceof Error ? error.message : "视频生成失败";
@@ -3184,8 +3196,9 @@ function InfiniteCanvasPage() {
                         ),
                     );
                     const video = await storeGeneratedVideo(generated, generationConfig);
-                    const videoSize = fitNodeSize(video.width || node.width, video.height || node.height, VIDEO_NODE_MAX_WIDTH, VIDEO_NODE_MAX_HEIGHT);
-                    setNodes((prev) => prev.map((item) => (item.id === node.id ? { ...item, width: videoSize.width, height: videoSize.height, position: { x: item.position.x + item.width / 2 - videoSize.width / 2, y: item.position.y + item.height / 2 - videoSize.height / 2 }, metadata: { ...item.metadata, ...videoMetadata(video, generated), prompt, model: generationConfig.model, size: generationConfig.size, seconds: generationConfig.videoSeconds, vquality: generationConfig.vquality, generateAudio: generationConfig.videoGenerateAudio, watermark: generationConfig.videoWatermark } } : item)));
+                    const fallbackSpec = nodeSizeFromRatio(generationConfig.size, NODE_DEFAULT_SIZE[CanvasNodeType.Video].width, NODE_DEFAULT_SIZE[CanvasNodeType.Video].height) || { width: node.width, height: node.height };
+                    const media = videoNodeMedia(video, generated, fallbackSpec);
+                    setNodes((prev) => prev.map((item) => (item.id === node.id ? { ...item, width: media.size.width, height: media.size.height, position: { x: item.position.x + item.width / 2 - media.size.width / 2, y: item.position.y + item.height / 2 - media.size.height / 2 }, metadata: { ...item.metadata, ...media.metadata, prompt, model: generationConfig.model, size: generationConfig.size, seconds: generationConfig.videoSeconds, vquality: generationConfig.vquality, generateAudio: generationConfig.videoGenerateAudio, watermark: generationConfig.videoWatermark } } : item)));
                     return;
                 }
                 if (node.type === CanvasNodeType.Audio) {
@@ -4166,6 +4179,27 @@ function videoMetadata(video: UploadedFile, result?: VideoGenerationResult): Can
     };
 }
 
+function videoNodeMedia(video: UploadedFile, result: VideoGenerationResult | undefined, fallback: { width: number; height: number }) {
+    const dimensions = videoDimensionsForNode(video, fallback);
+    return {
+        size: fitNodeSize(dimensions.width, dimensions.height, VIDEO_NODE_MAX_WIDTH, VIDEO_NODE_MAX_HEIGHT),
+        metadata: {
+            ...videoMetadata(video, result),
+            naturalWidth: dimensions.width,
+            naturalHeight: dimensions.height,
+        },
+    };
+}
+
+function videoDimensionsForNode(video: UploadedFile, fallback: { width: number; height: number }) {
+    const width = video.width || 0;
+    const height = video.height || 0;
+    const hasMeasuredFile = Boolean(video.storageKey || video.bytes > 0);
+    const isGenericRemoteFallback = width === 1280 && height === 720 && !hasMeasuredFile;
+    if (width > 0 && height > 0 && !isGenericRemoteFallback) return { width, height };
+    return { width: Math.max(1, fallback.width), height: Math.max(1, fallback.height) };
+}
+
 function audioMetadata(audio: UploadedFile): CanvasNodeMetadata {
     return { content: audio.url, storageKey: audio.storageKey, status: "success", bytes: audio.bytes, mimeType: audio.mimeType || "audio/mpeg", durationMs: audio.durationMs };
 }
@@ -4226,7 +4260,20 @@ async function hydrateCanvasImages(nodes: CanvasNodeData[]) {
                         const config = useConfigStore.getState().config;
                         const blob = config.baseUrl.trim() && config.apiKey.trim() ? await downloadRemoteVideoBlob(config, content) : null;
                         const video = blob ? await uploadMediaFile(blob, "video") : await uploadMediaFile(content, "video");
-                        return { ...node, metadata: { ...node.metadata, ...videoMetadata(video) } };
+                        const media = videoNodeMedia(video, undefined, {
+                            width: node.metadata?.naturalWidth || node.width,
+                            height: node.metadata?.naturalHeight || node.height,
+                        });
+                        return {
+                            ...node,
+                            width: media.size.width,
+                            height: media.size.height,
+                            position: {
+                                x: node.position.x + node.width / 2 - media.size.width / 2,
+                                y: node.position.y + node.height / 2 - media.size.height / 2,
+                            },
+                            metadata: { ...node.metadata, ...media.metadata },
+                        };
                     } catch {
                         return node;
                     }

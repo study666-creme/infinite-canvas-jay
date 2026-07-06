@@ -116,7 +116,7 @@ export function CanvasAssetDrawer({ open, onClose, onInsert }: CanvasAssetDrawer
                     onChange={(value) => setTab(String(value))}
                 />
                 <div className="min-h-0 flex-1 pt-4">{tab === "assets" ? <MyAssetsPanel compact onInsert={onInsert} /> : <PromptHubCardsTab compact />}</div>
-                <button type="button" aria-label="调整我的资产侧边栏宽度" className="absolute -right-1 top-0 h-full w-2 cursor-ew-resize rounded-r-lg transition hover:bg-blue-400/30" onPointerDown={startResize} />
+                <button type="button" aria-label="调整我的资产侧边栏宽度" className="absolute -right-1 top-0 h-full w-2 cursor-ew-resize rounded-r-lg transition hover:bg-white/20" onPointerDown={startResize} />
             </div>
         </aside>
     );

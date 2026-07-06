@@ -247,9 +247,43 @@
             0 10px 28px rgba(0, 0, 0, 0.1);
     }
 
+    @keyframes canvas-node-pop-in {
+        from {
+            opacity: 0;
+            transform: scale(0.96) translateY(8px);
+            filter: blur(1px);
+        }
+
+        72% {
+            opacity: 1;
+            transform: scale(1.012) translateY(0);
+            filter: blur(0);
+        }
+
+        to {
+            opacity: 1;
+            transform: scale(1) translateY(0);
+            filter: blur(0);
+        }
+    }
+
+    .canvas-node-pop-in {
+        animation: canvas-node-pop-in 220ms cubic-bezier(0.2, 0.9, 0.2, 1) both;
+        transform-origin: center;
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+        .canvas-node-pop-in {
+            animation: none;
+        }
+    }
+
     .canvas-asset-drawer {
-        --apple-accent: #0a84ff;
-        --apple-accent-soft: rgba(10, 132, 255, 0.18);
+        --apple-accent: #cfc6b6;
+        --apple-accent-strong: #eee5d6;
+        --apple-accent-contrast: #161616;
+        --apple-accent-soft: rgba(207, 198, 182, 0.18);
+        --apple-accent-hover: rgba(207, 198, 182, 0.26);
     }
 
     .canvas-asset-drawer .canvas-asset-segmented.ant-segmented {
@@ -303,7 +337,7 @@
     .canvas-asset-drawer .ant-select:hover .ant-select-selector,
     .canvas-asset-drawer .canvas-asset-surface-button.ant-btn:hover {
         background: rgba(255, 255, 255, 0.1) !important;
-        border-color: rgba(10, 132, 255, 0.46) !important;
+        border-color: var(--apple-accent-hover) !important;
         color: #ffffff !important;
     }
 
@@ -323,17 +357,17 @@
     }
 
     .canvas-asset-drawer .prompt-filter-tag.canvas-asset-filter-tag.ant-tag-checkable:hover {
-        border-color: rgba(10, 132, 255, 0.46);
+        border-color: var(--apple-accent-hover);
         background: rgba(255, 255, 255, 0.1);
         color: #ffffff;
     }
 
     .canvas-asset-drawer .prompt-filter-tag.canvas-asset-filter-tag.ant-tag-checkable.is-active,
     .canvas-asset-drawer .prompt-filter-tag.canvas-asset-filter-tag.ant-tag-checkable-checked {
-        border-color: rgba(10, 132, 255, 0.88);
-        background: rgba(10, 132, 255, 0.22);
-        box-shadow: 0 6px 18px rgba(10, 132, 255, 0.18);
-        color: #f5faff !important;
+        border-color: var(--apple-accent);
+        background: var(--apple-accent-soft);
+        box-shadow: 0 6px 18px rgba(207, 198, 182, 0.16);
+        color: var(--apple-accent-strong) !important;
     }
 
     .canvas-asset-drawer .canvas-asset-card {
@@ -343,8 +377,38 @@
     }
 
     .canvas-asset-drawer .canvas-asset-card:hover {
-        border-color: rgba(10, 132, 255, 0.42) !important;
+        border-color: var(--apple-accent-hover) !important;
         box-shadow: 0 12px 28px rgba(0, 0, 0, 0.28);
+    }
+
+    .canvas-asset-drawer .canvas-asset-card.is-selected {
+        border-color: var(--apple-accent) !important;
+        box-shadow:
+            0 0 0 2px rgba(207, 198, 182, 0.35),
+            0 16px 34px rgba(0, 0, 0, 0.32) !important;
+    }
+
+    .canvas-asset-drawer .canvas-asset-select-toggle {
+        border-color: rgba(255, 255, 255, 0.5);
+        background: rgba(15, 15, 16, 0.5);
+        color: #ffffff;
+    }
+
+    .canvas-asset-drawer .canvas-asset-select-toggle.is-selected {
+        border-color: var(--apple-accent);
+        background: var(--apple-accent);
+        color: var(--apple-accent-contrast);
+    }
+
+    .canvas-asset-drawer .canvas-asset-selection-bar {
+        border-color: rgba(207, 198, 182, 0.28);
+        background: rgba(207, 198, 182, 0.1);
+        color: var(--apple-accent-strong);
+    }
+
+    .canvas-asset-drawer .canvas-asset-drop-zone.is-ready {
+        border-color: rgba(207, 198, 182, 0.62);
+        background: rgba(207, 198, 182, 0.08);
     }
 
     .canvas-asset-drawer .canvas-asset-card .text-stone-800,
@@ -417,15 +481,15 @@
     }
 
     .canvas-asset-modal .ant-btn-primary {
-        border-color: rgba(10, 132, 255, 0.95) !important;
-        background: #0a84ff !important;
-        color: #ffffff !important;
-        box-shadow: 0 8px 22px rgba(10, 132, 255, 0.26) !important;
+        border-color: #cfc6b6 !important;
+        background: #cfc6b6 !important;
+        color: #161616 !important;
+        box-shadow: 0 8px 22px rgba(207, 198, 182, 0.24) !important;
     }
 
     .canvas-asset-modal .ant-btn-default:hover {
         background: rgba(255, 255, 255, 0.11) !important;
-        border-color: rgba(10, 132, 255, 0.44) !important;
+        border-color: rgba(207, 198, 182, 0.44) !important;
     }
 
     .hover-scrollbar {

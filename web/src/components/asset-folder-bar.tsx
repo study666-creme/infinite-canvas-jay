@@ -149,8 +149,8 @@ function FolderChip({
         <button
             type="button"
             className={`inline-flex h-8 items-center gap-1.5 rounded-full border px-3 text-sm transition ${
-                active ? "border-blue-400 bg-blue-500 text-white shadow-sm shadow-blue-950/15" : "border-stone-200 bg-white text-stone-600 hover:border-stone-400 dark:border-stone-700 dark:bg-stone-900 dark:text-stone-300 dark:hover:border-stone-500"
-            } ${dragActive ? "ring-2 ring-blue-400/80" : ""} ${buttonClassName || ""}`}
+                active ? "border-[#cfc6b6] bg-[#cfc6b6] text-[#161616] shadow-sm shadow-black/15" : "border-stone-200 bg-white text-stone-600 hover:border-stone-400 dark:border-stone-700 dark:bg-stone-900 dark:text-stone-300 dark:hover:border-stone-500"
+            } ${dragActive ? "ring-2 ring-[#cfc6b6]" : ""} ${buttonClassName || ""}`}
             onClick={onClick}
             onDragEnter={(event) => {
                 if (!canDrop || !hasAssetDrag(event)) return;

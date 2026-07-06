@@ -313,7 +313,7 @@ export const CanvasNode = React.memo(function CanvasNode({
     return (
         <div
             data-node-id={data.id}
-            className={`node-element absolute flex select-none flex-col transition-shadow duration-200 ${showSelectionChrome ? "z-50" : "z-10"}`}
+            className={`node-element canvas-node-pop-in absolute flex select-none flex-col transition-shadow duration-200 ${showSelectionChrome ? "z-50" : "z-10"}`}
             style={{
                 left: data.position.x,
                 top: data.position.y,
@@ -602,8 +602,15 @@ function TextContent({ node, theme, isEditingContent, textareaRef, mentionRefere
 }
 
 function ResourceLabelBadge({ reference }: { reference: CanvasResourceReference }) {
+    const theme = canvasThemes[useThemeStore((state) => state.theme)];
     return (
-        <span className={`pointer-events-none absolute right-2 top-2 z-30 rounded-md px-1.5 py-0.5 text-[10px] font-medium ${reference.active ? "bg-[#2f80ff] text-white shadow-sm" : "bg-black/35 text-white/75"}`}>
+        <span
+            className="pointer-events-none absolute right-2 top-2 z-30 rounded-md px-1.5 py-0.5 text-[10px] font-medium shadow-sm"
+            style={{
+                background: reference.active ? theme.accent.solid : "rgba(0,0,0,.35)",
+                color: reference.active ? theme.accent.contrast : "rgba(255,255,255,.75)",
+            }}
+        >
             {reference.label}
         </span>
     );
@@ -768,7 +775,9 @@ function ImageContent({
                     onMouseDown={(event) => event.stopPropagation()}
                     onPointerDown={(event) => event.stopPropagation()}
                 >
-                    <span className="leading-none text-[#2f80ff]">{batchCount}</span>
+                    <span className="leading-none" style={{ color: theme.accent.text }}>
+                        {batchCount}
+                    </span>
                     <ChevronRight className={`size-3.5 opacity-55 transition-transform ${batchExpanded ? "rotate-90" : ""}`} />
                 </button>
             ) : null}
@@ -784,7 +793,7 @@ function ImageContent({
                     onMouseDown={(event) => event.stopPropagation()}
                     onPointerDown={(event) => event.stopPropagation()}
                 >
-                    <Star className="size-3.5 text-[#2f80ff]" />
+                    <Star className="size-3.5" style={{ color: theme.accent.text }} />
                     设为主图
                 </button>
             ) : null}
@@ -936,13 +945,13 @@ function ConnectionHandlePlus({
             <span
                 className="grid size-9 place-items-center rounded-full border transition duration-200 hover:scale-105 active:scale-95"
                 style={{
-                    background: hot || emphasized ? "rgba(255,255,255,.96)" : theme.node.panel,
-                    borderColor: hot || emphasized ? "rgba(147,197,253,.85)" : theme.node.stroke,
-                    color: hot || emphasized ? "#0f172a" : theme.node.muted,
+                    background: hot || emphasized ? theme.accent.solid : theme.node.panel,
+                    borderColor: hot || emphasized ? theme.accent.solid : theme.node.stroke,
+                    color: hot || emphasized ? theme.accent.contrast : theme.node.muted,
                     boxShadow: hot
-                        ? "0 0 0 4px rgba(91,157,255,.28), 0 8px 22px rgba(0,0,0,.28)"
+                        ? `0 0 0 4px ${theme.accent.soft}, 0 8px 22px rgba(0,0,0,.28)`
                         : emphasized
-                          ? "0 0 0 4px rgba(255,255,255,.06), 0 6px 18px rgba(0,0,0,.22)"
+                          ? `0 0 0 4px ${theme.accent.soft}, 0 6px 18px rgba(0,0,0,.22)`
                           : "0 4px 14px rgba(0,0,0,.18)",
                 }}
                 title={side === "left" ? "点击添加输入 · 按住拖拽连线" : "点击添加节点 · 按住拖拽连线"}

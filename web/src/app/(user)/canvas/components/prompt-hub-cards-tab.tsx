@@ -42,7 +42,7 @@ function PickerCard({
             role="button"
             tabIndex={disabled ? -1 : 0}
             aria-disabled={disabled}
-            className={`canvas-asset-card group relative min-w-0 overflow-hidden rounded-lg border text-left transition hover:border-stone-400 hover:shadow-md dark:hover:border-stone-500 ${selected ? "border-blue-400 ring-2 ring-blue-400/45" : "border-stone-200 bg-white dark:border-stone-700 dark:bg-stone-900"} ${disabled ? "cursor-default opacity-70" : "cursor-pointer"}`}
+            className={`canvas-asset-card group relative min-w-0 overflow-hidden rounded-lg border text-left transition hover:border-stone-400 hover:shadow-md dark:hover:border-stone-500 ${selected ? "is-selected" : "border-stone-200 bg-white dark:border-stone-700 dark:bg-stone-900"} ${disabled ? "cursor-default opacity-70" : "cursor-pointer"}`}
             onClick={() => {
                 if (disabled) return;
                 onClick();
@@ -56,7 +56,7 @@ function PickerCard({
             {!saved ? (
                 <button
                     type="button"
-                    className={`absolute left-2 top-2 z-10 grid size-7 place-items-center rounded-full border text-xs shadow-sm backdrop-blur transition ${selected ? "border-blue-400 bg-blue-500 text-white opacity-100" : "border-white/50 bg-stone-950/45 text-white opacity-0 hover:bg-stone-900 group-hover:opacity-100"}`}
+                    className={`canvas-asset-select-toggle absolute left-2 top-2 z-10 grid size-7 place-items-center rounded-full border text-xs shadow-sm backdrop-blur transition ${selected ? "is-selected opacity-100" : "opacity-0 hover:bg-stone-900 group-hover:opacity-100"}`}
                     aria-pressed={selected}
                     aria-label={selected ? "取消选择卡片" : "选择卡片"}
                     onClick={(event) => {
@@ -331,8 +331,8 @@ export function PromptHubCardsTab({ compact = false }: { compact?: boolean } = {
             </div>
 
             {selectedCardIds.size ? (
-                <div className="flex flex-wrap items-center gap-2 rounded-lg border border-blue-400/25 bg-blue-500/10 px-2.5 py-2 text-xs">
-                    <span className="font-medium text-blue-100">已选 {selectedCardIds.size} 张</span>
+                <div className="canvas-asset-selection-bar flex flex-wrap items-center gap-2 rounded-lg border px-2.5 py-2 text-xs">
+                    <span className="font-medium">已选 {selectedCardIds.size} 张</span>
                     <Button size="small" className="canvas-asset-surface-button" icon={<FolderInput className="size-3.5" />} onClick={() => void saveSelectedCards()}>
                         添加选中
                     </Button>

@@ -294,26 +294,21 @@ export function MyAssetsPanel({ onInsert, compact = false }: MyAssetsPanelProps)
                 <Button size="small" className="canvas-asset-surface-button" icon={<Plus className="size-3.5" />} onClick={openCreateAsset}>
                     新建资产
                 </Button>
-                <div className="flex flex-wrap gap-1.5">
-                    {kindOptions.map((option) => (
-                        <Tag.CheckableTag
-                            key={option.value}
-                            checked={kindFilter === option.value}
-                            className={cn("prompt-filter-tag canvas-asset-filter-tag", kindFilter === option.value && "is-active")}
-                            onChange={() => {
-                                setPage(1);
-                                setKindFilter(option.value);
-                            }}
-                        >
-                            {option.label}
-                        </Tag.CheckableTag>
-                    ))}
-                </div>
+                <Segmented
+                    className="canvas-asset-segmented canvas-asset-kind-segmented"
+                    size="small"
+                    value={kindFilter}
+                    options={kindOptions}
+                    onChange={(value) => {
+                        setPage(1);
+                        setKindFilter(String(value));
+                    }}
+                />
             </div>
 
             {selectedIds.size ? (
-                <div className="flex flex-wrap items-center gap-2 rounded-lg border border-cyan-300/30 bg-cyan-300/10 px-2.5 py-2 text-xs" data-asset-no-context>
-                    <span className="font-medium text-cyan-100">已选 {selectedIds.size} 个</span>
+                <div className="flex flex-wrap items-center gap-2 rounded-lg border border-blue-400/25 bg-blue-500/10 px-2.5 py-2 text-xs" data-asset-no-context>
+                    <span className="font-medium text-blue-100">已选 {selectedIds.size} 个</span>
                     <Select size="small" className="min-w-[128px]" value={bulkFolderValue} options={folderSelectOptions} onChange={setBulkFolderValue} />
                     <Button size="small" className="canvas-asset-surface-button" icon={<FolderInput className="size-3.5" />} onClick={() => moveAssetsToFolder(Array.from(selectedIds), folderValueToFolderId(bulkFolderValue))}>
                         移动
@@ -384,6 +379,7 @@ export function MyAssetsPanel({ onInsert, compact = false }: MyAssetsPanelProps)
             ) : null}
 
             <Modal
+                className="canvas-asset-modal"
                 title="新建资产"
                 open={createOpen}
                 width={720}
@@ -416,7 +412,7 @@ export function MyAssetsPanel({ onInsert, compact = false }: MyAssetsPanelProps)
                     <div
                         className={cn(
                             "flex min-h-40 cursor-pointer flex-col items-center justify-center rounded-xl border border-dashed p-5 text-center transition",
-                            createImageDraft ? "border-cyan-300/60 bg-cyan-300/5" : "border-stone-600 bg-stone-950/30 hover:border-stone-400",
+                            createImageDraft ? "border-blue-400/60 bg-blue-500/5" : "border-stone-600 bg-stone-950/30 hover:border-stone-400",
                         )}
                         onClick={() => createImageInputRef.current?.click()}
                         onDragOver={(event) => event.preventDefault()}
@@ -511,7 +507,7 @@ function AssetCard({ asset, selected, selectedIds, onInsert, onToggleSelected }:
             draggable
             className={cn(
                 "canvas-asset-card group relative min-w-0 cursor-grab overflow-hidden rounded-lg border border-stone-200 bg-white text-left transition hover:border-stone-400 hover:shadow-md active:cursor-grabbing dark:border-stone-700 dark:bg-stone-900 dark:hover:border-stone-500",
-                selected && "border-cyan-300 ring-2 ring-cyan-300/50",
+                selected && "border-blue-400 ring-2 ring-blue-400/45",
             )}
             onClick={onInsert}
             onKeyDown={handleKeyDown}
@@ -522,7 +518,7 @@ function AssetCard({ asset, selected, selectedIds, onInsert, onToggleSelected }:
                 type="button"
                 className={cn(
                     "absolute left-2 top-2 z-10 grid size-7 place-items-center rounded-full border text-xs shadow-sm backdrop-blur transition",
-                    selected ? "border-cyan-300 bg-cyan-300 text-stone-950 opacity-100" : "border-white/50 bg-stone-950/45 text-white opacity-0 hover:bg-stone-900 group-hover:opacity-100",
+                    selected ? "border-blue-400 bg-blue-500 text-white opacity-100" : "border-white/50 bg-stone-950/45 text-white opacity-0 hover:bg-stone-900 group-hover:opacity-100",
                 )}
                 aria-pressed={selected}
                 aria-label={selected ? "取消选择资产" : "选择资产"}

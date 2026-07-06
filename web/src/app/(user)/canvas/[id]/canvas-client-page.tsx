@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { ChangeEvent as ReactChangeEvent, DragEvent as ReactDragEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent } from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
-import { BookOpen, Bot, Home, ImageIcon, Images, List, Menu, Music2, Plus, Redo2, Settings2, Trash2, Undo2, Upload, Video } from "lucide-react";
+import { BookOpen, Bot, Home, ImageIcon, Images, List, Menu, Music2, Plus, Redo2, Save, Settings2, Trash2, Undo2, Upload, Video } from "lucide-react";
 import { saveAs } from "file-saver";
 
 import { requestEdit, requestGeneration, requestImageQuestion } from "@/services/api/image";
@@ -577,8 +577,8 @@ function InfiniteCanvasPage() {
 
     useEffect(() => subscribeCanvasPersistStatus(setSavePending), []);
 
-    useEffect(() => {
-        const flushProjectState = () => {
+    const saveCurrentProjectNow = useCallback(
+        async (showToast = true) => {
             if (projectSaveTimerRef.current) {
                 clearTimeout(projectSaveTimerRef.current);
                 projectSaveTimerRef.current = null;
@@ -598,10 +598,14 @@ function InfiniteCanvasPage() {
                 showImageInfo: meta.showImageInfo,
                 viewport: viewportRef.current,
             });
-            void flushCanvasStore();
-        };
+            await flushCanvasStore();
+            if (showToast) message.success("画布已保存");
+        },
+        [message, updateProject],
+    );
 
-        const handlePageHide = () => flushProjectState();
+    useEffect(() => {
+        const handlePageHide = () => void saveCurrentProjectNow(false);
         window.addEventListener("pagehide", handlePageHide);
         const handleVisibilityChange = () => {
             if (document.visibilityState === "hidden") handlePageHide();
@@ -611,7 +615,7 @@ function InfiniteCanvasPage() {
             window.removeEventListener("pagehide", handlePageHide);
             document.removeEventListener("visibilitychange", handleVisibilityChange);
         };
-    }, [updateProject]);
+    }, [saveCurrentProjectNow]);
 
     useLayoutEffect(() => {
         nodesRef.current = nodes;
@@ -3469,6 +3473,7 @@ function InfiniteCanvasPage() {
                     agentOpen={assistantOpen}
                     compactAgentStatus={codexCompactAgent ? { connected: localAgentConnected, enabled: localAgentEnabled, activity: localAgentActivity } : undefined}
                     onToggleAgent={() => (assistantOpen ? closeAgent() : openAgent())}
+                    onSaveNow={() => void saveCurrentProjectNow()}
                     savePending={savePending}
                 />
 
@@ -3972,6 +3977,7 @@ function CanvasTopBar({
     agentOpen,
     compactAgentStatus,
     onToggleAgent,
+    onSaveNow,
     savePending,
 }: {
     title: string;
@@ -3993,6 +3999,7 @@ function CanvasTopBar({
     agentOpen: boolean;
     compactAgentStatus?: { connected: boolean; enabled: boolean; activity: string };
     onToggleAgent: () => void;
+    onSaveNow: () => void;
     savePending: boolean;
 }) {
     const colorTheme = useThemeStore((state) => state.theme);
@@ -4025,6 +4032,8 @@ function CanvasTopBar({
                                 { key: "delete", danger: true, icon: <Trash2 className="size-4" />, label: "删除当前画布", onClick: onDeleteProject },
                                 { type: "divider" },
                                 { key: "import", icon: <Upload className="size-4" />, label: "导入素材", onClick: onImportImage },
+                                { type: "divider" },
+                                { key: "save", icon: <Save className="size-4" />, label: "立即保存", onClick: onSaveNow },
                                 { type: "divider" },
                                 { key: "undo", disabled: !canUndo, icon: <Undo2 className="size-4" />, label: <MenuLabel text="撤销" shortcut="⌘ Z" />, onClick: onUndo },
                                 { key: "redo", disabled: !canRedo, icon: <Redo2 className="size-4" />, label: <MenuLabel text="重做" shortcut="⌘ ⇧ Z / ⌘ Y" />, onClick: onRedo },
@@ -4061,9 +4070,16 @@ function CanvasTopBar({
                             </button>
                         )}
                     </div>
-                    <span className="rounded-full px-2 py-0.5 text-[11px] opacity-55" style={{ color: theme.node.muted, background: theme.toolbar.activeBg }}>
-                        {savePending ? "保存中…" : "已自动保存"}
-                    </span>
+                    <button
+                        type="button"
+                        className="canvas-toolbar-pill inline-flex h-8 items-center gap-1.5 rounded-full border px-2.5 text-[11px] font-medium transition hover:opacity-90"
+                        style={{ color: theme.node.muted, background: theme.toolbar.panel, borderColor: theme.toolbar.border }}
+                        title="立即保存当前画布"
+                        onClick={onSaveNow}
+                    >
+                        <Save className="size-3.5" />
+                        <span>{savePending ? "保存中…" : "已保存"}</span>
+                    </button>
                 </div>
 
                 <div className="pointer-events-auto flex items-center gap-1.5">

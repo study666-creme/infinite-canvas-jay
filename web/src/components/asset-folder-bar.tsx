@@ -105,11 +105,11 @@ export function AssetFolderBar({ value, onChange, className = "", buttonClassNam
                 新建分类
             </Button>
 
-            <Modal title="新建资产分类" open={createOpen} onCancel={() => setCreateOpen(false)} onOk={createFolder} okText="创建" cancelText="取消" destroyOnHidden>
+            <Modal className={buttonClassName ? "canvas-asset-modal" : undefined} title="新建资产分类" open={createOpen} onCancel={() => setCreateOpen(false)} onOk={createFolder} okText="创建" cancelText="取消" destroyOnHidden>
                 <Input value={newFolderName} placeholder="例如：角色参考、场景资产" onChange={(event) => setNewFolderName(event.target.value)} onPressEnter={createFolder} />
             </Modal>
 
-            <Modal title="重命名分类" open={Boolean(editingFolder)} onCancel={() => setEditingFolder(null)} onOk={saveRename} okText="保存" cancelText="取消" destroyOnHidden>
+            <Modal className={buttonClassName ? "canvas-asset-modal" : undefined} title="重命名分类" open={Boolean(editingFolder)} onCancel={() => setEditingFolder(null)} onOk={saveRename} okText="保存" cancelText="取消" destroyOnHidden>
                 <Input value={editingName} onChange={(event) => setEditingName(event.target.value)} onPressEnter={saveRename} />
             </Modal>
         </div>
@@ -149,8 +149,8 @@ function FolderChip({
         <button
             type="button"
             className={`inline-flex h-8 items-center gap-1.5 rounded-full border px-3 text-sm transition ${
-                active ? "border-cyan-300 bg-cyan-300 text-stone-950 shadow-sm shadow-cyan-950/15" : "border-stone-200 bg-white text-stone-600 hover:border-stone-400 dark:border-stone-700 dark:bg-stone-900 dark:text-stone-300 dark:hover:border-stone-500"
-            } ${dragActive ? "ring-2 ring-cyan-300/80" : ""} ${buttonClassName || ""}`}
+                active ? "border-blue-400 bg-blue-500 text-white shadow-sm shadow-blue-950/15" : "border-stone-200 bg-white text-stone-600 hover:border-stone-400 dark:border-stone-700 dark:bg-stone-900 dark:text-stone-300 dark:hover:border-stone-500"
+            } ${dragActive ? "ring-2 ring-blue-400/80" : ""} ${buttonClassName || ""}`}
             onClick={onClick}
             onDragEnter={(event) => {
                 if (!canDrop || !hasAssetDrag(event)) return;

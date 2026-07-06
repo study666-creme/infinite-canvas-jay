@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { PointerEvent as ReactPointerEvent } from "react";
-import { Button, Tabs } from "antd";
+import { Button, Segmented } from "antd";
 import { X } from "lucide-react";
 
 import { canvasThemes } from "@/lib/canvas-theme";
@@ -100,21 +100,23 @@ export function CanvasAssetDrawer({ open, onClose, onInsert }: CanvasAssetDrawer
             >
                 <div className="flex items-center justify-between gap-3">
                     <div>
-                        <div className="text-sm font-semibold">我的资产</div>
+                        <div className="text-[15px] font-semibold tracking-normal">我的资产</div>
                         <div className="mt-0.5 text-xs opacity-55">资产与 Prompt Hub 卡片</div>
                     </div>
-                    <Button type="text" aria-label="关闭我的资产" icon={<X className="size-4" />} onClick={onClose} />
+                    <Button type="text" className="canvas-asset-ghost-button" aria-label="关闭我的资产" icon={<X className="size-4" />} onClick={onClose} />
                 </div>
-                <Tabs
-                    className="mt-3 flex min-h-0 flex-1 flex-col overflow-hidden [&_.ant-tabs-content-holder]:min-h-0 [&_.ant-tabs-content-holder]:flex-1 [&_.ant-tabs-content-holder]:overflow-hidden [&_.ant-tabs-content]:flex [&_.ant-tabs-content]:h-full [&_.ant-tabs-content]:min-h-0 [&_.ant-tabs-tabpane]:h-full [&_.ant-tabs-tabpane]:min-h-0 [&_.ant-tabs-tabpane-active]:flex [&_.ant-tabs-tabpane-active]:flex-col"
-                    activeKey={tab}
-                    onChange={setTab}
-                    items={[
-                        { key: "assets", label: "我的资产", children: <MyAssetsPanel compact onInsert={onInsert} /> },
-                        { key: "prompt-hub", label: "卡片库", children: <PromptHubCardsTab compact /> },
+                <Segmented
+                    block
+                    className="canvas-asset-segmented mt-4"
+                    value={tab}
+                    options={[
+                        { label: "我的资产", value: "assets" },
+                        { label: "卡片库", value: "prompt-hub" },
                     ]}
+                    onChange={(value) => setTab(String(value))}
                 />
-                <button type="button" aria-label="调整我的资产侧边栏宽度" className="absolute -right-1 top-0 h-full w-2 cursor-ew-resize rounded-r-lg transition hover:bg-cyan-300/45" onPointerDown={startResize} />
+                <div className="min-h-0 flex-1 pt-4">{tab === "assets" ? <MyAssetsPanel compact onInsert={onInsert} /> : <PromptHubCardsTab compact />}</div>
+                <button type="button" aria-label="调整我的资产侧边栏宽度" className="absolute -right-1 top-0 h-full w-2 cursor-ew-resize rounded-r-lg transition hover:bg-blue-400/30" onPointerDown={startResize} />
             </div>
         </aside>
     );

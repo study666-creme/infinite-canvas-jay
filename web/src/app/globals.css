@@ -240,21 +240,40 @@
         border-radius: 999px;
     }
 
-    .canvas-asset-drawer .ant-tabs-nav {
-        margin-bottom: 12px;
+    .canvas-toolbar-pill {
+        backdrop-filter: blur(18px) saturate(1.35);
+        box-shadow:
+            inset 0 1px 0 rgba(255, 255, 255, 0.12),
+            0 10px 28px rgba(0, 0, 0, 0.1);
     }
 
-    .canvas-asset-drawer .ant-tabs-tab {
-        color: rgba(245, 245, 244, 0.62);
+    .canvas-asset-drawer {
+        --apple-accent: #0a84ff;
+        --apple-accent-soft: rgba(10, 132, 255, 0.18);
     }
 
-    .canvas-asset-drawer .ant-tabs-tab:hover,
-    .canvas-asset-drawer .ant-tabs-tab-active .ant-tabs-tab-btn {
-        color: #f5f5f4 !important;
+    .canvas-asset-drawer .canvas-asset-segmented.ant-segmented {
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        background: rgba(255, 255, 255, 0.08);
+        padding: 3px;
+        color: rgba(245, 245, 244, 0.74);
+        backdrop-filter: blur(18px) saturate(1.35);
     }
 
-    .canvas-asset-drawer .ant-tabs-ink-bar {
-        background: #67e8f9 !important;
+    .canvas-asset-drawer .canvas-asset-segmented .ant-segmented-item {
+        border-radius: 8px;
+        color: rgba(245, 245, 244, 0.72);
+        transition:
+            background 0.18s ease,
+            color 0.18s ease;
+    }
+
+    .canvas-asset-drawer .canvas-asset-segmented .ant-segmented-item-selected {
+        background: rgba(255, 255, 255, 0.18);
+        box-shadow:
+            inset 0 1px 0 rgba(255, 255, 255, 0.18),
+            0 5px 14px rgba(0, 0, 0, 0.18);
+        color: #ffffff;
     }
 
     .canvas-asset-drawer .ant-input-affix-wrapper,
@@ -284,7 +303,7 @@
     .canvas-asset-drawer .ant-select:hover .ant-select-selector,
     .canvas-asset-drawer .canvas-asset-surface-button.ant-btn:hover {
         background: rgba(255, 255, 255, 0.1) !important;
-        border-color: rgba(103, 232, 249, 0.46) !important;
+        border-color: rgba(10, 132, 255, 0.46) !important;
         color: #ffffff !important;
     }
 
@@ -304,17 +323,17 @@
     }
 
     .canvas-asset-drawer .prompt-filter-tag.canvas-asset-filter-tag.ant-tag-checkable:hover {
-        border-color: rgba(103, 232, 249, 0.4);
+        border-color: rgba(10, 132, 255, 0.46);
         background: rgba(255, 255, 255, 0.1);
         color: #ffffff;
     }
 
     .canvas-asset-drawer .prompt-filter-tag.canvas-asset-filter-tag.ant-tag-checkable.is-active,
     .canvas-asset-drawer .prompt-filter-tag.canvas-asset-filter-tag.ant-tag-checkable-checked {
-        border-color: rgba(103, 232, 249, 0.88);
-        background: rgba(103, 232, 249, 0.18);
-        box-shadow: 0 6px 18px rgba(8, 145, 178, 0.18);
-        color: #ecfeff !important;
+        border-color: rgba(10, 132, 255, 0.88);
+        background: rgba(10, 132, 255, 0.22);
+        box-shadow: 0 6px 18px rgba(10, 132, 255, 0.18);
+        color: #f5faff !important;
     }
 
     .canvas-asset-drawer .canvas-asset-card {
@@ -324,7 +343,7 @@
     }
 
     .canvas-asset-drawer .canvas-asset-card:hover {
-        border-color: rgba(103, 232, 249, 0.42) !important;
+        border-color: rgba(10, 132, 255, 0.42) !important;
         box-shadow: 0 12px 28px rgba(0, 0, 0, 0.28);
     }
 
@@ -336,6 +355,77 @@
     .canvas-asset-drawer .canvas-asset-card .text-stone-500,
     .canvas-asset-drawer .canvas-asset-card .text-stone-400 {
         color: rgba(214, 211, 209, 0.72) !important;
+    }
+
+    .canvas-asset-modal .ant-modal-content {
+        display: flex;
+        max-height: calc(100vh - 64px);
+        flex-direction: column;
+        overflow: hidden;
+        border: 1px solid rgba(255, 255, 255, 0.14);
+        background: rgba(28, 25, 23, 0.92);
+        color: #f5f5f4;
+        box-shadow: 0 24px 80px rgba(0, 0, 0, 0.42);
+        backdrop-filter: blur(28px) saturate(1.35);
+    }
+
+    .canvas-asset-modal .ant-modal-body {
+        min-height: 0;
+        overflow-y: auto;
+    }
+
+    .canvas-asset-modal .ant-modal-header,
+    .canvas-asset-modal .ant-modal-footer {
+        flex: 0 0 auto;
+        background: transparent;
+    }
+
+    .canvas-asset-modal .ant-modal-title,
+    .canvas-asset-modal label,
+    .canvas-asset-modal .ant-modal-close {
+        color: #f5f5f4;
+    }
+
+    .canvas-asset-modal .ant-input,
+    .canvas-asset-modal .ant-input-affix-wrapper,
+    .canvas-asset-modal .ant-select .ant-select-selector,
+    .canvas-asset-modal .ant-segmented,
+    .canvas-asset-modal .ant-btn-default {
+        background: rgba(255, 255, 255, 0.07) !important;
+        border-color: rgba(255, 255, 255, 0.14) !important;
+        color: #f5f5f4 !important;
+        box-shadow: none !important;
+    }
+
+    .canvas-asset-modal .ant-input::placeholder,
+    .canvas-asset-modal .ant-select-selection-placeholder {
+        color: rgba(245, 245, 244, 0.45) !important;
+    }
+
+    .canvas-asset-modal .ant-select-selection-item,
+    .canvas-asset-modal .ant-select-arrow {
+        color: rgba(245, 245, 244, 0.86) !important;
+    }
+
+    .canvas-asset-modal .ant-segmented-item {
+        color: rgba(245, 245, 244, 0.74);
+    }
+
+    .canvas-asset-modal .ant-segmented-item-selected {
+        background: rgba(255, 255, 255, 0.18);
+        color: #ffffff;
+    }
+
+    .canvas-asset-modal .ant-btn-primary {
+        border-color: rgba(10, 132, 255, 0.95) !important;
+        background: #0a84ff !important;
+        color: #ffffff !important;
+        box-shadow: 0 8px 22px rgba(10, 132, 255, 0.26) !important;
+    }
+
+    .canvas-asset-modal .ant-btn-default:hover {
+        background: rgba(255, 255, 255, 0.11) !important;
+        border-color: rgba(10, 132, 255, 0.44) !important;
     }
 
     .hover-scrollbar {

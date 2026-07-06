@@ -25,7 +25,14 @@ import { NODE_DEFAULT_SIZE } from "../constants";
 import { CanvasNodeType, type CanvasAssistantMessage, type CanvasAssistantReference, type CanvasAssistantSession, type CanvasNodeData } from "../types";
 import { useCanvasAgentStore, type CanvasAgentCreativeMode } from "../stores/use-canvas-agent-store";
 import { summarizeCanvasAgentOps, type CanvasAgentOp, type CanvasAgentSnapshot } from "../utils/canvas-agent-ops";
-import { isShortDramaAgentPresetPrompt, SHORT_DRAMA_AGENT_MODE_CONTEXT } from "../utils/short-drama-agent-prompt";
+import {
+    CANVAS_AGENT_KNOWLEDGE_DISCLOSURE_CONTEXT,
+    CREATIVE_KNOWLEDGE_CORE_CONTEXT,
+    isShortDramaAgentPresetPrompt,
+    SHORT_DRAMA_AGENT_MODE_CONTEXT,
+    shouldDiscloseCanvasAgentKnowledge,
+    shouldUseCanvasCreativeKnowledge,
+} from "../utils/short-drama-agent-prompt";
 
 export const CANVAS_AGENT_PANEL_MOTION_MS = 500;
 const PANEL_MOTION_SECONDS = CANVAS_AGENT_PANEL_MOTION_MS / 1000;
@@ -1278,7 +1285,14 @@ function buildAssistantReferences(nodes: CanvasNodeData[], selectedNodeIds: Set<
 
 async function buildToolAgentMessages(snapshot: CanvasAgentSnapshot, history: CanvasAssistantMessage[], userMessage: CanvasAssistantMessage, creativeMode: CanvasAgentCreativeMode): Promise<ResponseInputMessage[]> {
     const refs = userMessage.references || [];
-    const systemPrompt = [ONLINE_AGENT_PROMPT, creativeMode === "short_drama" ? SHORT_DRAMA_AGENT_MODE_CONTEXT : ""].filter(Boolean).join("\n\n");
+    const systemPrompt = [
+        ONLINE_AGENT_PROMPT,
+        shouldDiscloseCanvasAgentKnowledge(userMessage.text, creativeMode) ? CANVAS_AGENT_KNOWLEDGE_DISCLOSURE_CONTEXT : "",
+        shouldUseCanvasCreativeKnowledge(userMessage.text, creativeMode) && creativeMode !== "short_drama" ? CREATIVE_KNOWLEDGE_CORE_CONTEXT : "",
+        creativeMode === "short_drama" ? SHORT_DRAMA_AGENT_MODE_CONTEXT : "",
+    ]
+        .filter(Boolean)
+        .join("\n\n");
     const scopedHistory = history.filter((message) => messageCreativeMode(message) === creativeMode);
     return [
         { role: "system", content: systemPrompt },

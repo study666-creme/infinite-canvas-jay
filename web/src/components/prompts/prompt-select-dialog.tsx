@@ -55,8 +55,8 @@ export function PromptSelectDialog({ open, onOpenChange, onSelect }: { open: boo
 
     return (
         <>
-            <Modal title="提示词库" open={open} onCancel={() => onOpenChange(false)} footer={null} width={960} centered>
-                <div data-canvas-no-zoom onWheelCapture={(event) => event.stopPropagation()}>
+            <Modal title="提示词库" open={open} onCancel={() => onOpenChange(false)} footer={null} width={960} centered className="canvas-prompt-library-modal">
+                <div className="canvas-prompt-library-body" data-canvas-no-zoom onWheelCapture={(event) => event.stopPropagation()}>
                     <div className="flex flex-wrap items-center gap-3">
                         <Input
                             className="min-w-[260px] flex-1"

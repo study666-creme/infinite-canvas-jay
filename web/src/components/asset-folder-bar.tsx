@@ -118,7 +118,7 @@ export function AssetFolderBar({ value, onChange, className = "", buttonClassNam
     };
 
     return (
-        <div className={`flex flex-wrap items-center gap-2 ${className}`}>
+        <div className={`canvas-asset-folder-scope flex flex-wrap items-center gap-2 ${className}`}>
             <div ref={railRef} className="canvas-asset-folder-rail thin-scrollbar">
                 <span
                     aria-hidden

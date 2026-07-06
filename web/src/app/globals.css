@@ -347,7 +347,8 @@
         color: #ffffff !important;
     }
 
-    .canvas-asset-drawer .canvas-asset-folder-rail {
+    .canvas-asset-drawer .canvas-asset-folder-rail,
+    .canvas-asset-folder-scope .canvas-asset-folder-rail {
         position: relative;
         display: inline-flex;
         max-width: 100%;
@@ -365,7 +366,8 @@
         backdrop-filter: blur(18px) saturate(1.35);
     }
 
-    .canvas-asset-drawer .canvas-asset-folder-glider {
+    .canvas-asset-drawer .canvas-asset-folder-glider,
+    .canvas-asset-folder-scope .canvas-asset-folder-glider {
         position: absolute;
         left: 0;
         top: 0;
@@ -383,7 +385,8 @@
             opacity 140ms ease;
     }
 
-    .canvas-asset-drawer .canvas-asset-folder-chip {
+    .canvas-asset-drawer .canvas-asset-folder-chip,
+    .canvas-asset-folder-scope .canvas-asset-folder-chip {
         position: relative;
         z-index: 1;
         display: inline-flex;
@@ -402,25 +405,30 @@
             transform 160ms cubic-bezier(0.2, 0.9, 0.2, 1);
     }
 
-    .canvas-asset-drawer .canvas-asset-folder-chip:hover {
+    .canvas-asset-drawer .canvas-asset-folder-chip:hover,
+    .canvas-asset-folder-scope .canvas-asset-folder-chip:hover {
         color: #ffffff;
     }
 
-    .canvas-asset-drawer .canvas-asset-folder-chip:active {
+    .canvas-asset-drawer .canvas-asset-folder-chip:active,
+    .canvas-asset-folder-scope .canvas-asset-folder-chip:active {
         transform: scale(0.97);
     }
 
-    .canvas-asset-drawer .canvas-asset-folder-chip.is-active {
+    .canvas-asset-drawer .canvas-asset-folder-chip.is-active,
+    .canvas-asset-folder-scope .canvas-asset-folder-chip.is-active {
         color: #ffffff;
         text-shadow: 0 1px 10px rgba(0, 0, 0, 0.32);
     }
 
-    .canvas-asset-drawer .canvas-asset-folder-chip.is-drag-over {
+    .canvas-asset-drawer .canvas-asset-folder-chip.is-drag-over,
+    .canvas-asset-folder-scope .canvas-asset-folder-chip.is-drag-over {
         color: var(--apple-accent-strong);
         box-shadow: 0 0 0 2px rgba(207, 198, 182, 0.32);
     }
 
-    .canvas-asset-drawer .canvas-asset-folder-icon-button {
+    .canvas-asset-drawer .canvas-asset-folder-icon-button,
+    .canvas-asset-folder-scope .canvas-asset-folder-icon-button {
         position: relative;
         z-index: 1;
         display: grid;
@@ -438,18 +446,31 @@
     }
 
     .canvas-asset-drawer .group:hover .canvas-asset-folder-icon-button,
-    .canvas-asset-drawer .canvas-asset-folder-icon-button:focus-visible {
+    .canvas-asset-drawer .canvas-asset-folder-icon-button:focus-visible,
+    .canvas-asset-folder-scope .group:hover .canvas-asset-folder-icon-button,
+    .canvas-asset-folder-scope .canvas-asset-folder-icon-button:focus-visible {
         opacity: 1;
     }
 
-    .canvas-asset-drawer .canvas-asset-folder-icon-button:hover {
+    .canvas-asset-drawer .canvas-asset-folder-icon-button:hover,
+    .canvas-asset-folder-scope .canvas-asset-folder-icon-button:hover {
         background: rgba(255, 255, 255, 0.09);
         color: #ffffff;
     }
 
-    .canvas-asset-drawer .canvas-asset-folder-icon-button.danger:hover {
+    .canvas-asset-drawer .canvas-asset-folder-icon-button.danger:hover,
+    .canvas-asset-folder-scope .canvas-asset-folder-icon-button.danger:hover {
         background: rgba(255, 69, 58, 0.14);
         color: #ffb4ad;
+    }
+
+    .canvas-prompt-library-modal .canvas-prompt-library-body .canvas-asset-folder-scope {
+        width: 100%;
+    }
+
+    .canvas-prompt-library-modal .canvas-prompt-library-body .canvas-asset-folder-scope .canvas-asset-folder-rail {
+        flex: 1;
+        min-width: 0;
     }
 
     .canvas-asset-drawer .prompt-filter-tag.canvas-asset-filter-tag.ant-tag-checkable {

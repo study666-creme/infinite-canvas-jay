@@ -73,17 +73,18 @@ export const ConnectionPath = memo(function ConnectionPath({
     );
 });
 
-export const ActiveConnectionPath = memo(function ActiveConnectionPath({ node, handle, mouseWorld, target }: { node?: CanvasNodeData; handle: ConnectionHandle; mouseWorld: Position; target?: CanvasNodeData }) {
+export const ActiveConnectionPath = memo(function ActiveConnectionPath({ node, handle, mouseWorld, target, scale = 1 }: { node?: CanvasNodeData; handle: ConnectionHandle; mouseWorld: Position; target?: CanvasNodeData; scale?: number }) {
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     if (!node) return null;
 
-    const startX = handle.handleType === "source" ? node.position.x + node.width : mouseWorld.x;
+    const outset = 48 / Math.max(scale, 0.05);
+    const startX = handle.handleType === "source" ? node.position.x + node.width + outset : mouseWorld.x;
     const startY = handle.handleType === "source" ? node.position.y + node.height / 2 : mouseWorld.y;
-    const endX = handle.handleType === "source" ? mouseWorld.x : node.position.x;
+    const endX = handle.handleType === "source" ? mouseWorld.x : node.position.x - outset;
     const endY = handle.handleType === "source" ? mouseWorld.y : node.position.y + node.height / 2;
-    const snappedStartX = handle.handleType === "target" && target ? target.position.x + target.width : startX;
+    const snappedStartX = handle.handleType === "target" && target ? target.position.x + target.width + outset : startX;
     const snappedStartY = handle.handleType === "target" && target ? target.position.y + target.height / 2 : startY;
-    const snappedEndX = handle.handleType === "source" && target ? target.position.x : endX;
+    const snappedEndX = handle.handleType === "source" && target ? target.position.x - outset : endX;
     const snappedEndY = handle.handleType === "source" && target ? target.position.y + target.height / 2 : endY;
     const distance = Math.abs(snappedEndX - snappedStartX);
     const pathD = `M ${snappedStartX} ${snappedStartY} C ${snappedStartX + distance * 0.5} ${snappedStartY}, ${snappedEndX - distance * 0.5} ${snappedEndY}, ${snappedEndX} ${snappedEndY}`;

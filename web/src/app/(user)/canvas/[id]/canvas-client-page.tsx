@@ -1558,6 +1558,17 @@ function InfiniteCanvasPage() {
         });
     }, []);
 
+    const trackConnectionPointer = useCallback(
+        (clientX: number, clientY: number) => {
+            if (!connectingParamsRef.current || pendingConnectionCreateRef.current) return;
+            const dropTarget = getConnectionDropTarget(clientX, clientY, connectingParamsRef.current);
+            connectionTargetNodeIdRef.current = dropTarget.nodeId;
+            setConnectionTargetNodeId(dropTarget.nodeId);
+            setMouseWorld(screenToCanvas(clientX, clientY));
+        },
+        [getConnectionDropTarget, screenToCanvas],
+    );
+
     const handleGlobalMouseMove = useCallback(
         (event: MouseEvent) => {
             lastPointerPointRef.current = { clientX: event.clientX, clientY: event.clientY };
@@ -1566,14 +1577,9 @@ function InfiniteCanvasPage() {
                 return;
             }
 
-            if (connectingParamsRef.current && !pendingConnectionCreateRef.current) {
-                const dropTarget = getConnectionDropTarget(event.clientX, event.clientY, connectingParamsRef.current);
-                connectionTargetNodeIdRef.current = dropTarget.nodeId;
-                setConnectionTargetNodeId(dropTarget.nodeId);
-                setMouseWorld(screenToCanvas(event.clientX, event.clientY));
-            }
+            trackConnectionPointer(event.clientX, event.clientY);
         },
-        [applyNodeDragMove, getConnectionDropTarget, screenToCanvas],
+        [applyNodeDragMove, trackConnectionPointer],
     );
 
     const handleCanvasPointerMove = useCallback(
@@ -1613,9 +1619,12 @@ function InfiniteCanvasPage() {
     const handleGlobalPointerMove = useCallback(
         (event: PointerEvent) => {
             lastPointerPointRef.current = { clientX: event.clientX, clientY: event.clientY };
+            if (!dragRef.current.isDraggingNode) {
+                trackConnectionPointer(event.clientX, event.clientY);
+            }
             handleCanvasPointerMove(event as unknown as ReactPointerEvent<HTMLDivElement>);
         },
-        [handleCanvasPointerMove],
+        [handleCanvasPointerMove, trackConnectionPointer],
     );
 
     const handleGlobalMouseUp = useCallback(
@@ -3550,7 +3559,7 @@ function InfiniteCanvasPage() {
                                     />
                                 );
                             })}
-                        {connectingParams ? <ActiveConnectionPath node={nodeById.get(connectingParams.nodeId)} handle={connectingParams} mouseWorld={mouseWorld} target={connectionTargetNodeId ? nodeById.get(connectionTargetNodeId) : undefined} /> : null}
+                        {connectingParams ? <ActiveConnectionPath scale={viewport.k} node={nodeById.get(connectingParams.nodeId)} handle={connectingParams} mouseWorld={mouseWorld} target={connectionTargetNodeId ? nodeById.get(connectionTargetNodeId) : undefined} /> : null}
                     </svg>
 
                     {nodeGroups.map((bounds) => (

@@ -919,6 +919,9 @@ function ConnectionHandlePlus({
         const dy = event.clientY - pointerRef.current.y;
         if (dx * dx + dy * dy <= 100) return;
         pointerRef.current.dragging = true;
+        if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+            event.currentTarget.releasePointerCapture(event.pointerId);
+        }
         onConnectStart(event as unknown as React.MouseEvent);
     };
 

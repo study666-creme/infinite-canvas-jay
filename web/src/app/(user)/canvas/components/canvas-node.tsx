@@ -26,6 +26,7 @@ type CanvasNodeProps = {
     isFocusRelated: boolean;
     isConnectionTarget: boolean;
     isConnecting: boolean;
+    connectionDropSides?: Array<"left" | "right">;
     activeConnectHandle?: ConnectionHandle | null;
     editRequestNonce?: number;
     showPanel: boolean;
@@ -93,6 +94,7 @@ export const CanvasNode = React.memo(function CanvasNode({
     isFocusRelated,
     isConnectionTarget,
     isConnecting,
+    connectionDropSides,
     activeConnectHandle = null,
     editRequestNonce = 0,
     showPanel,
@@ -297,6 +299,10 @@ export const CanvasNode = React.memo(function CanvasNode({
     }, [handleResizeMove, handleResizeUp]);
 
     const showSelectionChrome = isSelected && !isGroupPackaged;
+    const leftHandleVisible = showSelectionChrome || hovered || connectHover === "left" || leftHandleActive || (isConnecting && connectionDropSides?.includes("left"));
+    const rightHandleVisible =
+        data.type !== CanvasNodeType.Config &&
+        (showSelectionChrome || hovered || connectHover === "right" || rightHandleActive || (isConnecting && connectionDropSides?.includes("right")));
 
     const borderColor = showSelectionChrome
         ? theme.node.activeStroke
@@ -436,9 +442,9 @@ export const CanvasNode = React.memo(function CanvasNode({
                 ) : null}
             </div>
 
-            <ConnectionHandlePlus side="left" visible={showSelectionChrome || hovered || connectHover === "left" || leftHandleActive} emphasized={leftHandleActive} onHoverChange={(active) => setConnectHover((current) => (active ? "left" : current === "left" ? null : current))} onConnectStart={(event) => onConnectStart(event, data.id, "target")} onConnectMenu={onConnectMenu ? () => onConnectMenu(data.id, "target") : undefined} />
+            <ConnectionHandlePlus side="left" visible={leftHandleVisible} emphasized={leftHandleActive} onHoverChange={(active) => setConnectHover((current) => (active ? "left" : current === "left" ? null : current))} onConnectStart={(event) => onConnectStart(event, data.id, "target")} onConnectMenu={onConnectMenu ? () => onConnectMenu(data.id, "target") : undefined} />
             {data.type !== CanvasNodeType.Config ? (
-                <ConnectionHandlePlus side="right" visible={showSelectionChrome || hovered || connectHover === "right" || rightHandleActive} emphasized={rightHandleActive} onHoverChange={(active) => setConnectHover((current) => (active ? "right" : current === "right" ? null : current))} onConnectStart={(event) => onConnectStart(event, data.id, "source")} onConnectMenu={onConnectMenu ? () => onConnectMenu(data.id, "source") : undefined} />
+                <ConnectionHandlePlus side="right" visible={rightHandleVisible} emphasized={rightHandleActive} onHoverChange={(active) => setConnectHover((current) => (active ? "right" : current === "right" ? null : current))} onConnectStart={(event) => onConnectStart(event, data.id, "source")} onConnectMenu={onConnectMenu ? () => onConnectMenu(data.id, "source") : undefined} />
             ) : null}
 
             {showPanel && renderPanel ? <div className="absolute left-1/2 top-full z-[70] w-[min(640px,calc(100vw-48px))] -translate-x-1/2 pt-4">{renderPanel(data)}</div> : null}
@@ -911,7 +917,7 @@ function ConnectionHandlePlus({
         if (!pointerRef.current || pointerRef.current.dragging) return;
         const dx = event.clientX - pointerRef.current.x;
         const dy = event.clientY - pointerRef.current.y;
-        if (dx * dx + dy * dy <= 36) return;
+        if (dx * dx + dy * dy <= 100) return;
         pointerRef.current.dragging = true;
         onConnectStart(event as unknown as React.MouseEvent);
     };
@@ -925,9 +931,10 @@ function ConnectionHandlePlus({
     return (
         <button
             type="button"
+            data-connection-handle
             aria-label={side === "left" ? "添加输入或拖拽连线" : "添加节点或拖拽连线"}
-            className={`absolute top-1/2 z-[110] flex size-20 -translate-y-1/2 items-center justify-center rounded-full transition-opacity duration-150 ${
-                side === "left" ? "-left-10" : "-right-10"
+            className={`absolute top-1/2 z-[110] flex size-24 -translate-y-1/2 items-center justify-center rounded-full transition-opacity duration-150 ${
+                side === "left" ? "-left-12" : "-right-12"
             } pointer-events-auto ${visible ? "opacity-100" : "opacity-0"}`}
             onPointerEnter={() => {
                 setHot(true);
@@ -943,7 +950,7 @@ function ConnectionHandlePlus({
             onPointerCancel={resetPointer}
         >
             <span
-                className="grid size-9 place-items-center rounded-full border transition duration-200 hover:scale-105 active:scale-95"
+                className="grid size-11 place-items-center rounded-full border transition duration-200 hover:scale-105 active:scale-95"
                 style={{
                     background: hot || emphasized ? theme.accent.solid : theme.node.panel,
                     borderColor: hot || emphasized ? theme.accent.solid : theme.node.stroke,
@@ -956,7 +963,7 @@ function ConnectionHandlePlus({
                 }}
                 title={side === "left" ? "点击添加输入 · 按住拖拽连线" : "点击添加节点 · 按住拖拽连线"}
             >
-                <Plus className="size-4" strokeWidth={2.5} />
+                <Plus className="size-5" strokeWidth={2.5} />
             </span>
         </button>
     );

@@ -131,7 +131,8 @@ type CanvasGenerationRequest = {
 
 const VIDEO_NODE_MAX_WIDTH = 640;
 const VIDEO_NODE_MAX_HEIGHT = 640;
-const CONNECTION_HANDLE_HIT_RADIUS = 40;
+const CONNECTION_HANDLE_HIT_RADIUS = 52;
+const CONNECTION_HANDLE_SCREEN_OFFSET = 48;
 const CONNECTION_NODE_HIT_PADDING = 32;
 const NODE_STATUS_IDLE = "idle" as const;
 const NODE_STATUS_LOADING = "loading" as const;
@@ -838,6 +839,7 @@ function InfiniteCanvasPage() {
             const scale = Math.max(viewportRef.current.k, 0.05);
             const padding = CONNECTION_NODE_HIT_PADDING / scale;
             const handleRadius = CONNECTION_HANDLE_HIT_RADIUS / scale;
+            const targetHandleSide: "left" | "right" = current.handleType === "source" ? "left" : "right";
             let isNearNode = false;
             let bestNodeId: string | null = null;
             let bestPriority = Number.POSITIVE_INFINITY;
@@ -846,9 +848,9 @@ function InfiniteCanvasPage() {
                 .filter((node) => !isHiddenBatchChild(node, nodesRef.current))
                 .reverse()
                 .forEach((node) => {
-                    const anchor = getConnectionTargetAnchor(node, current);
-                    const dx = world.x - anchor.x;
-                    const dy = world.y - anchor.y;
+                    const handlePoint = getConnectionHandlePoint(node, targetHandleSide, scale);
+                    const dx = world.x - handlePoint.x;
+                    const dy = world.y - handlePoint.y;
                     const hitsHandle = dx * dx + dy * dy <= handleRadius * handleRadius;
                     const hitsInside = world.x >= node.position.x && world.x <= node.position.x + node.width && world.y >= node.position.y && world.y <= node.position.y + node.height;
                     const hitsExpanded = world.x >= node.position.x - padding && world.x <= node.position.x + node.width + padding && world.y >= node.position.y - padding && world.y <= node.position.y + node.height + padding;
@@ -857,7 +859,7 @@ function InfiniteCanvasPage() {
                     isNearNode = true;
                     if (node.id === current.nodeId || !normalizeConnection(current.nodeId, node.id, nodesRef.current, current.handleType)) return;
 
-                    const priority = hitsInside ? 0 : hitsHandle ? 1 : 2;
+                    const priority = hitsHandle ? 0 : hitsInside ? 1 : 2;
                     if (priority < bestPriority) {
                         bestNodeId = node.id;
                         bestPriority = priority;
@@ -867,6 +869,29 @@ function InfiniteCanvasPage() {
             return { nodeId: bestNodeId, isNearNode };
         },
         [screenToCanvas],
+    );
+
+    const finishConnectionDragRef = useRef(0);
+    const finishConnectionDrag = useCallback(
+        (clientX: number, clientY: number) => {
+            const now = Date.now();
+            if (now - finishConnectionDragRef.current < 40) return;
+            finishConnectionDragRef.current = now;
+            if (pendingConnectionCreateRef.current) return;
+
+            const currentConnection = connectingParamsRef.current;
+            if (!currentConnection) return;
+
+            const dropTarget = getConnectionDropTarget(clientX, clientY, currentConnection);
+            if (dropTarget.nodeId) {
+                connectNodes(currentConnection, dropTarget.nodeId);
+            } else {
+                setMouseWorld(screenToCanvas(clientX, clientY));
+                setPendingConnectionCreate({ connection: currentConnection, position: screenToCanvas(clientX, clientY) });
+            }
+            setConnecting(null);
+        },
+        [connectNodes, getConnectionDropTarget, screenToCanvas, setConnecting],
     );
 
     const nodeById = useMemo(() => new Map(nodes.map((node) => [node.id, node])), [nodes]);
@@ -1601,29 +1626,16 @@ function InfiniteCanvasPage() {
             selectionBoxRef.current = null;
             setSelectionBox(null);
 
-            if (pendingConnectionCreateRef.current) return;
-
-            const currentConnection = connectingParamsRef.current;
-            if (currentConnection) {
-                const dropTarget = getConnectionDropTarget(event.clientX, event.clientY, currentConnection);
-                if (dropTarget.nodeId) {
-                    connectNodes(currentConnection, dropTarget.nodeId);
-                    setConnecting(null);
-                } else if (dropTarget.isNearNode) {
-                    setConnecting(null);
-                } else {
-                    setMouseWorld(screenToCanvas(event.clientX, event.clientY));
-                    setPendingConnectionCreate({ connection: currentConnection, position: screenToCanvas(event.clientX, event.clientY) });
-                }
-            }
+            finishConnectionDrag(event.clientX, event.clientY);
         },
-        [connectNodes, finishNodeDrag, getConnectionDropTarget, screenToCanvas, setConnecting],
+        [finishConnectionDrag, finishNodeDrag],
     );
 
     useEffect(() => {
         const handlePointerUp = (event: PointerEvent) => {
             lastPointerPointRef.current = { clientX: event.clientX, clientY: event.clientY };
             finishNodeDrag(event.clientX, event.clientY);
+            finishConnectionDrag(event.clientX, event.clientY);
         };
         const cancelNodeDrag = () => finishNodeDrag();
         window.addEventListener("mousemove", handleGlobalMouseMove);
@@ -1640,7 +1652,7 @@ function InfiniteCanvasPage() {
             window.removeEventListener("blur", cancelNodeDrag);
             window.removeEventListener("pointermove", handleGlobalPointerMove);
         };
-    }, [finishNodeDrag, handleGlobalMouseMove, handleGlobalMouseUp, handleGlobalPointerMove]);
+    }, [finishConnectionDrag, finishNodeDrag, handleGlobalMouseMove, handleGlobalMouseUp, handleGlobalPointerMove]);
 
     const createImageFileNode = useCallback(async (file: File, position: Position) => {
         const image = await uploadImage(file, { source: "upload" });
@@ -3552,7 +3564,14 @@ function InfiniteCanvasPage() {
                         />
                     ))}
 
-                    {visibleNodes.map((node) => (
+                    {visibleNodes.map((node) => {
+                        const activeConnection = connectingParams ?? pendingConnectionCreate?.connection ?? null;
+                        let connectionDropSides: Array<"left" | "right"> | undefined;
+                        if (connectingParams && connectingParams.nodeId !== node.id && normalizeConnection(connectingParams.nodeId, node.id, nodes, connectingParams.handleType)) {
+                            connectionDropSides = connectingParams.handleType === "source" ? ["left"] : ["right"];
+                        }
+
+                        return (
                         <CanvasNode
                             key={node.id}
                             data={node}
@@ -3563,7 +3582,8 @@ function InfiniteCanvasPage() {
                             isFocusRelated={activeNodeId === node.id}
                             isConnectionTarget={connectionTargetNodeId === node.id}
                             isConnecting={Boolean(connectingParams)}
-                            activeConnectHandle={connectingParams ?? pendingConnectionCreate?.connection ?? null}
+                            connectionDropSides={connectionDropSides}
+                            activeConnectHandle={activeConnection}
                             editRequestNonce={editingNodeId === node.id ? editRequestNonce : 0}
                             showPanel={dialogNodeId === node.id && !selectionBox}
                             batchCount={batchChildCountById.get(node.id) || 0}
@@ -3647,7 +3667,8 @@ function InfiniteCanvasPage() {
                             onVideoPersisted={handleVideoPersisted}
                             onRegisterVideoControl={registerVideoControl}
                         />
-                    ))}
+                        );
+                    })}
 
                     {selectionBox ? (
                         <div
@@ -4347,10 +4368,12 @@ function applyNodeConfigPatch(node: CanvasNodeData, patch: Partial<CanvasNodeDat
     return size && (node.type === CanvasNodeType.Image || node.type === CanvasNodeType.Video) ? { ...next, ...size, position: { x: node.position.x + node.width / 2 - size.width / 2, y: node.position.y + node.height / 2 - size.height / 2 } } : next;
 }
 
-function getConnectionTargetAnchor(node: CanvasNodeData, current: ConnectionHandle) {
+function getConnectionHandlePoint(node: CanvasNodeData, side: "left" | "right", scale: number) {
+    const outset = CONNECTION_HANDLE_SCREEN_OFFSET / Math.max(scale, 0.05);
+    const y = node.position.y + node.height / 2;
     return {
-        x: current.handleType === "source" ? node.position.x : node.position.x + node.width,
-        y: node.position.y + node.height / 2,
+        x: side === "left" ? node.position.x - outset : node.position.x + node.width + outset,
+        y,
     };
 }
 

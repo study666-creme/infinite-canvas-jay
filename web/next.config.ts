@@ -36,8 +36,12 @@ export default function nextConfig(phase: string): NextConfig {
 
     return {
         // Vercel 自带 Next 部署；standalone 仅用于 Docker 自托管
-        ...(onVercel ? {} : { output: "standalone" as const }),
-        outputFileTracingRoot: repoRoot,
+        ...(onVercel
+            ? {}
+            : {
+                  output: "standalone" as const,
+                  outputFileTracingRoot: repoRoot,
+              }),
         allowedDevOrigins: isDev ? ["*.*.*.*"] : [],
         typescript: {
             ignoreBuildErrors: true,

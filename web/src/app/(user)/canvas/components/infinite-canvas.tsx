@@ -115,7 +115,7 @@ export function InfiniteCanvas({ containerRef, worldLayerRef, viewport, backgrou
     const handlePointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
         const target = event.target instanceof Element ? event.target : null;
         if (target?.closest("[data-canvas-no-zoom]")) return;
-        if (target?.closest("[data-connection-create-menu]")) return;
+        if (target?.closest("[data-connection-create-menu],[data-connection-handle]")) return;
         const isBackgroundClick = !target?.closest("[data-node-id],[data-connection-id],[data-group-frame]");
 
         if (event.button === 0 && isBackgroundClick && !isSpacePressed) {

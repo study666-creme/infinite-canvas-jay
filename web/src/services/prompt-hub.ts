@@ -7,7 +7,8 @@ import { CanvasNodeType } from "@/app/(user)/canvas/types";
 export const PROMPT_HUB_DEFAULTS = {
     apiBase: "https://api.prompt-hubs.com",
     supabaseUrl: "https://api.prompt-hubs.com/supabase",
-    anonKey: "sb_publishable_PGhXkT83iWKzx5244I9t4w_HSBITvgF",
+    anonKey:
+        "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoiYW5vbiIsImV4cCI6MzM2MDEwMTQ5NywiaWF0IjoxNzgzMzAxNDk3LCJpc3MiOiJzdXBhYmFzZSJ9.5lXHe7E3Fef6XFqUjloawjQRbFVmyA7rmnRPf5ymEgM",
     siteUrl: "https://prompt-hubs.com/",
 };
 
@@ -137,7 +138,11 @@ export async function loginPromptHub(email: string, password: string, opts: { ap
     });
     const data = await res.json().catch(() => ({}));
     if (!res.ok || !data.access_token) {
-        throw new Error(data.error_description || data.msg || data.message || "登录失败，请检查邮箱和密码");
+        const raw = String(data.error_description || data.msg || data.message || "").toLowerCase();
+        if (/invalid login|invalid credentials|invalid_grant|invalid authentication/.test(raw)) {
+            throw new Error("邮箱或密码不正确，请核对后重试");
+        }
+        throw new Error("登录失败，请检查邮箱和密码后重试");
     }
     return {
         access_token: data.access_token as string,
@@ -210,6 +215,7 @@ export async function submitPromptHubGeneration(
         model: string;
         resolution?: "1k" | "2k" | "4k";
         quality?: "standard" | "high" | "ultra";
+        count?: number;
         refImageUrls?: string[];
         apiBase?: string;
         signal?: AbortSignal;
@@ -221,6 +227,9 @@ export async function submitPromptHubGeneration(
         resolution: payload.resolution || "1k",
         quality: payload.quality || "standard",
     };
+    if (payload.count && payload.count > 1) {
+        body.count = Math.max(1, Math.min(8, Math.floor(payload.count)));
+    }
     if (payload.refImageUrls?.length) {
         body.refImageUrls = payload.refImageUrls.slice(0, 8);
     }
@@ -260,7 +269,7 @@ export async function pollPromptHubGenerationJob(
     throw new Error("卡藏生图超时，请到 Prompt Hub 生图页查看是否已完成");
 }
 
-function collectPromptHubJobImageUrls(job: PromptHubGenerationJob) {
+export function collectPromptHubJobImageUrls(job: PromptHubGenerationJob) {
     const urls: string[] = [];
     const push = (u?: string | null) => {
         if (u && typeof u === "string" && !urls.includes(u)) urls.push(u);

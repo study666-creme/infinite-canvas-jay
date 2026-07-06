@@ -14,13 +14,13 @@ export function CanvasNodeLoadingState({ variant = "default", progress, label }:
     const stage = label || (variant === "video" ? "视频生成中" : variant === "image" ? "图像生成中" : "生成中");
 
     return (
-        <div className={`canvas-generation-state canvas-generation-state-${variant}`} style={{ "--generation-progress": `${clampedProgress ?? 38}%` } as CSSProperties}>
-            <div className="canvas-generation-aura" />
-            <div className="canvas-generation-sheen" />
+        <div
+            className={`canvas-generation-state canvas-generation-state-${variant}`}
+            style={{ "--generation-progress": `${clampedProgress ?? 36}%` } as CSSProperties}
+        >
+            <div className="canvas-generation-beam" aria-hidden />
             <div className="canvas-generation-center">
-                <div className="canvas-generation-orb" aria-hidden>
-                    <span />
-                </div>
+                <div className="canvas-generation-spinner" aria-hidden />
                 <div className="canvas-generation-stage">{stage}</div>
                 <div className="canvas-generation-value">{clampedProgress === null ? "准备中" : `${clampedProgress}%`}</div>
                 <div className={`canvas-generation-track ${clampedProgress === null ? "is-indeterminate" : ""}`}>

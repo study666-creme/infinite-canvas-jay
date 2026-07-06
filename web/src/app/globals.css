@@ -1092,11 +1092,9 @@
         border-radius: inherit;
         isolation: isolate;
         background:
-            radial-gradient(circle at 50% 34%, rgba(255, 255, 255, 0.12), transparent 32%),
-            linear-gradient(145deg, rgba(11, 11, 12, 0.94), rgba(29, 29, 31, 0.92) 52%, rgba(9, 9, 10, 0.96));
-        box-shadow:
-            inset 0 1px 0 rgba(255, 255, 255, 0.08),
-            inset 0 -1px 0 rgba(0, 0, 0, 0.4);
+            radial-gradient(circle at 50% 0%, rgba(255, 255, 255, 0.06), transparent 42%),
+            linear-gradient(180deg, rgba(18, 18, 20, 0.96), rgba(10, 10, 11, 0.98));
+        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
     }
 
     .canvas-generation-state::after {
@@ -1105,41 +1103,28 @@
         inset: 0;
         z-index: 4;
         border-radius: inherit;
-        box-shadow:
-            inset 0 0 0 1px rgba(255, 255, 255, 0.07),
-            inset 0 0 42px rgba(0, 0, 0, 0.34);
+        box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.05);
         pointer-events: none;
     }
 
-    .canvas-generation-aura {
+    .canvas-generation-beam {
         position: absolute;
-        inset: -18%;
+        inset: 0;
         z-index: 1;
-        background:
-            radial-gradient(circle at 24% 18%, rgba(234, 224, 208, 0.2), transparent 34%),
-            radial-gradient(circle at 78% 22%, rgba(245, 245, 247, 0.12), transparent 32%),
-            radial-gradient(circle at 50% 78%, rgba(176, 168, 154, 0.16), transparent 38%);
-        opacity: 0.78;
-        transform: translate3d(0, 0, 0);
-        animation: canvas-generation-aura 3.4s ease-in-out infinite;
+        overflow: hidden;
+        opacity: 0.55;
     }
 
-    .canvas-generation-state-video .canvas-generation-aura {
-        background:
-            radial-gradient(circle at 22% 20%, rgba(226, 226, 220, 0.18), transparent 34%),
-            radial-gradient(circle at 78% 26%, rgba(194, 186, 172, 0.17), transparent 32%),
-            radial-gradient(circle at 52% 78%, rgba(245, 245, 247, 0.1), transparent 38%);
-    }
-
-    .canvas-generation-sheen {
+    .canvas-generation-beam::before {
+        content: "";
         position: absolute;
-        inset: -35% -80%;
-        z-index: 2;
-        background: linear-gradient(108deg, transparent 0%, transparent 38%, rgba(255, 255, 255, 0.06) 45%, rgba(255, 255, 255, 0.24) 50%, rgba(255, 255, 255, 0.06) 55%, transparent 62%, transparent 100%);
-        mix-blend-mode: screen;
-        opacity: 0.72;
-        transform: translate3d(-34%, 0, 0) rotate(10deg);
-        animation: canvas-generation-sheen 2.35s cubic-bezier(0.45, 0, 0.2, 1) infinite;
+        top: -40%;
+        left: -120%;
+        width: 42%;
+        height: 180%;
+        background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.07), rgba(255, 255, 255, 0.16), rgba(255, 255, 255, 0.07), transparent);
+        transform: rotate(12deg);
+        animation: canvas-generation-beam 2.8s cubic-bezier(0.4, 0, 0.2, 1) infinite;
     }
 
     .canvas-generation-center {
@@ -1150,75 +1135,47 @@
         flex-direction: column;
         align-items: center;
         justify-content: center;
-        gap: 9px;
-        padding: 24px;
+        gap: 8px;
+        padding: 20px;
         text-align: center;
     }
 
-    .canvas-generation-orb {
-        position: relative;
-        width: 58px;
-        height: 58px;
+    .canvas-generation-spinner {
+        width: 34px;
+        height: 34px;
         border-radius: 999px;
-        background:
-            linear-gradient(180deg, rgba(255, 255, 255, 0.16), rgba(255, 255, 255, 0.04)),
-            rgba(255, 255, 255, 0.06);
-        box-shadow:
-            inset 0 1px 0 rgba(255, 255, 255, 0.18),
-            inset 0 -10px 20px rgba(0, 0, 0, 0.24),
-            0 16px 42px rgba(0, 0, 0, 0.34);
-    }
-
-    .canvas-generation-orb::before {
-        content: "";
-        position: absolute;
-        inset: -3px;
-        border-radius: inherit;
-        background: conic-gradient(from 0deg, rgba(255, 255, 255, 0.05), rgba(236, 226, 210, 0.92), rgba(255, 255, 255, 0.05), rgba(207, 198, 182, 0.72), rgba(255, 255, 255, 0.05));
-        animation: canvas-generation-orb-spin 1.9s linear infinite;
-        -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 4px), #000 calc(100% - 3px));
-        mask: radial-gradient(farthest-side, transparent calc(100% - 4px), #000 calc(100% - 3px));
-    }
-
-    .canvas-generation-orb span {
-        position: absolute;
-        inset: 17px;
-        border-radius: inherit;
-        background:
-            radial-gradient(circle at 40% 35%, rgba(255, 255, 255, 0.95), rgba(239, 231, 217, 0.72) 35%, rgba(207, 198, 182, 0.18) 68%, transparent 74%),
-            rgba(255, 255, 255, 0.06);
-        box-shadow: 0 0 28px rgba(236, 226, 210, 0.28);
-        animation: canvas-generation-orb-pulse 1.8s ease-in-out infinite;
+        border: 2px solid rgba(255, 255, 255, 0.1);
+        border-top-color: rgba(245, 245, 247, 0.88);
+        animation: canvas-generation-spinner 0.85s linear infinite;
     }
 
     .canvas-generation-stage {
-        max-width: 82%;
+        max-width: 86%;
         overflow: hidden;
-        color: rgba(245, 245, 247, 0.92);
-        font-size: 13px;
-        font-weight: 650;
-        line-height: 1.25;
+        color: rgba(245, 245, 247, 0.78);
+        font-size: 12px;
+        font-weight: 500;
+        line-height: 1.35;
+        letter-spacing: 0.01em;
         text-overflow: ellipsis;
-        text-shadow: 0 1px 12px rgba(0, 0, 0, 0.35);
         white-space: nowrap;
     }
 
     .canvas-generation-value {
-        color: rgba(245, 245, 247, 0.62);
+        color: rgba(245, 245, 247, 0.42);
         font-size: 11px;
         font-variant-numeric: tabular-nums;
-        font-weight: 600;
-        letter-spacing: 0.04em;
+        font-weight: 500;
+        letter-spacing: 0.06em;
     }
 
     .canvas-generation-track {
         position: relative;
-        width: min(220px, 70%);
-        height: 5px;
+        width: min(168px, 62%);
+        height: 3px;
         overflow: hidden;
         border-radius: 999px;
-        background: rgba(255, 255, 255, 0.12);
-        box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.36);
+        background: rgba(255, 255, 255, 0.08);
     }
 
     .canvas-generation-fill {
@@ -1226,16 +1183,13 @@
         width: var(--generation-progress);
         height: 100%;
         border-radius: inherit;
-        background: linear-gradient(90deg, rgba(178, 168, 150, 0.4), rgba(255, 248, 235, 0.88), rgba(207, 198, 182, 0.62));
-        box-shadow:
-            0 0 16px rgba(236, 226, 210, 0.32),
-            inset 0 1px 0 rgba(255, 255, 255, 0.22);
+        background: rgba(245, 245, 247, 0.72);
         transition: width 260ms cubic-bezier(0.2, 0.9, 0.2, 1);
     }
 
     .canvas-generation-track.is-indeterminate .canvas-generation-fill {
-        width: 42%;
-        animation: canvas-generation-track-scan 1.55s cubic-bezier(0.45, 0, 0.2, 1) infinite;
+        width: 34%;
+        animation: canvas-generation-track-scan 1.45s cubic-bezier(0.45, 0, 0.2, 1) infinite;
     }
 
     .canvas-generation-progress-overlay {
@@ -1372,16 +1326,19 @@
         }
     }
 
-    @keyframes canvas-generation-aura {
-        0%,
-        100% {
-            transform: translate3d(-1%, -1%, 0) scale(1);
-            opacity: 0.62;
+    @keyframes canvas-generation-beam {
+        0% {
+            transform: translateX(0) rotate(12deg);
         }
 
-        50% {
-            transform: translate3d(2%, 1%, 0) scale(1.04);
-            opacity: 0.88;
+        100% {
+            transform: translateX(520%) rotate(12deg);
+        }
+    }
+
+    @keyframes canvas-generation-spinner {
+        to {
+            transform: rotate(360deg);
         }
     }
 
@@ -1396,42 +1353,6 @@
         }
     }
 
-    @keyframes canvas-generation-sheen {
-        0% {
-            transform: translate3d(-42%, 0, 0) rotate(10deg);
-            opacity: 0;
-        }
-
-        18%,
-        62% {
-            opacity: 0.72;
-        }
-
-        100% {
-            transform: translate3d(42%, 0, 0) rotate(10deg);
-            opacity: 0;
-        }
-    }
-
-    @keyframes canvas-generation-orb-spin {
-        to {
-            transform: rotate(360deg);
-        }
-    }
-
-    @keyframes canvas-generation-orb-pulse {
-        0%,
-        100% {
-            transform: scale(0.88);
-            opacity: 0.68;
-        }
-
-        50% {
-            transform: scale(1.08);
-            opacity: 1;
-        }
-    }
-
     @keyframes canvas-generation-track-scan {
         0% {
             transform: translateX(-120%);
@@ -1443,10 +1364,8 @@
     }
 
     @media (prefers-reduced-motion: reduce) {
-        .canvas-generation-aura,
-        .canvas-generation-sheen,
-        .canvas-generation-orb::before,
-        .canvas-generation-orb span,
+        .canvas-generation-beam::before,
+        .canvas-generation-spinner,
         .canvas-generation-track.is-indeterminate .canvas-generation-fill,
         .canvas-generation-action-button.ant-btn.is-running {
             animation: none;

@@ -2835,15 +2835,19 @@ function InfiniteCanvasPage() {
                                 setNodes((prev) => prev.map((node) => (node.id === nodeId && isConfigNode && node.metadata?.status === NODE_STATUS_LOADING ? { ...node, metadata: { ...node.metadata, status: NODE_STATUS_IDLE, errorDetails: undefined } } : node)));
                                 return;
                             }
-                            if (hasFailure) message.error(hasSuccess ? "部分图片生成失败" : "全部图片生成失败");
+                            if (hasFailure) {
+                                const failureSummary = pickGenerationFailureDetails(nodesRef.current, hubPlan.ids);
+                                message.error(hasSuccess ? "部分图片生成失败" : failureSummary);
+                            }
                             finishGenerationRequest(nodeId, controller);
-                            setNodes((prev) =>
-                                prev.map((node) =>
+                            setNodes((prev) => {
+                                const failureDetails = pickGenerationFailureDetails(prev, hubPlan.ids);
+                                return prev.map((node) =>
                                     node.id === nodeId
-                                        ? { ...node, metadata: { ...node.metadata, prompt: effectivePrompt, status: hasSuccess ? NODE_STATUS_SUCCESS : NODE_STATUS_ERROR, errorDetails: hasSuccess ? undefined : "全部图片生成失败" } }
+                                        ? { ...node, metadata: { ...node.metadata, prompt: effectivePrompt, status: hasSuccess ? NODE_STATUS_SUCCESS : NODE_STATUS_ERROR, errorDetails: hasSuccess ? undefined : failureDetails } }
                                         : node,
-                                ),
-                            );
+                                );
+                            });
                             return;
                         }
 
@@ -2969,18 +2973,22 @@ function InfiniteCanvasPage() {
                         setNodes((prev) => prev.map((node) => (node.id === nodeId && isConfigNode && node.metadata?.status === NODE_STATUS_LOADING ? { ...node, metadata: { ...node.metadata, status: NODE_STATUS_IDLE, errorDetails: undefined } } : node)));
                         return;
                     }
-                    if (hasFailure) message.error(hasSuccess ? "部分图片生成失败" : "全部图片生成失败");
-                    setNodes((prev) =>
-                        prev.map((node) =>
+                    if (hasFailure) {
+                        const failureSummary = pickGenerationFailureDetails(nodesRef.current, progressNodeIds);
+                        message.error(hasSuccess ? "部分图片生成失败" : failureSummary);
+                    }
+                    setNodes((prev) => {
+                        const failureDetails = pickGenerationFailureDetails(prev, progressNodeIds);
+                        return prev.map((node) =>
                             node.id === nodeId && isConfigNode
-                                ? { ...node, metadata: { ...node.metadata, status: hasSuccess ? NODE_STATUS_SUCCESS : NODE_STATUS_ERROR, errorDetails: hasSuccess ? undefined : "全部图片生成失败" } }
+                                ? { ...node, metadata: { ...node.metadata, status: hasSuccess ? NODE_STATUS_SUCCESS : NODE_STATUS_ERROR, errorDetails: hasSuccess ? undefined : failureDetails } }
                                 : node.id === nodeId && isEmptyImageNode
-                                  ? { ...node, metadata: { ...node.metadata, status: hasSuccess ? NODE_STATUS_SUCCESS : NODE_STATUS_ERROR, errorDetails: hasSuccess ? undefined : "全部图片生成失败" } }
+                                  ? { ...node, metadata: { ...node.metadata, status: hasSuccess ? NODE_STATUS_SUCCESS : NODE_STATUS_ERROR, errorDetails: hasSuccess ? undefined : failureDetails } }
                                   : node.id === rootId && !hasSuccess
-                                    ? { ...node, metadata: { ...node.metadata, status: NODE_STATUS_ERROR, errorDetails: "全部图片生成失败" } }
+                                    ? { ...node, metadata: { ...node.metadata, status: NODE_STATUS_ERROR, errorDetails: failureDetails } }
                                     : node,
-                        ),
-                    );
+                        );
+                    });
                     return;
                 }
 
@@ -4459,6 +4467,18 @@ function buildGenerationConfig(config: AiConfig, node: CanvasNodeData | undefine
 
 function resetInterruptedGeneration(nodes: CanvasNodeData[]) {
     return nodes.map((node) => (node.metadata?.status === "loading" ? { ...node, metadata: { ...node.metadata, status: "error" as const, errorDetails: "页面刷新后生成已中断，请重新生成。" } } : node));
+}
+
+function pickGenerationFailureDetails(nodes: CanvasNodeData[], nodeIds: string[], fallback = "全部图片生成失败") {
+    for (const id of nodeIds) {
+        const details = nodes.find((node) => node.id === id)?.metadata?.errorDetails?.trim();
+        if (details && details !== "全部图片生成失败" && details !== "部分图片生成失败") return details;
+    }
+    for (const id of nodeIds) {
+        const details = nodes.find((node) => node.id === id)?.metadata?.errorDetails?.trim();
+        if (details) return details;
+    }
+    return fallback;
 }
 
 function isGenerationCanceled(error: unknown) {

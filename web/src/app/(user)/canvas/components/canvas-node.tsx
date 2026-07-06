@@ -480,8 +480,8 @@ const nodeContentRenderers = {
 
 function ErrorContent({ node, theme, onRetry }: Pick<NodeContentRendererProps, "node" | "theme" | "onRetry">) {
     return (
-        <div className="flex max-w-[260px] flex-col items-center gap-3 px-5 text-center">
-            <div className="text-xs leading-5 text-red-300">{node.metadata?.errorDetails || "生成失败"}</div>
+        <div className="flex max-w-[280px] flex-col items-center gap-3 px-5 text-center">
+            <div className="line-clamp-4 text-xs leading-5 text-red-300/90">{node.metadata?.errorDetails || "生成失败"}</div>
             <span
                 className="inline-flex h-8 items-center gap-1.5 rounded-full border px-3 text-xs font-medium transition hover:scale-[1.02]"
                 style={{ background: theme.toolbar.panel, borderColor: theme.toolbar.border, color: theme.node.text }}

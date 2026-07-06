@@ -74,7 +74,7 @@ export function PromptSelectDialog({ open, onOpenChange, onSelect }: { open: boo
                     <div className="mt-5">
                         <AssetFolderBar value={folderFilter} onChange={setFolderFilter} />
                     </div>
-                    <div className="thin-scrollbar mt-6 max-h-[520px] overflow-y-auto pr-2" data-canvas-no-zoom onWheelCapture={(event) => event.stopPropagation()}>
+                    <div className="thin-scrollbar mt-6 max-h-[520px] overflow-y-auto pr-2" data-canvas-scroll onWheelCapture={(event) => event.stopPropagation()}>
                         {promptAssets.length ? (
                             <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
                                 {promptAssets.map((asset) => (

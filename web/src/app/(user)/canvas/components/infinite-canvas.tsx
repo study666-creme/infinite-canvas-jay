@@ -89,32 +89,60 @@ export function InfiniteCanvas({ containerRef, worldLayerRef, viewport, backgrou
         };
     }, []);
 
-    const handleWheel = (event: React.WheelEvent<HTMLDivElement>) => {
-        const target = event.target instanceof Element ? event.target : null;
-        if (target?.closest("[data-canvas-no-zoom],.ant-modal,.ant-popover,.ant-dropdown,.ant-select-dropdown,.ant-picker-dropdown")) return;
+    const shouldIgnoreCanvasWheelZoom = useCallback((target: Element | null) => {
+        if (!target) return true;
+        return Boolean(
+            target.closest(
+                ".ant-modal,.ant-popover,.ant-dropdown,.ant-select-dropdown,.ant-picker-dropdown,.canvas-prompt-library-modal,.canvas-asset-drawer,[data-canvas-scroll]",
+            ),
+        );
+    }, []);
 
-        const delta = -event.deltaY;
-        const factor = Math.pow(1.1, delta / 100);
-        const currentViewport = nextViewportRef.current || viewportRef.current;
-        const newScale = Math.min(Math.max(currentViewport.k * factor, 0.05), 5);
-        const rect = containerRef.current?.getBoundingClientRect();
-        if (!rect) return;
+    const applyWheelZoom = useCallback(
+        (event: WheelEvent) => {
+            const target = event.target instanceof Element ? event.target : null;
+            if (shouldIgnoreCanvasWheelZoom(target)) return false;
 
-        const mouseX = event.clientX - rect.left;
-        const mouseY = event.clientY - rect.top;
-        const worldX = (mouseX - currentViewport.x) / currentViewport.k;
-        const worldY = (mouseY - currentViewport.y) / currentViewport.k;
+            event.preventDefault();
+            event.stopPropagation();
 
-        queueViewportChange({
-            x: mouseX - worldX * newScale,
-            y: mouseY - worldY * newScale,
-            k: newScale,
-        });
-    };
+            const delta = -event.deltaY;
+            const factor = Math.pow(1.1, delta / 100);
+            const currentViewport = nextViewportRef.current || viewportRef.current;
+            const newScale = Math.min(Math.max(currentViewport.k * factor, 0.05), 5);
+            const rect = containerRef.current?.getBoundingClientRect();
+            if (!rect) return true;
+
+            const mouseX = event.clientX - rect.left;
+            const mouseY = event.clientY - rect.top;
+            const worldX = (mouseX - currentViewport.x) / currentViewport.k;
+            const worldY = (mouseY - currentViewport.y) / currentViewport.k;
+
+            queueViewportChange({
+                x: mouseX - worldX * newScale,
+                y: mouseY - worldY * newScale,
+                k: newScale,
+            });
+            return true;
+        },
+        [containerRef, queueViewportChange, shouldIgnoreCanvasWheelZoom],
+    );
+
+    useEffect(() => {
+        const container = containerRef.current;
+        if (!container) return;
+
+        const handleWheelCapture = (event: WheelEvent) => {
+            applyWheelZoom(event);
+        };
+
+        container.addEventListener("wheel", handleWheelCapture, { passive: false, capture: true });
+        return () => container.removeEventListener("wheel", handleWheelCapture, { capture: true });
+    }, [applyWheelZoom, containerRef]);
 
     const handlePointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
         const target = event.target instanceof Element ? event.target : null;
-        if (target?.closest("[data-canvas-no-zoom]")) return;
+        if (target?.closest(".canvas-asset-drawer,.ant-modal,.ant-popover,.ant-dropdown,.ant-select-dropdown,.ant-picker-dropdown,[data-canvas-scroll]")) return;
         if (target?.closest("[data-connection-create-menu],[data-connection-handle]")) return;
         const isBackgroundClick = !target?.closest("[data-node-id],[data-connection-id],[data-group-frame]");
 
@@ -175,19 +203,6 @@ export function InfiniteCanvas({ containerRef, worldLayerRef, viewport, backgrou
         };
     }, [onCanvasDeselect, queueViewportChange]);
 
-    useEffect(() => {
-        const container = containerRef.current;
-        if (!container) return;
-
-        const preventWheelScroll = (event: WheelEvent) => {
-            const target = event.target instanceof Element ? event.target : null;
-            if (target?.closest("[data-canvas-no-zoom],.ant-modal,.ant-popover,.ant-dropdown,.ant-select-dropdown,.ant-picker-dropdown")) return;
-            event.preventDefault();
-        };
-        container.addEventListener("wheel", preventWheelScroll, { passive: false });
-        return () => container.removeEventListener("wheel", preventWheelScroll);
-    }, [containerRef]);
-
     return (
         <div
             ref={containerRef}
@@ -195,7 +210,6 @@ export function InfiniteCanvas({ containerRef, worldLayerRef, viewport, backgrou
             style={{ background: theme.canvas.background }}
             onPointerDown={handlePointerDown}
             onPointerMove={(event) => onCanvasPointerMove?.(event)}
-            onWheel={handleWheel}
             onContextMenu={onContextMenu}
             onDragOver={(event) => event.preventDefault()}
             onDrop={onDrop}

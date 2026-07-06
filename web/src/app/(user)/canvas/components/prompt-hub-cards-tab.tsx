@@ -357,7 +357,7 @@ export function PromptHubCardsTab({ compact = false }: { compact?: boolean } = {
                 </div>
             )}
 
-            <div className="thin-scrollbar min-h-0 flex-1 overflow-y-auto overscroll-contain pr-1" onWheelCapture={(event) => event.stopPropagation()}>
+            <div className="thin-scrollbar min-h-0 flex-1 overflow-y-auto overscroll-contain pr-1" data-canvas-scroll onWheelCapture={(event) => event.stopPropagation()}>
                 {loading && !cards.length ? (
                     <div className="flex min-h-[280px] items-center justify-center">
                         <Spin />

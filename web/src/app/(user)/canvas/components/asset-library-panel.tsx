@@ -333,7 +333,7 @@ export function MyAssetsPanel({ onInsert, compact = false }: MyAssetsPanelProps)
                 </div>
             )}
 
-            <div className="thin-scrollbar min-h-0 flex-1 overflow-y-auto overscroll-contain pr-1" onWheelCapture={(event) => event.stopPropagation()}>
+            <div className="thin-scrollbar min-h-0 flex-1 overflow-y-auto overscroll-contain pr-1" data-canvas-scroll onWheelCapture={(event) => event.stopPropagation()}>
                 {visible.length ? (
                     <div className={compact ? "grid grid-cols-[repeat(auto-fill,minmax(142px,1fr))] gap-3" : "grid grid-cols-[repeat(auto-fill,minmax(160px,1fr))] gap-3"}>
                         {visible.map((asset) => (

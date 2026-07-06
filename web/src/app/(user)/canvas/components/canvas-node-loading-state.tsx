@@ -1,23 +1,31 @@
 "use client";
 
+import type { CSSProperties } from "react";
+
 type CanvasNodeLoadingStateProps = {
     variant?: "image" | "video" | "default";
     progress?: number;
     label?: string;
 };
 
-export function CanvasNodeLoadingState({ progress }: CanvasNodeLoadingStateProps) {
+export function CanvasNodeLoadingState({ variant = "default", progress, label }: CanvasNodeLoadingStateProps) {
     const hasProgress = typeof progress === "number";
     const clampedProgress = hasProgress ? Math.max(0, Math.min(100, Math.round(progress))) : null;
+    const stage = label || (variant === "video" ? "视频生成中" : variant === "image" ? "图像生成中" : "生成中");
 
     return (
-        <div className="pointer-events-none absolute inset-0 overflow-hidden rounded-[inherit] bg-black/28 backdrop-blur-[1px]">
-            <div className="absolute inset-0 flex items-center justify-center">
-                {clampedProgress !== null ? (
-                    <span className="text-[13px] font-medium tabular-nums tracking-wide text-white/72">{clampedProgress}%</span>
-                ) : (
-                    <span className="size-4 animate-spin rounded-full border-2 border-white/20 border-t-white/70" />
-                )}
+        <div className={`canvas-generation-state canvas-generation-state-${variant}`} style={{ "--generation-progress": `${clampedProgress ?? 38}%` } as CSSProperties}>
+            <div className="canvas-generation-aura" />
+            <div className="canvas-generation-sheen" />
+            <div className="canvas-generation-center">
+                <div className="canvas-generation-orb" aria-hidden>
+                    <span />
+                </div>
+                <div className="canvas-generation-stage">{stage}</div>
+                <div className="canvas-generation-value">{clampedProgress === null ? "准备中" : `${clampedProgress}%`}</div>
+                <div className={`canvas-generation-track ${clampedProgress === null ? "is-indeterminate" : ""}`}>
+                    <span className="canvas-generation-fill" />
+                </div>
             </div>
         </div>
     );

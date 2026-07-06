@@ -125,7 +125,7 @@ export function CanvasConfigNodePanel({ node, isRunning, inputSummary, onConfigC
 
             <Button
                 type="primary"
-                className="mt-auto !h-9 !w-full !cursor-pointer !rounded-lg"
+                className={`canvas-generation-action-button mt-auto !h-9 !w-full !cursor-pointer !rounded-lg ${isRunning ? "is-running" : ""}`}
                 danger={isRunning}
                 disabled={!isRunning && !canGenerate}
                 onMouseDown={(event) => event.stopPropagation()}

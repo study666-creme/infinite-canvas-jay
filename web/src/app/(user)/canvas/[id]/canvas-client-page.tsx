@@ -301,12 +301,14 @@ function InfiniteCanvasPage() {
         startX: number;
         startY: number;
         initialSelectedNodes: { id: string; x: number; y: number }[];
+        initialSelectedNodeMap: Map<string, { x: number; y: number }>;
     }>({
         isDraggingNode: false,
         hasMoved: false,
         startX: 0,
         startY: 0,
         initialSelectedNodes: [],
+        initialSelectedNodeMap: new Map(),
     });
 
     const config = useConfigStore((state) => state.config);
@@ -1351,13 +1353,15 @@ function InfiniteCanvasPage() {
 
     const startNodeDrag = useCallback((event: ReactMouseEvent, dragIds: Set<string>, selectedIds: Set<string>) => {
         const currentNodes = nodesRef.current;
+        const initialSelectedNodes = currentNodes.filter((node) => dragIds.has(node.id)).map((node) => ({ id: node.id, x: node.position.x, y: node.position.y }));
         setSelectedNodeIds(selectedIds);
         dragRef.current = {
             isDraggingNode: true,
             hasMoved: false,
             startX: event.clientX,
             startY: event.clientY,
-            initialSelectedNodes: currentNodes.filter((node) => dragIds.has(node.id)).map((node) => ({ id: node.id, x: node.position.x, y: node.position.y })),
+            initialSelectedNodes,
+            initialSelectedNodeMap: new Map(initialSelectedNodes.map((node) => [node.id, { x: node.x, y: node.y }])),
         };
         historyPausedRef.current = true;
         nodeDraggingRef.current = true;
@@ -1475,7 +1479,7 @@ function InfiniteCanvasPage() {
         const currentViewport = viewportRef.current;
         const dx = clientX == null ? 0 : (clientX - dragRef.current.startX) / currentViewport.k;
         const dy = clientY == null ? 0 : (clientY - dragRef.current.startY) / currentViewport.k;
-        const initialPositions = dragRef.current.initialSelectedNodes;
+        const initialPositions = dragRef.current.initialSelectedNodeMap;
 
         historyPausedRef.current = false;
         nodeDraggingRef.current = false;
@@ -1483,7 +1487,7 @@ function InfiniteCanvasPage() {
         if (dragRef.current.hasMoved && clientX != null && clientY != null) {
             setNodes((prev) =>
                 prev.map((node) => {
-                    const initial = initialPositions.find((item) => item.id === node.id);
+                    const initial = initialPositions.get(node.id);
                     if (!initial) return node;
                     return { ...node, position: { x: initial.x + dx, y: initial.y + dy } };
                 }),
@@ -1493,6 +1497,7 @@ function InfiniteCanvasPage() {
         dragRef.current.isDraggingNode = false;
         dragRef.current.hasMoved = false;
         dragRef.current.initialSelectedNodes = [];
+        dragRef.current.initialSelectedNodeMap = new Map();
         if (wasClick && clickedNodeId) {
             keepNodeToolbar(clickedNodeId);
             const clickedNode = nodesRef.current.find((node) => node.id === clickedNodeId);
@@ -1511,7 +1516,7 @@ function InfiniteCanvasPage() {
         const currentViewport = viewportRef.current;
         const dx = (clientX - dragRef.current.startX) / currentViewport.k;
         const dy = (clientY - dragRef.current.startY) / currentViewport.k;
-        const initialPositions = dragRef.current.initialSelectedNodes;
+        const initialPositions = dragRef.current.initialSelectedNodeMap;
         if (Math.abs(clientX - dragRef.current.startX) > 3 || Math.abs(clientY - dragRef.current.startY) > 3) {
             dragRef.current.hasMoved = true;
         }
@@ -1520,7 +1525,7 @@ function InfiniteCanvasPage() {
         rafRef.current = requestAnimationFrame(() => {
             setNodes((prev) =>
                 prev.map((node) => {
-                    const initial = initialPositions.find((item) => item.id === node.id);
+                    const initial = initialPositions.get(node.id);
                     return initial ? { ...node, position: { x: initial.x + dx, y: initial.y + dy } } : node;
                 }),
             );
@@ -1832,6 +1837,7 @@ function InfiniteCanvasPage() {
         dragRef.current.isDraggingNode = false;
         dragRef.current.hasMoved = false;
         dragRef.current.initialSelectedNodes = [];
+        dragRef.current.initialSelectedNodeMap = new Map();
         historyPausedRef.current = false;
         nodeDraggingRef.current = false;
         setIsNodeDragging(false);

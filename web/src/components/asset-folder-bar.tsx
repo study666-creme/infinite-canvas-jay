@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useCallback, useLayoutEffect, useRef, useState } from "react";
 import type { DragEvent as ReactDragEvent } from "react";
 import { App, Button, Input, Modal, Popconfirm } from "antd";
 import { Folder, Pencil, Plus, Trash2 } from "lucide-react";
@@ -28,6 +28,49 @@ export function AssetFolderBar({ value, onChange, className = "", buttonClassNam
     const [newFolderName, setNewFolderName] = useState("");
     const [editingFolder, setEditingFolder] = useState<AssetFolder | null>(null);
     const [editingName, setEditingName] = useState("");
+    const railRef = useRef<HTMLDivElement | null>(null);
+    const [activeFrame, setActiveFrame] = useState({ left: 0, top: 0, width: 0, height: 0, opacity: 0 });
+
+    const syncActiveFrame = useCallback(() => {
+        const rail = railRef.current;
+        const active = rail?.querySelector<HTMLElement>("[data-folder-chip-active='true']");
+        if (!rail || !active) {
+            setActiveFrame((current) => (current.opacity ? { ...current, opacity: 0 } : current));
+            return;
+        }
+
+        const railRect = rail.getBoundingClientRect();
+        const activeRect = active.getBoundingClientRect();
+        const next = {
+            left: activeRect.left - railRect.left + rail.scrollLeft,
+            top: activeRect.top - railRect.top + rail.scrollTop,
+            width: activeRect.width,
+            height: activeRect.height,
+            opacity: 1,
+        };
+
+        setActiveFrame((current) =>
+            Math.abs(current.left - next.left) < 0.5 && Math.abs(current.top - next.top) < 0.5 && Math.abs(current.width - next.width) < 0.5 && Math.abs(current.height - next.height) < 0.5 && current.opacity === next.opacity
+                ? current
+                : next,
+        );
+    }, []);
+
+    useLayoutEffect(() => {
+        syncActiveFrame();
+        const rail = railRef.current;
+        if (!rail) return;
+
+        const observer = new ResizeObserver(syncActiveFrame);
+        observer.observe(rail);
+        Array.from(rail.children).forEach((child) => observer.observe(child));
+        window.addEventListener("resize", syncActiveFrame);
+
+        return () => {
+            observer.disconnect();
+            window.removeEventListener("resize", syncActiveFrame);
+        };
+    }, [folders, syncActiveFrame, value]);
 
     const createFolder = () => {
         const name = newFolderName.trim();
@@ -35,6 +78,7 @@ export function AssetFolderBar({ value, onChange, className = "", buttonClassNam
             message.warning("请输入分类名称");
             return;
         }
+
         const existing = folders.find((folder) => folder.name.trim().toLowerCase() === name.toLowerCase());
         if (existing) {
             setCreateOpen(false);
@@ -43,6 +87,7 @@ export function AssetFolderBar({ value, onChange, className = "", buttonClassNam
             message.info(`分类「${existing.name}」已存在，已切换到该分类`);
             return;
         }
+
         const id = addFolder(name);
         setCreateOpen(false);
         setNewFolderName("");
@@ -74,33 +119,41 @@ export function AssetFolderBar({ value, onChange, className = "", buttonClassNam
 
     return (
         <div className={`flex flex-wrap items-center gap-2 ${className}`}>
-            <FolderChip active={value === "all"} label="全部" buttonClassName={buttonClassName} onClick={() => onChange("all")} />
-            <FolderChip active={value === "uncategorized"} label="未分类" buttonClassName={buttonClassName} dropValue="uncategorized" onDropAssets={handleDropAssets} onClick={() => onChange("uncategorized")} />
-            {folders.map((folder) => (
-                <div key={folder.id} className="group flex items-center gap-0.5">
-                    <FolderChip active={value === folder.id} label={folder.name} buttonClassName={buttonClassName} dropValue={folder.id} onDropAssets={handleDropAssets} onClick={() => onChange(folder.id)} />
-                    <button
-                        type="button"
-                        className="grid size-6 place-items-center rounded-full text-stone-400 opacity-0 transition hover:bg-stone-100 hover:text-stone-700 group-hover:opacity-100 dark:hover:bg-stone-800 dark:hover:text-stone-200"
-                        aria-label={`重命名 ${folder.name}`}
-                        onClick={() => {
-                            setEditingFolder(folder);
-                            setEditingName(folder.name);
-                        }}
-                    >
-                        <Pencil className="size-3" />
-                    </button>
-                    <Popconfirm title={`删除分类「${folder.name}」？资产将移至未分类`} okText="删除" cancelText="取消" onConfirm={() => removeFolder(folder.id)}>
+            <div ref={railRef} className="canvas-asset-folder-rail thin-scrollbar">
+                <span
+                    aria-hidden
+                    className="canvas-asset-folder-glider"
+                    style={{
+                        opacity: activeFrame.opacity,
+                        transform: `translate3d(${activeFrame.left}px, ${activeFrame.top}px, 0)`,
+                        width: activeFrame.width,
+                        height: activeFrame.height,
+                    }}
+                />
+                <FolderChip active={value === "all"} label="全部" onClick={() => onChange("all")} />
+                <FolderChip active={value === "uncategorized"} label="未分类" dropValue="uncategorized" onDropAssets={handleDropAssets} onClick={() => onChange("uncategorized")} />
+                {folders.map((folder) => (
+                    <div key={folder.id} className="group flex items-center gap-0.5">
+                        <FolderChip active={value === folder.id} label={folder.name} dropValue={folder.id} onDropAssets={handleDropAssets} onClick={() => onChange(folder.id)} />
                         <button
                             type="button"
-                            className="grid size-6 place-items-center rounded-full text-stone-400 opacity-0 transition hover:bg-red-50 hover:text-red-500 group-hover:opacity-100 dark:hover:bg-red-950/30"
-                            aria-label={`删除 ${folder.name}`}
+                            className="canvas-asset-folder-icon-button"
+                            aria-label={`重命名 ${folder.name}`}
+                            onClick={() => {
+                                setEditingFolder(folder);
+                                setEditingName(folder.name);
+                            }}
                         >
-                            <Trash2 className="size-3" />
+                            <Pencil className="size-3" />
                         </button>
-                    </Popconfirm>
-                </div>
-            ))}
+                        <Popconfirm title={`删除分类「${folder.name}」？资产将移至未分类`} okText="删除" cancelText="取消" onConfirm={() => removeFolder(folder.id)}>
+                            <button type="button" className="canvas-asset-folder-icon-button danger" aria-label={`删除 ${folder.name}`}>
+                                <Trash2 className="size-3" />
+                            </button>
+                        </Popconfirm>
+                    </div>
+                ))}
+            </div>
             <Button size="small" className={buttonClassName} icon={<Plus className="size-3.5" />} onClick={() => setCreateOpen(true)}>
                 新建分类
             </Button>
@@ -119,14 +172,12 @@ export function AssetFolderBar({ value, onChange, className = "", buttonClassNam
 function FolderChip({
     active,
     label,
-    buttonClassName,
     dropValue,
     onClick,
     onDropAssets,
 }: {
     active: boolean;
     label: string;
-    buttonClassName?: string;
     dropValue?: AssetFolderFilter;
     onClick: () => void;
     onDropAssets?: (target: AssetFolderFilter, assetIds: string[]) => void;
@@ -148,9 +199,8 @@ function FolderChip({
     return (
         <button
             type="button"
-            className={`inline-flex h-8 items-center gap-1.5 rounded-full border px-3 text-sm transition ${
-                active ? "border-[#cfc6b6] bg-[#cfc6b6] text-[#161616] shadow-sm shadow-black/15" : "border-stone-200 bg-white text-stone-600 hover:border-stone-400 dark:border-stone-700 dark:bg-stone-900 dark:text-stone-300 dark:hover:border-stone-500"
-            } ${dragActive ? "ring-2 ring-[#cfc6b6]" : ""} ${buttonClassName || ""}`}
+            data-folder-chip-active={active ? "true" : undefined}
+            className={`canvas-asset-folder-chip ${active ? "is-active" : ""} ${dragActive ? "is-drag-over" : ""}`}
             onClick={onClick}
             onDragEnter={(event) => {
                 if (!canDrop || !hasAssetDrag(event)) return;

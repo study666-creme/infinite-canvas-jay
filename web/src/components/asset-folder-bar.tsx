@@ -1,20 +1,24 @@
 "use client";
 
 import { useState } from "react";
+import type { DragEvent as ReactDragEvent } from "react";
 import { App, Button, Input, Modal, Popconfirm } from "antd";
 import { Folder, Pencil, Plus, Trash2 } from "lucide-react";
 
 import { useAssetStore, type AssetFolder } from "@/stores/use-asset-store";
 
 export type AssetFolderFilter = "all" | "uncategorized" | string;
+export const ASSET_FOLDER_DROP_DRAG_TYPE = "application/x-infinite-canvas-asset-ids";
 
 type AssetFolderBarProps = {
     value: AssetFolderFilter;
     onChange: (value: AssetFolderFilter) => void;
     className?: string;
+    buttonClassName?: string;
+    onDropAssets?: (assetIds: string[], folderId: string | null) => void;
 };
 
-export function AssetFolderBar({ value, onChange, className = "" }: AssetFolderBarProps) {
+export function AssetFolderBar({ value, onChange, className = "", buttonClassName = "", onDropAssets }: AssetFolderBarProps) {
     const { message } = App.useApp();
     const folders = useAssetStore((state) => state.folders);
     const addFolder = useAssetStore((state) => state.addFolder);
@@ -63,13 +67,18 @@ export function AssetFolderBar({ value, onChange, className = "" }: AssetFolderB
         message.success("分类已重命名");
     };
 
+    const handleDropAssets = (target: AssetFolderFilter, assetIds: string[]) => {
+        if (!onDropAssets || target === "all" || !assetIds.length) return;
+        onDropAssets(assetIds, target === "uncategorized" ? null : target);
+    };
+
     return (
         <div className={`flex flex-wrap items-center gap-2 ${className}`}>
-            <FolderChip active={value === "all"} label="全部" onClick={() => onChange("all")} />
-            <FolderChip active={value === "uncategorized"} label="未分类" onClick={() => onChange("uncategorized")} />
+            <FolderChip active={value === "all"} label="全部" buttonClassName={buttonClassName} onClick={() => onChange("all")} />
+            <FolderChip active={value === "uncategorized"} label="未分类" buttonClassName={buttonClassName} dropValue="uncategorized" onDropAssets={handleDropAssets} onClick={() => onChange("uncategorized")} />
             {folders.map((folder) => (
                 <div key={folder.id} className="group flex items-center gap-0.5">
-                    <FolderChip active={value === folder.id} label={folder.name} onClick={() => onChange(folder.id)} />
+                    <FolderChip active={value === folder.id} label={folder.name} buttonClassName={buttonClassName} dropValue={folder.id} onDropAssets={handleDropAssets} onClick={() => onChange(folder.id)} />
                     <button
                         type="button"
                         className="grid size-6 place-items-center rounded-full text-stone-400 opacity-0 transition hover:bg-stone-100 hover:text-stone-700 group-hover:opacity-100 dark:hover:bg-stone-800 dark:hover:text-stone-200"
@@ -92,7 +101,7 @@ export function AssetFolderBar({ value, onChange, className = "" }: AssetFolderB
                     </Popconfirm>
                 </div>
             ))}
-            <Button size="small" icon={<Plus className="size-3.5" />} onClick={() => setCreateOpen(true)}>
+            <Button size="small" className={buttonClassName} icon={<Plus className="size-3.5" />} onClick={() => setCreateOpen(true)}>
                 新建分类
             </Button>
 
@@ -107,16 +116,60 @@ export function AssetFolderBar({ value, onChange, className = "" }: AssetFolderB
     );
 }
 
-function FolderChip({ active, label, onClick }: { active: boolean; label: string; onClick: () => void }) {
+function FolderChip({
+    active,
+    label,
+    buttonClassName,
+    dropValue,
+    onClick,
+    onDropAssets,
+}: {
+    active: boolean;
+    label: string;
+    buttonClassName?: string;
+    dropValue?: AssetFolderFilter;
+    onClick: () => void;
+    onDropAssets?: (target: AssetFolderFilter, assetIds: string[]) => void;
+}) {
+    const [dragActive, setDragActive] = useState(false);
+    const canDrop = Boolean(dropValue && onDropAssets);
+
+    const hasAssetDrag = (event: ReactDragEvent<HTMLButtonElement>) => Array.from(event.dataTransfer.types).includes(ASSET_FOLDER_DROP_DRAG_TYPE);
+    const readAssetIds = (event: ReactDragEvent<HTMLButtonElement>) => {
+        try {
+            const value = event.dataTransfer.getData(ASSET_FOLDER_DROP_DRAG_TYPE);
+            const parsed = JSON.parse(value) as unknown;
+            return Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === "string" && item.length > 0) : [];
+        } catch {
+            return [];
+        }
+    };
+
     return (
         <button
             type="button"
             className={`inline-flex h-8 items-center gap-1.5 rounded-full border px-3 text-sm transition ${
-                active
-                    ? "border-cyan-300 bg-cyan-300 text-stone-950 shadow-sm shadow-cyan-950/15"
-                    : "border-stone-200 bg-white text-stone-600 hover:border-stone-400 dark:border-stone-700 dark:bg-stone-900 dark:text-stone-300 dark:hover:border-stone-500"
-            }`}
+                active ? "border-cyan-300 bg-cyan-300 text-stone-950 shadow-sm shadow-cyan-950/15" : "border-stone-200 bg-white text-stone-600 hover:border-stone-400 dark:border-stone-700 dark:bg-stone-900 dark:text-stone-300 dark:hover:border-stone-500"
+            } ${dragActive ? "ring-2 ring-cyan-300/80" : ""} ${buttonClassName || ""}`}
             onClick={onClick}
+            onDragEnter={(event) => {
+                if (!canDrop || !hasAssetDrag(event)) return;
+                event.preventDefault();
+                setDragActive(true);
+            }}
+            onDragOver={(event) => {
+                if (!canDrop || !hasAssetDrag(event)) return;
+                event.preventDefault();
+                event.dataTransfer.dropEffect = "move";
+                setDragActive(true);
+            }}
+            onDragLeave={() => setDragActive(false)}
+            onDrop={(event) => {
+                setDragActive(false);
+                if (!canDrop || !dropValue || !hasAssetDrag(event)) return;
+                event.preventDefault();
+                onDropAssets?.(dropValue, readAssetIds(event));
+            }}
         >
             <Folder className="size-3.5" />
             <span className="max-w-[120px] truncate">{label}</span>

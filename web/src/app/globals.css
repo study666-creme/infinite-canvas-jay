@@ -240,6 +240,104 @@
         border-radius: 999px;
     }
 
+    .canvas-asset-drawer .ant-tabs-nav {
+        margin-bottom: 12px;
+    }
+
+    .canvas-asset-drawer .ant-tabs-tab {
+        color: rgba(245, 245, 244, 0.62);
+    }
+
+    .canvas-asset-drawer .ant-tabs-tab:hover,
+    .canvas-asset-drawer .ant-tabs-tab-active .ant-tabs-tab-btn {
+        color: #f5f5f4 !important;
+    }
+
+    .canvas-asset-drawer .ant-tabs-ink-bar {
+        background: #67e8f9 !important;
+    }
+
+    .canvas-asset-drawer .ant-input-affix-wrapper,
+    .canvas-asset-drawer .ant-input,
+    .canvas-asset-drawer .ant-select .ant-select-selector,
+    .canvas-asset-drawer .canvas-asset-surface-button.ant-btn {
+        background: rgba(255, 255, 255, 0.065) !important;
+        border-color: rgba(255, 255, 255, 0.14) !important;
+        color: #f5f5f4 !important;
+        box-shadow: none !important;
+    }
+
+    .canvas-asset-drawer .ant-input::placeholder,
+    .canvas-asset-drawer .ant-select-selection-placeholder {
+        color: rgba(245, 245, 244, 0.44) !important;
+    }
+
+    .canvas-asset-drawer .ant-select-selection-item,
+    .canvas-asset-drawer .ant-select-arrow,
+    .canvas-asset-drawer .ant-input-clear-icon,
+    .canvas-asset-drawer .canvas-asset-surface-button.ant-btn .ant-btn-icon {
+        color: rgba(245, 245, 244, 0.82) !important;
+    }
+
+    .canvas-asset-drawer .ant-input-affix-wrapper:hover,
+    .canvas-asset-drawer .ant-input:hover,
+    .canvas-asset-drawer .ant-select:hover .ant-select-selector,
+    .canvas-asset-drawer .canvas-asset-surface-button.ant-btn:hover {
+        background: rgba(255, 255, 255, 0.1) !important;
+        border-color: rgba(103, 232, 249, 0.46) !important;
+        color: #ffffff !important;
+    }
+
+    .canvas-asset-drawer .canvas-asset-ghost-button.ant-btn {
+        color: rgba(245, 245, 244, 0.72) !important;
+    }
+
+    .canvas-asset-drawer .canvas-asset-ghost-button.ant-btn:hover {
+        background: rgba(255, 255, 255, 0.08) !important;
+        color: #ffffff !important;
+    }
+
+    .canvas-asset-drawer .prompt-filter-tag.canvas-asset-filter-tag.ant-tag-checkable {
+        border-color: rgba(255, 255, 255, 0.12);
+        background: rgba(255, 255, 255, 0.055);
+        color: rgba(245, 245, 244, 0.78);
+    }
+
+    .canvas-asset-drawer .prompt-filter-tag.canvas-asset-filter-tag.ant-tag-checkable:hover {
+        border-color: rgba(103, 232, 249, 0.4);
+        background: rgba(255, 255, 255, 0.1);
+        color: #ffffff;
+    }
+
+    .canvas-asset-drawer .prompt-filter-tag.canvas-asset-filter-tag.ant-tag-checkable.is-active,
+    .canvas-asset-drawer .prompt-filter-tag.canvas-asset-filter-tag.ant-tag-checkable-checked {
+        border-color: rgba(103, 232, 249, 0.88);
+        background: rgba(103, 232, 249, 0.18);
+        box-shadow: 0 6px 18px rgba(8, 145, 178, 0.18);
+        color: #ecfeff !important;
+    }
+
+    .canvas-asset-drawer .canvas-asset-card {
+        background: rgba(255, 255, 255, 0.06) !important;
+        border-color: rgba(255, 255, 255, 0.12) !important;
+        color: #f5f5f4;
+    }
+
+    .canvas-asset-drawer .canvas-asset-card:hover {
+        border-color: rgba(103, 232, 249, 0.42) !important;
+        box-shadow: 0 12px 28px rgba(0, 0, 0, 0.28);
+    }
+
+    .canvas-asset-drawer .canvas-asset-card .text-stone-800,
+    .canvas-asset-drawer .canvas-asset-card .text-stone-600 {
+        color: #e7e5e4 !important;
+    }
+
+    .canvas-asset-drawer .canvas-asset-card .text-stone-500,
+    .canvas-asset-drawer .canvas-asset-card .text-stone-400 {
+        color: rgba(214, 211, 209, 0.72) !important;
+    }
+
     .hover-scrollbar {
         scrollbar-color: transparent transparent;
         scrollbar-width: thin;
@@ -484,21 +582,15 @@
     }
 
     .canvas-black-glass-default {
-        background:
-            linear-gradient(145deg, rgba(8, 9, 12, 0.96) 0%, rgba(16, 17, 22, 0.94) 48%, rgba(6, 7, 10, 0.98) 100%),
-            radial-gradient(circle at 50% 0%, rgba(255, 255, 255, 0.06), transparent 55%);
+        background: linear-gradient(145deg, rgba(8, 9, 12, 0.96) 0%, rgba(16, 17, 22, 0.94) 48%, rgba(6, 7, 10, 0.98) 100%), radial-gradient(circle at 50% 0%, rgba(255, 255, 255, 0.06), transparent 55%);
     }
 
     .canvas-black-glass-image {
-        background:
-            linear-gradient(145deg, rgba(10, 9, 8, 0.96) 0%, rgba(18, 16, 14, 0.94) 48%, rgba(7, 6, 5, 0.98) 100%),
-            radial-gradient(circle at 50% 0%, rgba(255, 220, 180, 0.05), transparent 55%);
+        background: linear-gradient(145deg, rgba(10, 9, 8, 0.96) 0%, rgba(18, 16, 14, 0.94) 48%, rgba(7, 6, 5, 0.98) 100%), radial-gradient(circle at 50% 0%, rgba(255, 220, 180, 0.05), transparent 55%);
     }
 
     .canvas-black-glass-video {
-        background:
-            linear-gradient(145deg, rgba(6, 8, 14, 0.97) 0%, rgba(12, 14, 22, 0.95) 48%, rgba(4, 6, 12, 0.99) 100%),
-            radial-gradient(circle at 50% 0%, rgba(120, 170, 255, 0.07), transparent 58%);
+        background: linear-gradient(145deg, rgba(6, 8, 14, 0.97) 0%, rgba(12, 14, 22, 0.95) 48%, rgba(4, 6, 12, 0.99) 100%), radial-gradient(circle at 50% 0%, rgba(120, 170, 255, 0.07), transparent 58%);
     }
 
     .canvas-black-glass-fog {
@@ -515,28 +607,22 @@
 
     .canvas-black-glass-fog-default::before {
         background:
-            radial-gradient(circle at 18% 22%, rgba(190, 198, 214, 0.1) 0%, transparent 52%),
-            radial-gradient(circle at 82% 28%, rgba(170, 178, 198, 0.08) 0%, transparent 50%),
-            radial-gradient(circle at 24% 78%, rgba(180, 188, 206, 0.08) 0%, transparent 48%),
-            radial-gradient(circle at 78% 74%, rgba(165, 174, 194, 0.09) 0%, transparent 50%),
+            radial-gradient(circle at 18% 22%, rgba(190, 198, 214, 0.1) 0%, transparent 52%), radial-gradient(circle at 82% 28%, rgba(170, 178, 198, 0.08) 0%, transparent 50%),
+            radial-gradient(circle at 24% 78%, rgba(180, 188, 206, 0.08) 0%, transparent 48%), radial-gradient(circle at 78% 74%, rgba(165, 174, 194, 0.09) 0%, transparent 50%),
             radial-gradient(circle at 50% 50%, rgba(200, 208, 224, 0.07) 0%, transparent 58%);
     }
 
     .canvas-black-glass-fog-image::before {
         background:
-            radial-gradient(circle at 18% 22%, rgba(220, 205, 188, 0.1) 0%, transparent 52%),
-            radial-gradient(circle at 82% 28%, rgba(205, 190, 176, 0.08) 0%, transparent 50%),
-            radial-gradient(circle at 24% 78%, rgba(215, 200, 184, 0.08) 0%, transparent 48%),
-            radial-gradient(circle at 78% 74%, rgba(200, 186, 172, 0.09) 0%, transparent 50%),
+            radial-gradient(circle at 18% 22%, rgba(220, 205, 188, 0.1) 0%, transparent 52%), radial-gradient(circle at 82% 28%, rgba(205, 190, 176, 0.08) 0%, transparent 50%),
+            radial-gradient(circle at 24% 78%, rgba(215, 200, 184, 0.08) 0%, transparent 48%), radial-gradient(circle at 78% 74%, rgba(200, 186, 172, 0.09) 0%, transparent 50%),
             radial-gradient(circle at 50% 50%, rgba(225, 212, 196, 0.07) 0%, transparent 58%);
     }
 
     .canvas-black-glass-fog-video::before {
         background:
-            radial-gradient(circle at 18% 22%, rgba(186, 196, 216, 0.1) 0%, transparent 52%),
-            radial-gradient(circle at 82% 28%, rgba(168, 178, 202, 0.08) 0%, transparent 50%),
-            radial-gradient(circle at 24% 78%, rgba(178, 188, 210, 0.08) 0%, transparent 48%),
-            radial-gradient(circle at 78% 74%, rgba(160, 172, 198, 0.09) 0%, transparent 50%),
+            radial-gradient(circle at 18% 22%, rgba(186, 196, 216, 0.1) 0%, transparent 52%), radial-gradient(circle at 82% 28%, rgba(168, 178, 202, 0.08) 0%, transparent 50%),
+            radial-gradient(circle at 24% 78%, rgba(178, 188, 210, 0.08) 0%, transparent 48%), radial-gradient(circle at 78% 74%, rgba(160, 172, 198, 0.09) 0%, transparent 50%),
             radial-gradient(circle at 50% 50%, rgba(194, 204, 222, 0.07) 0%, transparent 58%);
     }
 
@@ -613,16 +699,7 @@
         content: "";
         position: absolute;
         inset: -70% -100%;
-        background: linear-gradient(
-            108deg,
-            transparent 0%,
-            transparent 30%,
-            rgba(255, 255, 255, 0.05) 38%,
-            rgba(255, 255, 255, 0.2) 50%,
-            rgba(255, 255, 255, 0.05) 62%,
-            transparent 70%,
-            transparent 100%
-        );
+        background: linear-gradient(108deg, transparent 0%, transparent 30%, rgba(255, 255, 255, 0.05) 38%, rgba(255, 255, 255, 0.2) 50%, rgba(255, 255, 255, 0.05) 62%, transparent 70%, transparent 100%);
         filter: blur(14px);
         mix-blend-mode: screen;
         animation: canvas-black-glass-sweep 2.2s linear infinite;
@@ -637,19 +714,27 @@
     }
 
     .canvas-black-glass-edge-default {
-        box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.06), inset 0 0 36px rgba(255, 255, 255, 0.04);
+        box-shadow:
+            inset 0 0 0 1px rgba(255, 255, 255, 0.06),
+            inset 0 0 36px rgba(255, 255, 255, 0.04);
     }
 
     .canvas-black-glass-edge-image {
-        box-shadow: inset 0 0 0 1px rgba(255, 214, 170, 0.08), inset 0 0 36px rgba(255, 214, 170, 0.05);
+        box-shadow:
+            inset 0 0 0 1px rgba(255, 214, 170, 0.08),
+            inset 0 0 36px rgba(255, 214, 170, 0.05);
     }
 
     .canvas-black-glass-edge-video {
-        box-shadow: inset 0 0 0 1px rgba(130, 180, 255, 0.12), inset 0 0 42px rgba(130, 180, 255, 0.08);
+        box-shadow:
+            inset 0 0 0 1px rgba(130, 180, 255, 0.12),
+            inset 0 0 42px rgba(130, 180, 255, 0.08);
     }
 
     .canvas-black-glass-vignette {
-        box-shadow: inset 0 0 40px rgba(0, 0, 0, 0.32), inset 0 1px 0 rgba(255, 255, 255, 0.05);
+        box-shadow:
+            inset 0 0 40px rgba(0, 0, 0, 0.32),
+            inset 0 1px 0 rgba(255, 255, 255, 0.05);
     }
 
     .canvas-generation-progress-overlay {
@@ -888,25 +973,3 @@
     animation: none;
     mix-blend-mode: normal;
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

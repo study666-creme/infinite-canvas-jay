@@ -1,8 +1,8 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Button, Empty, Input, Pagination, Select, Spin, message } from "antd";
-import { Search } from "lucide-react";
+import { Check, Search } from "lucide-react";
 
 import { uploadImage } from "@/services/image-storage";
 import {
@@ -12,14 +12,10 @@ import {
     preparePromptHubCardForCanvas,
     type PromptHubCardListItem,
 } from "@/services/prompt-hub";
+import { useAssetStore } from "@/stores/use-asset-store";
 import { usePromptHubStore } from "@/stores/use-prompt-hub-store";
-import type { InsertAssetPayload } from "./asset-picker-modal";
 
 const PAGE_SIZE = 12;
-
-type Props = {
-    onInsert: (payload: InsertAssetPayload) => void;
-};
 
 function PickerCard({
     title,
@@ -27,6 +23,7 @@ function PickerCard({
     promptPreview,
     tags,
     loading,
+    saved,
     textOnly,
     onClick,
 }: {
@@ -35,14 +32,15 @@ function PickerCard({
     promptPreview: string;
     tags?: string[];
     loading?: boolean;
+    saved?: boolean;
     textOnly?: boolean;
     onClick: () => void;
 }) {
     return (
         <button
             type="button"
-            disabled={loading}
-            className="group relative cursor-pointer overflow-hidden rounded-lg border border-stone-200 bg-white text-left transition hover:border-stone-400 hover:shadow-md disabled:cursor-wait disabled:opacity-70 dark:border-stone-700 dark:bg-stone-900 dark:hover:border-stone-500"
+            disabled={loading || saved}
+            className="group relative min-w-0 cursor-pointer overflow-hidden rounded-lg border border-stone-200 bg-white text-left transition hover:border-stone-400 hover:shadow-md disabled:cursor-default disabled:opacity-70 dark:border-stone-700 dark:bg-stone-900 dark:hover:border-stone-500"
             onClick={onClick}
         >
             {textOnly ? (
@@ -55,7 +53,10 @@ function PickerCard({
                 <div className="flex aspect-[4/3] items-center justify-center bg-stone-100 p-3 text-center text-xs text-stone-500 dark:bg-stone-800 dark:text-stone-400">缩略图加载中…</div>
             )}
             <div className="space-y-1 p-2.5">
-                <div className="line-clamp-1 text-xs font-medium text-stone-800 dark:text-stone-200">{title || "未命名卡片"}</div>
+                <div className="flex items-center gap-1.5">
+                    <div className="line-clamp-1 min-w-0 flex-1 text-xs font-medium text-stone-800 dark:text-stone-200">{title || "未命名卡片"}</div>
+                    {saved ? <Check className="size-3.5 shrink-0 text-emerald-500" /> : null}
+                </div>
                 {promptPreview ? (
                     <div className="line-clamp-3 text-[10px] leading-4 text-stone-500 dark:text-stone-400">{promptPreview}</div>
                 ) : (
@@ -72,16 +73,18 @@ function PickerCard({
                 ) : null}
             </div>
             <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-stone-950/0 text-sm font-medium text-white opacity-0 transition group-hover:bg-stone-950/55 group-hover:opacity-100">
-                {loading ? "插入中…" : textOnly ? "插入提示词" : "插入图片+提示词"}
+                {saved ? "已在我的资产" : loading ? "保存中…" : "添加到我的资产"}
             </div>
         </button>
     );
 }
 
-export function PromptHubCardsTab({ onInsert }: Props) {
+export function PromptHubCardsTab({ compact = false }: { compact?: boolean } = {}) {
     const session = usePromptHubStore((state) => state.session);
     const apiBase = usePromptHubStore((state) => state.apiBase);
     const getSession = usePromptHubStore((state) => state.getSession);
+    const addAsset = useAssetStore((state) => state.addAsset);
+    const assets = useAssetStore((state) => state.assets);
     const [keyword, setKeyword] = useState("");
     const [searchDraft, setSearchDraft] = useState("");
     const [group, setGroup] = useState<string>("");
@@ -92,7 +95,16 @@ export function PromptHubCardsTab({ onInsert }: Props) {
     const [total, setTotal] = useState(0);
     const [cards, setCards] = useState<PromptHubCardListItem[]>([]);
     const [loading, setLoading] = useState(false);
-    const [insertingId, setInsertingId] = useState<string | null>(null);
+    const [savingId, setSavingId] = useState<string | null>(null);
+
+    const savedCardIds = useMemo(() => {
+        const ids = new Set<string>();
+        assets.forEach((asset) => {
+            const id = asset.metadata?.promptHubCardId;
+            if (typeof id === "string") ids.add(id);
+        });
+        return ids;
+    }, [assets]);
 
     useEffect(() => {
         void (async () => {
@@ -103,14 +115,14 @@ export function PromptHubCardsTab({ onInsert }: Props) {
                 return;
             }
             try {
-                const [g, t] = await Promise.all([
+                const [nextGroups, nextTags] = await Promise.all([
                     listPromptHubGroups(active, { apiBase }),
                     listPromptHubTags(active, { apiBase }),
                 ]);
-                setGroups(g);
-                setTags(t);
+                setGroups(nextGroups);
+                setTags(nextTags);
             } catch {
-                /* 筛选可选，失败不阻塞列表 */
+                // Filters are optional; failing them should not block the card list.
             }
         })();
     }, [apiBase, getSession, session?.access_token]);
@@ -147,35 +159,56 @@ export function PromptHubCardsTab({ onInsert }: Props) {
         void loadCards();
     }, [loadCards]);
 
-    const handleInsert = async (card: PromptHubCardListItem) => {
-        const active = await getSession();
-        if (!active) {
-            message.warning("请先在设置 → Prompt Hub 连接账号");
+    const saveCardToAssets = async (card: PromptHubCardListItem) => {
+        if (savedCardIds.has(card.id)) {
+            message.info("这张卡片已经在我的资产里");
             return;
         }
-        setInsertingId(card.id);
+        const active = await getSession();
+        if (!active) {
+            message.warning("请先在设置 -> Prompt Hub 连接账号");
+            return;
+        }
+        setSavingId(card.id);
         try {
             const prepared = await preparePromptHubCardForCanvas(card, active, { apiBase });
+            const tags = card.tags || [];
             if (prepared.kind === "text") {
-                onInsert({
+                addAsset({
                     kind: "text",
-                    content: prepared.prompt,
                     title: prepared.title,
+                    coverUrl: "",
+                    tags,
+                    source: "Prompt Hub",
+                    data: { content: prepared.prompt },
+                    metadata: { source: "prompt-hub", promptHubCardId: card.id, group: card.group || null },
                 });
+                message.success("已添加到我的资产");
                 return;
             }
+
             const uploaded = await uploadImage(prepared.blob, { source: "upload" });
-            onInsert({
+            addAsset({
                 kind: "image",
-                dataUrl: uploaded.url,
-                storageKey: uploaded.storageKey,
                 title: prepared.title,
-                prompt: prepared.prompt,
+                coverUrl: uploaded.url,
+                tags,
+                source: "Prompt Hub",
+                data: {
+                    dataUrl: uploaded.url,
+                    storageKey: uploaded.storageKey,
+                    width: uploaded.width,
+                    height: uploaded.height,
+                    bytes: uploaded.bytes,
+                    mimeType: uploaded.mimeType,
+                },
+                metadata: { source: "prompt-hub", promptHubCardId: card.id, prompt: prepared.prompt, group: card.group || null },
             });
+            message.success("已添加到我的资产");
         } catch (error) {
-            message.error(error instanceof Error ? error.message : "插入失败");
+            message.error(error instanceof Error ? error.message : "添加到我的资产失败");
         } finally {
-            setInsertingId(null);
+            setSavingId(null);
         }
     };
 
@@ -183,7 +216,7 @@ export function PromptHubCardsTab({ onInsert }: Props) {
         return (
             <div className="flex min-h-[360px] flex-col items-center justify-center gap-3 text-center">
                 <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="尚未连接 Prompt Hub" />
-                <p className="max-w-md text-xs leading-5 text-stone-500">请打开右上角设置 → Prompt Hub，用卡藏账号登录后再从卡片库插入。</p>
+                <p className="max-w-md text-xs leading-5 text-stone-500">请打开右上角设置 → Prompt Hub，用卡藏账号登录后再添加卡片。</p>
             </div>
         );
     }
@@ -191,21 +224,21 @@ export function PromptHubCardsTab({ onInsert }: Props) {
     const groupOptions = [
         { value: "", label: "全部分组" },
         { value: "uncategorized", label: "未分类" },
-        ...groups.map((g) => ({ value: g, label: g })),
+        ...groups.map((item) => ({ value: item, label: item })),
     ];
-    const tagOptions = [{ value: "", label: "全部标签" }, ...tags.map((t) => ({ value: t, label: t }))];
+    const tagOptions = [{ value: "", label: "全部标签" }, ...tags.map((item) => ({ value: item, label: item }))];
 
     return (
-        <div className="space-y-4">
+        <div className="flex min-h-0 flex-1 flex-col gap-4">
             <div className="flex flex-wrap items-center gap-2">
                 <Input
-                    className="w-56"
+                    className="min-w-[180px] flex-1"
                     size="small"
                     prefix={<Search className="size-3.5 text-stone-400" />}
                     placeholder="搜索标题或提示词"
                     value={searchDraft}
                     allowClear
-                    onChange={(e) => setSearchDraft(e.target.value)}
+                    onChange={(event) => setSearchDraft(event.target.value)}
                     onPressEnter={() => {
                         setPage(1);
                         setKeyword(searchDraft);
@@ -241,31 +274,34 @@ export function PromptHubCardsTab({ onInsert }: Props) {
                 >
                     搜索
                 </Button>
-                <span className="text-xs text-stone-500">共 {total} 张卡片</span>
+                <span className="text-xs text-stone-500">共 {total} 张</span>
             </div>
 
-            {loading && !cards.length ? (
-                <div className="flex min-h-[280px] items-center justify-center">
-                    <Spin />
-                </div>
-            ) : cards.length ? (
-                <div className="grid grid-cols-4 gap-3">
-                    {cards.map((card) => (
-                        <PickerCard
-                            key={card.id}
-                            title={card.title || card.prompt.slice(0, 24) || "未命名"}
-                            cover={card.thumbUrl}
-                            promptPreview={card.prompt}
-                            tags={card.tags}
-                            textOnly={card.hasImage === false || !String(card.imageRef || "").trim()}
-                            loading={insertingId === card.id}
-                            onClick={() => void handleInsert(card)}
-                        />
-                    ))}
-                </div>
-            ) : (
-                <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="没有匹配的卡片" className="py-12" />
-            )}
+            <div className="thin-scrollbar min-h-0 flex-1 overflow-y-auto pr-1">
+                {loading && !cards.length ? (
+                    <div className="flex min-h-[280px] items-center justify-center">
+                        <Spin />
+                    </div>
+                ) : cards.length ? (
+                    <div className={compact ? "grid grid-cols-2 gap-3" : "grid grid-cols-2 gap-3 lg:grid-cols-4"}>
+                        {cards.map((card) => (
+                            <PickerCard
+                                key={card.id}
+                                title={card.title || card.prompt.slice(0, 24) || "未命名卡片"}
+                                cover={card.thumbUrl}
+                                promptPreview={card.prompt}
+                                tags={card.tags}
+                                textOnly={card.hasImage === false || !String(card.imageRef || "").trim()}
+                                loading={savingId === card.id}
+                                saved={savedCardIds.has(card.id)}
+                                onClick={() => void saveCardToAssets(card)}
+                            />
+                        ))}
+                    </div>
+                ) : (
+                    <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="没有匹配的卡片" className="py-12" />
+                )}
+            </div>
 
             {total > PAGE_SIZE ? (
                 <div className="flex justify-center">

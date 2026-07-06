@@ -85,15 +85,23 @@ export const useAssetStore = create<AssetStore>()(
             folders: [],
             assets: [],
             addFolder: (name) => {
+                const nextName = name.trim();
+                if (!nextName) return "";
+                const existing = get().folders.find((folder) => folder.name.trim().toLowerCase() === nextName.toLowerCase());
+                if (existing) return existing.id;
                 const now = new Date().toISOString();
-                const folder = { id: nanoid(), name: name.trim(), createdAt: now, updatedAt: now };
+                const folder = { id: nanoid(), name: nextName, createdAt: now, updatedAt: now };
                 set((state) => ({ folders: [...state.folders, folder] }));
                 return folder.id;
             },
             renameFolder: (id, name) =>
-                set((state) => ({
-                    folders: state.folders.map((folder) => (folder.id === id ? { ...folder, name: name.trim(), updatedAt: new Date().toISOString() } : folder)),
-                })),
+                set((state) => {
+                    const nextName = name.trim();
+                    if (!nextName || state.folders.some((folder) => folder.id !== id && folder.name.trim().toLowerCase() === nextName.toLowerCase())) return state;
+                    return {
+                        folders: state.folders.map((folder) => (folder.id === id ? { ...folder, name: nextName, updatedAt: new Date().toISOString() } : folder)),
+                    };
+                }),
             removeFolder: (id) =>
                 set((state) => ({
                     folders: state.folders.filter((folder) => folder.id !== id),

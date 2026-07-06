@@ -226,7 +226,7 @@ export default function VideoPage() {
             data: { url: video.url, storageKey: video.storageKey, width: video.width, height: video.height, bytes: video.bytes, mimeType: video.mimeType },
             metadata: { source: "video-page", prompt },
         });
-        message.success("已加入我的素材");
+        message.success("已加入我的资产");
     };
 
     const insertPickedAsset = async (payload: InsertAssetPayload) => {
@@ -376,7 +376,7 @@ export default function VideoPage() {
                                             查看提示词库
                                         </Button>
                                         <Button size="small" icon={<FolderPlus className="size-3.5" />} onClick={() => setAssetPickerOpen(true)}>
-                                            查看我的素材
+                                            查看我的资产
                                         </Button>
                                     </div>
                                 </div>

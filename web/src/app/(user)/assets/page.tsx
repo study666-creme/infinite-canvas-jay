@@ -190,7 +190,7 @@ export default function AssetsPage() {
     const confirmDelete = () => {
         if (!deletingAsset) return;
         removeAsset(deletingAsset.id);
-        message.success("素材已删除");
+        message.success("资产已删除");
         setDeletingAsset(null);
     };
 
@@ -199,7 +199,7 @@ export default function AssetsPage() {
             <main className="min-h-0 flex-1 overflow-y-auto bg-[radial-gradient(#e5e7eb_1px,transparent_1px)] px-6 py-8 [background-size:16px_16px] dark:bg-[radial-gradient(rgba(245,245,244,.14)_1px,transparent_1px)]">
                 <div className="pb-8">
                     <div className="mx-auto max-w-5xl text-center">
-                        <h1 className="text-4xl font-semibold tracking-tight text-stone-950 dark:text-stone-100">我的素材</h1>
+                        <h1 className="text-4xl font-semibold tracking-tight text-stone-950 dark:text-stone-100">我的资产</h1>
                         <p className="mt-3 text-sm text-stone-500 dark:text-stone-400">收藏常用文本和图片，按类型、标题和标签快速查找。</p>
                     </div>
 
@@ -412,7 +412,7 @@ export default function AssetsPage() {
             <input ref={assetInputRef} type="file" accept="application/zip,.zip" className="hidden" onChange={(event) => void importAssetZip(event.target.files?.[0])} />
 
             <Modal title="删除素材" open={Boolean(deletingAsset)} onCancel={() => setDeletingAsset(null)} onOk={confirmDelete} okText="删除" okButtonProps={{ danger: true }} cancelText="取消">
-                确定删除「{deletingAsset?.title}」吗？删除后会从我的素材中移除。
+                确定删除「{deletingAsset?.title}」吗？删除后会从我的资产中移除。
             </Modal>
         </div>
     );

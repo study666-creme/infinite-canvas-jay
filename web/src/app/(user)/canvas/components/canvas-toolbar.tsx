@@ -94,7 +94,7 @@ export function CanvasToolbar({
                     <Upload className="size-4.5" />
                 </ToolbarButton>
                 <Divider theme={theme} />
-                <ToolbarButton id="tool-assets" label="我的素材" hovered={hovered} hoverStyle={hoverStyle} wrapRef={wrapRef} onTipX={setTipX} onHover={setHovered} onClick={onOpenMyAssets}>
+                <ToolbarButton id="tool-assets" label="我的资产" hovered={hovered} hoverStyle={hoverStyle} wrapRef={wrapRef} onTipX={setTipX} onHover={setHovered} onClick={onOpenMyAssets}>
                     <FolderOpen className="size-4.5" />
                 </ToolbarButton>
                 <ToolbarButton
@@ -282,7 +282,7 @@ function toolLabel(id: string) {
     if (id === "tool-audio") return "音频";
     if (id === "tool-config") return "生成配置";
     if (id === "tool-upload") return "上传素材";
-    if (id === "tool-assets") return "我的素材";
+    if (id === "tool-assets") return "我的资产";
     if (id === "tool-style") return "画布外观";
     if (id === "tool-delete") return "删除选中";
     if (id === "tool-clear") return "清空画布";

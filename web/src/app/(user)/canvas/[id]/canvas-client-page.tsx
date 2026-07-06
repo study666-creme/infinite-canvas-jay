@@ -54,7 +54,8 @@ import { Minimap } from "../components/canvas-mini-map";
 import { CanvasNode } from "../components/canvas-node";
 import { CanvasNodePromptPanel, type CanvasNodeGenerationMode } from "../components/canvas-node-prompt-panel";
 import { CanvasToolbar } from "../components/canvas-toolbar";
-import { AssetPickerModal, type InsertAssetPayload } from "../components/asset-picker-modal";
+import { CanvasAssetDrawer } from "../components/canvas-asset-drawer";
+import { CANVAS_ASSET_DRAG_TYPE, parseAssetDragPayload, type InsertAssetPayload } from "../components/asset-library-panel";
 import { CanvasZoomControls } from "../components/canvas-zoom-controls";
 import { CanvasShortcutsModal } from "../components/canvas-shortcuts-panel";
 import { CanvasLocalAgentPanel } from "../components/canvas-local-agent-panel";
@@ -275,6 +276,9 @@ function InfiniteCanvasPage() {
     const didInitialCenterRef = useRef(false);
     const rafRef = useRef<number | null>(null);
     const toolbarHideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const lastPointerPointRef = useRef<{ clientX: number; clientY: number } | null>(null);
+    const toolbarNodeIdRef = useRef<string | null>(null);
+    const assetInsertRef = useRef<((payload: InsertAssetPayload, position?: Position) => void) | null>(null);
     const groupToolbarHideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const groupToolbarMenuOpenRef = useRef(false);
     const toolbarImageSettingsOpenRef = useRef(false);
@@ -339,7 +343,7 @@ function InfiniteCanvasPage() {
     const [backgroundMode, setBackgroundMode] = useState<CanvasBackgroundMode>("lines");
     const [showImageInfo, setShowImageInfo] = useState(false);
     const [clearConfirmOpen, setClearConfirmOpen] = useState(false);
-    const [assetPickerOpen, setAssetPickerOpen] = useState(false);
+    const [assetDrawerOpen, setAssetDrawerOpen] = useState(false);
     const [projectLoaded, setProjectLoaded] = useState(false);
     const [toolbarNodeId, setToolbarNodeId] = useState<string | null>(null);
     const [toolbarGroupRootId, setToolbarGroupRootId] = useState<string | null>(null);
@@ -617,10 +621,11 @@ function InfiniteCanvasPage() {
         connectingParamsRef.current = connectingParams;
         connectionTargetNodeIdRef.current = connectionTargetNodeId;
         pendingConnectionCreateRef.current = pendingConnectionCreate;
+        toolbarNodeIdRef.current = toolbarNodeId;
         projectMetaRef.current = { chatSessions, activeChatId, backgroundMode, showImageInfo };
         projectLoadedRef.current = projectLoaded;
         projectIdRef.current = projectId;
-    }, [nodes, connections, selectedNodeIds, viewport, connectingParams, connectionTargetNodeId, pendingConnectionCreate, chatSessions, activeChatId, backgroundMode, showImageInfo, projectLoaded, projectId]);
+    }, [nodes, connections, selectedNodeIds, viewport, connectingParams, connectionTargetNodeId, pendingConnectionCreate, toolbarNodeId, chatSessions, activeChatId, backgroundMode, showImageInfo, projectLoaded, projectId]);
 
     useLayoutEffect(() => {
         selectionBoxRef.current = selectionBox;
@@ -680,6 +685,39 @@ function InfiniteCanvasPage() {
         }
     }, []);
 
+    const isPointInRect = useCallback((clientX: number, clientY: number, rect: Pick<DOMRect, "left" | "top" | "right" | "bottom">, padding = 0) => {
+        return clientX >= rect.left - padding && clientX <= rect.right + padding && clientY >= rect.top - padding && clientY <= rect.bottom + padding;
+    }, []);
+
+    const isPointerInNodeToolbarZone = useCallback(
+        (clientX: number, clientY: number) => {
+            const nodeId = toolbarNodeIdRef.current;
+            if (!nodeId) return false;
+            const node = nodesRef.current.find((item) => item.id === nodeId);
+            if (!node) return false;
+
+            const currentViewport = viewportRef.current;
+            const nodeRect = {
+                left: currentViewport.x + node.position.x * currentViewport.k,
+                top: currentViewport.y + node.position.y * currentViewport.k,
+                right: currentViewport.x + (node.position.x + node.width) * currentViewport.k,
+                bottom: currentViewport.y + (node.position.y + node.height) * currentViewport.k,
+            };
+            const toolbarRect = document.querySelector<HTMLElement>("[data-canvas-node-toolbar]")?.getBoundingClientRect();
+            if (isPointInRect(clientX, clientY, nodeRect, 12)) return true;
+            if (toolbarRect && isPointInRect(clientX, clientY, toolbarRect, 18)) return true;
+            if (!toolbarRect) return false;
+            const bridgeRect = {
+                left: Math.min(nodeRect.left, toolbarRect.left),
+                top: Math.min(nodeRect.top, toolbarRect.top),
+                right: Math.max(nodeRect.right, toolbarRect.right),
+                bottom: Math.max(nodeRect.bottom, toolbarRect.bottom),
+            };
+            return isPointInRect(clientX, clientY, bridgeRect, 10);
+        },
+        [isPointInRect],
+    );
+
     const keepNodeToolbar = useCallback(
         (nodeId: string) => {
             if (nodeDraggingRef.current || nodeImageSettingsOpen || toolbarImageSettingsOpenRef.current) return;
@@ -687,23 +725,40 @@ function InfiniteCanvasPage() {
                 clearTimeout(toolbarHideTimerRef.current);
                 toolbarHideTimerRef.current = null;
             }
+            toolbarNodeIdRef.current = nodeId;
             setToolbarGroupRootId(null);
             setToolbarNodeId((current) => (current === nodeId ? current : nodeId));
         },
         [nodeImageSettingsOpen],
     );
 
-    const closeToolbar = useCallback(() => setToolbarNodeId(null), []);
-
-    const hideNodeToolbar = useCallback(() => {
-        if (toolbarImageSettingsOpenRef.current) return;
-        if (toolbarHideTimerRef.current) clearTimeout(toolbarHideTimerRef.current);
-        toolbarHideTimerRef.current = setTimeout(() => {
-            if (toolbarImageSettingsOpenRef.current) return;
-            setToolbarNodeId(null);
-            toolbarHideTimerRef.current = null;
-        }, 360);
+    const closeToolbar = useCallback(() => {
+        toolbarNodeIdRef.current = null;
+        setToolbarNodeId(null);
     }, []);
+
+    const hideNodeToolbar = useCallback(
+        (delay = 360) => {
+            if (toolbarImageSettingsOpenRef.current) return;
+            if (toolbarHideTimerRef.current) clearTimeout(toolbarHideTimerRef.current);
+            const schedule = (nextDelay: number) => {
+                toolbarHideTimerRef.current = setTimeout(() => {
+                    if (toolbarImageSettingsOpenRef.current) return;
+                    const point = lastPointerPointRef.current;
+                    if (point && isPointerInNodeToolbarZone(point.clientX, point.clientY)) {
+                        toolbarHideTimerRef.current = null;
+                        schedule(180);
+                        return;
+                    }
+                    toolbarNodeIdRef.current = null;
+                    setToolbarNodeId(null);
+                    toolbarHideTimerRef.current = null;
+                }, nextDelay);
+            };
+            schedule(delay);
+        },
+        [isPointerInNodeToolbarZone],
+    );
 
     const keepGroupToolbar = useCallback((rootId: string) => {
         if (nodeDraggingRef.current || groupToolbarMenuOpenRef.current) return;
@@ -1471,6 +1526,7 @@ function InfiniteCanvasPage() {
 
     const handleGlobalMouseMove = useCallback(
         (event: MouseEvent) => {
+            lastPointerPointRef.current = { clientX: event.clientX, clientY: event.clientY };
             if (dragRef.current.isDraggingNode) {
                 applyNodeDragMove(event.clientX, event.clientY);
                 return;
@@ -1522,6 +1578,7 @@ function InfiniteCanvasPage() {
 
     const handleGlobalPointerMove = useCallback(
         (event: PointerEvent) => {
+            lastPointerPointRef.current = { clientX: event.clientX, clientY: event.clientY };
             handleCanvasPointerMove(event as unknown as ReactPointerEvent<HTMLDivElement>);
         },
         [handleCanvasPointerMove],
@@ -1529,6 +1586,7 @@ function InfiniteCanvasPage() {
 
     const handleGlobalMouseUp = useCallback(
         (event: MouseEvent) => {
+            lastPointerPointRef.current = { clientX: event.clientX, clientY: event.clientY };
             finishNodeDrag(event.clientX, event.clientY);
 
             selectionBoxRef.current = null;
@@ -1554,7 +1612,10 @@ function InfiniteCanvasPage() {
     );
 
     useEffect(() => {
-        const handlePointerUp = (event: PointerEvent) => finishNodeDrag(event.clientX, event.clientY);
+        const handlePointerUp = (event: PointerEvent) => {
+            lastPointerPointRef.current = { clientX: event.clientX, clientY: event.clientY };
+            finishNodeDrag(event.clientX, event.clientY);
+        };
         const cancelNodeDrag = () => finishNodeDrag();
         window.addEventListener("mousemove", handleGlobalMouseMove);
         window.addEventListener("mouseup", handleGlobalMouseUp);
@@ -1895,13 +1956,13 @@ function InfiniteCanvasPage() {
                 const content = node.metadata?.content?.trim();
                 if (!content) return message.error("没有可保存的文本");
                 addAsset({ kind: "text", title: node.metadata?.prompt?.slice(0, 24) || "画布文本", coverUrl: "", tags: [], source: "Canvas", data: { content }, metadata: { source: "canvas", nodeId: node.id } });
-                message.success("已加入我的素材");
+                message.success("已加入我的资产");
                 return;
             }
             if (node.type === CanvasNodeType.Video) {
                 if (!node.metadata?.content) return message.error("没有可保存的视频");
                 addAsset({ kind: "video", title: node.metadata?.prompt?.slice(0, 24) || "画布视频", coverUrl: "", tags: [], source: "Canvas", data: { url: node.metadata.content, storageKey: node.metadata.storageKey, width: node.width, height: node.height, bytes: node.metadata.bytes || 0, mimeType: node.metadata.mimeType || "video/mp4" }, metadata: { source: "canvas", nodeId: node.id, prompt: node.metadata?.prompt } });
-                message.success("已加入我的素材");
+                message.success("已加入我的资产");
                 return;
             }
             if (!node.metadata?.content) return message.error("没有可保存的图片");
@@ -1922,7 +1983,7 @@ function InfiniteCanvasPage() {
                 },
                 metadata: { source: "canvas", nodeId: node.id, prompt: node.metadata?.prompt },
             });
-            message.success("已加入我的素材");
+            message.success("已加入我的资产");
         },
         [addAsset, message],
     );
@@ -2348,6 +2409,13 @@ function InfiniteCanvasPage() {
     const handleDrop = useCallback(
         (event: ReactDragEvent<HTMLDivElement>) => {
             event.preventDefault();
+            const droppedAsset = parseAssetDragPayload(event.dataTransfer.getData(CANVAS_ASSET_DRAG_TYPE));
+            if (droppedAsset) {
+                const position = screenToCanvas(event.clientX, event.clientY);
+                assetInsertRef.current?.(droppedAsset, position);
+                return;
+            }
+
             const file = Array.from(event.dataTransfer.files).find((item) => item.type.startsWith("image/") || item.type.startsWith("video/") || isAudioFile(item));
             if (!file) return;
 
@@ -3293,11 +3361,11 @@ function InfiniteCanvasPage() {
     );
 
     const insertAssistantImage = useCallback(
-        async (image: CanvasAssistantImage) => {
+        async (image: CanvasAssistantImage, position?: Position) => {
             const storedImage = image.storageKey ? { url: image.dataUrl, storageKey: image.storageKey, width: 1, height: 1, bytes: 0, mimeType: "image/png" } : await uploadImage(image.dataUrl);
             const meta = storedImage.width === 1 && storedImage.height === 1 ? await readImageMeta(storedImage.url) : storedImage;
             const config = fitNodeSize(meta.width, meta.height);
-            const center = screenToCanvas((containerRef.current?.getBoundingClientRect().left || 0) + size.width / 2, (containerRef.current?.getBoundingClientRect().top || 0) + size.height / 2);
+            const center = position || screenToCanvas((containerRef.current?.getBoundingClientRect().left || 0) + size.width / 2, (containerRef.current?.getBoundingClientRect().top || 0) + size.height / 2);
             const id = `image-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
             const node: CanvasNodeData = {
                 id,
@@ -3318,8 +3386,8 @@ function InfiniteCanvasPage() {
     );
 
     const insertAssistantText = useCallback(
-        (text: string) => {
-            const center = screenToCanvas((containerRef.current?.getBoundingClientRect().left || 0) + size.width / 2, (containerRef.current?.getBoundingClientRect().top || 0) + size.height / 2);
+        (text: string, position?: Position) => {
+            const center = position || screenToCanvas((containerRef.current?.getBoundingClientRect().left || 0) + size.width / 2, (containerRef.current?.getBoundingClientRect().top || 0) + size.height / 2);
             const node = {
                 ...createCanvasNode(CanvasNodeType.Text, center, { content: text, status: NODE_STATUS_SUCCESS }),
                 title: text.slice(0, 32) || "Assistant Text",
@@ -3333,23 +3401,26 @@ function InfiniteCanvasPage() {
     );
 
     const handleAssetInsert = useCallback(
-        (payload: InsertAssetPayload) => {
+        (payload: InsertAssetPayload, position?: Position) => {
             if (payload.kind === "text") {
-                insertAssistantText(payload.content);
+                insertAssistantText(payload.content, position);
             } else if (payload.kind === "video") {
                 const spec = NODE_DEFAULT_SIZE[CanvasNodeType.Video];
-                const center = screenToCanvas((containerRef.current?.getBoundingClientRect().left || 0) + size.width / 2, (containerRef.current?.getBoundingClientRect().top || 0) + size.height / 2);
+                const center = position || screenToCanvas((containerRef.current?.getBoundingClientRect().left || 0) + size.width / 2, (containerRef.current?.getBoundingClientRect().top || 0) + size.height / 2);
                 const id = `video-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
                 const nextSize = fitNodeSize(payload.width || spec.width, payload.height || spec.height, VIDEO_NODE_MAX_WIDTH, VIDEO_NODE_MAX_HEIGHT);
                 setNodes((prev) => [...prev, { id, type: CanvasNodeType.Video, title: payload.title, position: { x: center.x - nextSize.width / 2, y: center.y - nextSize.height / 2 }, width: nextSize.width, height: nextSize.height, metadata: { content: payload.url, storageKey: payload.storageKey, status: NODE_STATUS_SUCCESS, naturalWidth: payload.width, naturalHeight: payload.height } }]);
                 setSelectedNodeIds(new Set([id]));
             } else {
-                insertAssistantImage({ id: `asset-${Date.now()}`, prompt: payload.prompt || payload.title, dataUrl: payload.dataUrl, storageKey: payload.storageKey });
+                insertAssistantImage({ id: `asset-${Date.now()}`, prompt: payload.prompt || payload.title, dataUrl: payload.dataUrl, storageKey: payload.storageKey }, position);
             }
-            setAssetPickerOpen(false);
         },
         [insertAssistantImage, insertAssistantText, screenToCanvas, size.height, size.width],
     );
+
+    useLayoutEffect(() => {
+        assetInsertRef.current = handleAssetInsert;
+    }, [handleAssetInsert]);
 
     const assistantOpen = assistantMounted && !assistantCollapsed;
     const openAgent = (mode: CanvasAgentMode = agentMode) => {
@@ -3646,7 +3717,7 @@ function InfiniteCanvasPage() {
                     onBackgroundModeChange={setBackgroundMode}
                     onShowImageInfoChange={setShowImageInfo}
                     onOpenMyAssets={() => {
-                        setAssetPickerOpen(true);
+                        setAssetDrawerOpen((value) => !value);
                     }}
                 />
 
@@ -3854,7 +3925,7 @@ function InfiniteCanvasPage() {
                     <p className="text-sm opacity-60">这会删除当前画布上的所有节点和连线。</p>
                 </Modal>
 
-                <AssetPickerModal open={assetPickerOpen} onInsert={handleAssetInsert} onClose={() => setAssetPickerOpen(false)} />
+                <CanvasAssetDrawer open={assetDrawerOpen} onInsert={handleAssetInsert} onClose={() => setAssetDrawerOpen(false)} />
                 {codexCompactAgent && !assistantMounted ? <CanvasLocalAgentPanel headless snapshot={agentSnapshot} canUndoOps={Boolean(agentUndoSnapshot)} onApplyOps={applyAgentOps} onUndoOps={undoAgentOps} autoConnect={codexAutoConnect} /> : null}
             </section>
             {assistantMounted ? (

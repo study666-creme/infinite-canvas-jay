@@ -28,27 +28,39 @@ export function AssetFolderBar({ value, onChange, className = "" }: AssetFolderB
     const createFolder = () => {
         const name = newFolderName.trim();
         if (!name) {
-            message.warning("请输入文件夹名称");
+            message.warning("请输入分类名称");
+            return;
+        }
+        const existing = folders.find((folder) => folder.name.trim().toLowerCase() === name.toLowerCase());
+        if (existing) {
+            setCreateOpen(false);
+            setNewFolderName("");
+            onChange(existing.id);
+            message.info("分类已存在，已切换到该分类");
             return;
         }
         const id = addFolder(name);
         setCreateOpen(false);
         setNewFolderName("");
         onChange(id);
-        message.success("文件夹已创建");
+        message.success("分类已创建");
     };
 
     const saveRename = () => {
         if (!editingFolder) return;
         const name = editingName.trim();
         if (!name) {
-            message.warning("请输入文件夹名称");
+            message.warning("请输入分类名称");
+            return;
+        }
+        if (folders.some((folder) => folder.id !== editingFolder.id && folder.name.trim().toLowerCase() === name.toLowerCase())) {
+            message.warning("分类名称已存在");
             return;
         }
         renameFolder(editingFolder.id, name);
         setEditingFolder(null);
         setEditingName("");
-        message.success("文件夹已重命名");
+        message.success("分类已重命名");
     };
 
     return (
@@ -69,7 +81,7 @@ export function AssetFolderBar({ value, onChange, className = "" }: AssetFolderB
                     >
                         <Pencil className="size-3" />
                     </button>
-                    <Popconfirm title={`删除文件夹「${folder.name}」？素材将移至未分类`} okText="删除" cancelText="取消" onConfirm={() => removeFolder(folder.id)}>
+                    <Popconfirm title={`删除分类「${folder.name}」？资产将移至未分类`} okText="删除" cancelText="取消" onConfirm={() => removeFolder(folder.id)}>
                         <button
                             type="button"
                             className="grid size-6 place-items-center rounded-full text-stone-400 opacity-0 transition hover:bg-red-50 hover:text-red-500 group-hover:opacity-100 dark:hover:bg-red-950/30"
@@ -81,14 +93,14 @@ export function AssetFolderBar({ value, onChange, className = "" }: AssetFolderB
                 </div>
             ))}
             <Button size="small" icon={<Plus className="size-3.5" />} onClick={() => setCreateOpen(true)}>
-                新建文件夹
+                新建分类
             </Button>
 
-            <Modal title="新建文件夹" open={createOpen} onCancel={() => setCreateOpen(false)} onOk={createFolder} okText="创建" cancelText="取消" destroyOnHidden>
-                <Input value={newFolderName} placeholder="例如：角色参考、场景素材" onChange={(event) => setNewFolderName(event.target.value)} onPressEnter={createFolder} />
+            <Modal title="新建资产分类" open={createOpen} onCancel={() => setCreateOpen(false)} onOk={createFolder} okText="创建" cancelText="取消" destroyOnHidden>
+                <Input value={newFolderName} placeholder="例如：角色参考、场景资产" onChange={(event) => setNewFolderName(event.target.value)} onPressEnter={createFolder} />
             </Modal>
 
-            <Modal title="重命名文件夹" open={Boolean(editingFolder)} onCancel={() => setEditingFolder(null)} onOk={saveRename} okText="保存" cancelText="取消" destroyOnHidden>
+            <Modal title="重命名分类" open={Boolean(editingFolder)} onCancel={() => setEditingFolder(null)} onOk={saveRename} okText="保存" cancelText="取消" destroyOnHidden>
                 <Input value={editingName} onChange={(event) => setEditingName(event.target.value)} onPressEnter={saveRename} />
             </Modal>
         </div>

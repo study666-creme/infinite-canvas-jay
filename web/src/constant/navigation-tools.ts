@@ -23,7 +23,7 @@ export const navigationTools = [
     },
     {
         slug: "assets",
-        label: "我的素材",
+        label: "我的资产",
         icon: Images,
     },
 ] as const;

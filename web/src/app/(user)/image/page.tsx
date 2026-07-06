@@ -214,7 +214,7 @@ export default function ImagePage() {
             data: { dataUrl: stored.url, storageKey: stored.storageKey, width: stored.width, height: stored.height, bytes: stored.bytes, mimeType: stored.mimeType },
             metadata: { source: "image-page", prompt },
         });
-        message.success("已加入我的素材");
+        message.success("已加入我的资产");
     };
 
     const insertPickedAsset = async (payload: InsertAssetPayload) => {
@@ -348,7 +348,7 @@ export default function ImagePage() {
                                             查看提示词库
                                         </Button>
                                         <Button size="small" icon={<FolderPlus className="size-3.5" />} onClick={() => setAssetPickerOpen(true)}>
-                                            查看我的素材
+                                            查看我的资产
                                         </Button>
                                     </div>
                                 </div>

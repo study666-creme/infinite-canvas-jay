@@ -183,7 +183,11 @@ export function PromptHubCardsTab({ compact = false }: { compact?: boolean } = {
                     data: { content: prepared.prompt },
                     metadata: { source: "prompt-hub", promptHubCardId: card.id, group: card.group || null },
                 });
-                message.success("已添加到我的资产");
+                if (prepared.imageUnavailable) {
+                    message.warning("图片下载失败，已先保存提示词到我的资产");
+                } else {
+                    message.success("已添加到我的资产");
+                }
                 return;
             }
 
@@ -291,7 +295,7 @@ export function PromptHubCardsTab({ compact = false }: { compact?: boolean } = {
                                 cover={card.thumbUrl}
                                 promptPreview={card.prompt}
                                 tags={card.tags}
-                                textOnly={card.hasImage === false || !String(card.imageRef || "").trim()}
+                                textOnly={card.hasImage === false || (!String(card.imageRef || "").trim() && !String(card.thumbUrl || "").trim())}
                                 loading={savingId === card.id}
                                 saved={savedCardIds.has(card.id)}
                                 onClick={() => void saveCardToAssets(card)}

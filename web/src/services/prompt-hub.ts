@@ -33,6 +33,8 @@ export type PromptHubCardListItem = {
     prompt: string;
     imageRef: string;
     thumbUrl: string;
+    imageUrl?: string;
+    sourceUrl?: string;
     hasImage?: boolean;
     tags?: string[];
     group?: string | null;
@@ -41,7 +43,7 @@ export type PromptHubCardListItem = {
 
 export type PreparedPromptHubCard =
     | { kind: "image"; blob: Blob; prompt: string; title: string }
-    | { kind: "text"; prompt: string; title: string };
+    | { kind: "text"; prompt: string; title: string; imageUnavailable?: boolean };
 
 export type PromptHubCardListResult = {
     cards: PromptHubCardListItem[];
@@ -338,24 +340,99 @@ export async function signPromptHubImageRef(
     return String(data.data.url);
 }
 
+function normalizePromptHubMediaUrl(value: string, apiBase: string) {
+    const raw = value.trim();
+    if (!raw) return "";
+    if (/^(?:https?:|blob:|data:)/i.test(raw)) return raw;
+    if (raw.startsWith("/")) return new URL(raw, apiBase).toString();
+    return "";
+}
+
+function cardStringField(card: PromptHubCardListItem, key: string) {
+    const value = (card as unknown as Record<string, unknown>)[key];
+    return typeof value === "string" ? value.trim() : "";
+}
+
+function collectPromptHubCardImageCandidates(card: PromptHubCardListItem, apiBase: string) {
+    const fields = [
+        card.imageUrl,
+        cardStringField(card, "image_url"),
+        cardStringField(card, "fullUrl"),
+        cardStringField(card, "full_url"),
+        card.sourceUrl,
+        cardStringField(card, "source_url"),
+        cardStringField(card, "url"),
+        card.thumbUrl,
+        cardStringField(card, "thumbnailUrl"),
+        cardStringField(card, "thumbnail_url"),
+        card.imageRef,
+    ];
+    const urls: string[] = [];
+    fields.forEach((field) => {
+        const url = normalizePromptHubMediaUrl(String(field || ""), apiBase);
+        if (url && !urls.includes(url)) urls.push(url);
+    });
+    return urls;
+}
+
+async function fetchPromptHubImageBlob(url: string) {
+    if (url.startsWith("data:")) {
+        const response = await fetch(url);
+        return response.blob();
+    }
+
+    let directError: Error | null = null;
+    try {
+        const response = await fetch(url, { mode: "cors", credentials: "omit" });
+        if (response.ok) return await response.blob();
+        directError = new Error(`下载卡片图片失败 (${response.status})`);
+    } catch (error) {
+        directError = error instanceof Error ? error : new Error("下载卡片图片失败");
+    }
+
+    const proxyResponse = await fetch(`/api/prompt-hub-media?url=${encodeURIComponent(url)}`);
+    if (proxyResponse.ok) return proxyResponse.blob();
+    throw directError || new Error(`下载卡片图片失败 (${proxyResponse.status})`);
+}
+
 export async function preparePromptHubCardForCanvas(
     card: PromptHubCardListItem,
     session: PromptHubSession,
     opts: { apiBase?: string } = {},
 ): Promise<PreparedPromptHubCard> {
+    const apiBase = normalizeApiBase(opts.apiBase || PROMPT_HUB_DEFAULTS.apiBase);
     const prompt = String(card.prompt || card.title || "").trim();
     const title = String(card.title || prompt.slice(0, 32) || "Prompt Hub 卡片").trim();
     const imageRef = String(card.imageRef || "").trim();
-    const hasImage = card.hasImage !== false && Boolean(imageRef);
+    const directCandidates = collectPromptHubCardImageCandidates(card, apiBase);
+    const hasImage = card.hasImage !== false && (Boolean(imageRef) || directCandidates.length > 0);
     if (!hasImage) {
         if (!prompt) throw new Error("该卡片没有提示词");
         return { kind: "text", prompt, title };
     }
-    const imageUrl = await signPromptHubImageRef(imageRef, session, { ...opts, variant: "full" });
-    const res = await fetch(imageUrl, { mode: "cors", credentials: "omit" });
-    if (!res.ok) throw new Error("下载卡片图片失败");
-    const blob = await res.blob();
-    return { kind: "image", blob, prompt, title };
+    const candidates: string[] = [];
+    if (!normalizePromptHubMediaUrl(imageRef, apiBase)) {
+        try {
+            candidates.push(await signPromptHubImageRef(imageRef, session, { ...opts, variant: "full" }));
+        } catch {
+            // Older cards may carry a non-signable ref; the thumbnail/direct URL fallback below still works.
+        }
+    }
+    directCandidates.forEach((url) => {
+        if (!candidates.includes(url)) candidates.push(url);
+    });
+
+    for (const url of candidates) {
+        try {
+            const blob = await fetchPromptHubImageBlob(url);
+            if (blob.size > 0) return { kind: "image", blob, prompt, title };
+        } catch {
+            // Try the next candidate.
+        }
+    }
+
+    if (prompt) return { kind: "text", prompt, title, imageUnavailable: true };
+    throw new Error("图片签名或下载失败");
 }
 
 export async function savePromptHubQuickCard(

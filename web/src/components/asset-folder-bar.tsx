@@ -36,14 +36,14 @@ export function AssetFolderBar({ value, onChange, className = "" }: AssetFolderB
             setCreateOpen(false);
             setNewFolderName("");
             onChange(existing.id);
-            message.info("分类已存在，已切换到该分类");
+            message.info(`分类「${existing.name}」已存在，已切换到该分类`);
             return;
         }
         const id = addFolder(name);
         setCreateOpen(false);
         setNewFolderName("");
         onChange(id);
-        message.success("分类已创建");
+        message.success(`分类「${name}」已创建，已切换到该分类`);
     };
 
     const saveRename = () => {
@@ -111,7 +111,11 @@ function FolderChip({ active, label, onClick }: { active: boolean; label: string
     return (
         <button
             type="button"
-            className={`inline-flex h-8 items-center gap-1.5 rounded-full border px-3 text-sm transition ${active ? "border-stone-900 bg-stone-900 text-white dark:border-stone-100 dark:bg-stone-100 dark:text-stone-900" : "border-stone-200 bg-white text-stone-600 hover:border-stone-400 dark:border-stone-700 dark:bg-stone-900 dark:text-stone-300 dark:hover:border-stone-500"}`}
+            className={`inline-flex h-8 items-center gap-1.5 rounded-full border px-3 text-sm transition ${
+                active
+                    ? "border-cyan-300 bg-cyan-300 text-stone-950 shadow-sm shadow-cyan-950/15"
+                    : "border-stone-200 bg-white text-stone-600 hover:border-stone-400 dark:border-stone-700 dark:bg-stone-900 dark:text-stone-300 dark:hover:border-stone-500"
+            }`}
             onClick={onClick}
         >
             <Folder className="size-3.5" />

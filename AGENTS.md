@@ -91,3 +91,9 @@
 - 当前画布项目和“我的素材”主要保存在浏览器本地，不要在文档中误写成已支持云同步。
 - 当前 AI API Key 存在浏览器本地，并由前端直接请求 OpenAI 兼容接口；涉及安全说明时要写清楚。
 - Docker 静态资源路径目前仍是待办项，文档中不要过度承诺生产部署已经完全验证。
+
+## AI 接手入口
+
+- 后续 AI 接手画布、Prompt Hub 联动、生图历史、首屏加载性能相关任务时，先阅读 `docs/AI-HANDOFF.md`，再开始改代码。
+- 修改 Prompt Hub 画布生图、生成记录、媒体持久化或首屏加载逻辑后，同步更新 `docs/AI-HANDOFF.md`、`docs/content/docs/progress/pending-test.mdx` 和 `docs/content/docs/progress/todo.mdx`。
+- 不要把聊天里出现过的用户账号、密码、密钥写进文档、测试脚本或提交信息。

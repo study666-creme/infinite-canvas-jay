@@ -6,31 +6,30 @@ import { nanoid } from "nanoid";
 
 
 
+import { getDataUrlByteSize } from "@/lib/image-utils";
 import { imageToDataUrl } from "@/services/image-storage";
 
 import type { ReferenceImage } from "@/types/image";
 
 import {
-
     checkPromptHubStatus,
-
+    collectPromptHubJobImageUrls,
     fetchPromptHubGenerationCost,
-
     fetchPromptHubImageModels,
-
     pollPromptHubGenerationJob,
-
     PROMPT_HUB_DEFAULTS,
-
     submitPromptHubGeneration,
-
+    type PromptHubGenerationJob,
     type PromptHubSession,
-
 } from "@/services/prompt-hub";
 
 
 
 export type PromptHubCanvasImageItem = { id: string; dataUrl: string };
+
+
+
+export type PromptHubCanvasGenerationStage = { progress: number; stage: string };
 
 
 
@@ -54,6 +53,22 @@ export type PromptHubCanvasGenerateOpts = {
 
     signal?: AbortSignal;
 
+    onStage?: (stage: PromptHubCanvasGenerationStage) => void;
+
+};
+
+
+
+const REF_MAX_DATA_URL_CHARS = 5_700_000;
+const REF_TARGET_BYTES = 4 * 1024 * 1024;
+const REF_MAX_SIDE = 2048;
+
+type PromptHubApiErrorPayload = {
+    message?: unknown;
+    msg?: unknown;
+    code?: unknown;
+    error?: unknown;
+    details?: unknown;
 };
 
 
@@ -80,18 +95,226 @@ function formatFetchError(error: unknown, stage: string) {
 
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+    return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
+
+function stringField(value: unknown) {
+    return typeof value === "string" ? value.trim() : "";
+}
+
+function compactJson(value: unknown) {
+    if (!value) return "";
+    if (typeof value === "string") return value.trim();
+    try {
+        return JSON.stringify(value).slice(0, 300);
+    } catch {
+        return "";
+    }
+}
+
+function promptHubErrorMessage(payload: PromptHubApiErrorPayload | unknown, status: number) {
+    if (!isRecord(payload)) return `HTTP ${status}`;
+    const error = payload.error;
+    const details = isRecord(error) ? error.details : payload.details;
+    const message = stringField(payload.message) || stringField(payload.msg) || (isRecord(error) ? stringField(error.message) : stringField(error)) || compactJson(details) || stringField(payload.code);
+    return message || `HTTP ${status}`;
+}
 
 
-async function referenceImagesToRefUrls(references: ReferenceImage[]) {
+
+function loadImageElement(src: string) {
+
+    return new Promise<HTMLImageElement>((resolve, reject) => {
+
+        const img = new Image();
+
+        img.onload = () => resolve(img);
+
+        img.onerror = () => reject(new Error("参考图读取失败"));
+
+        img.src = src;
+
+    });
+
+}
+
+
+
+function canvasToJpegDataUrl(canvas: HTMLCanvasElement, quality: number) {
+
+    return new Promise<string>((resolve, reject) => {
+
+        canvas.toBlob((blob) => {
+
+            if (!blob) {
+
+                reject(new Error("参考图压缩失败"));
+
+                return;
+
+            }
+
+            blobToDataUrl(blob).then(resolve, reject);
+
+        }, "image/jpeg", quality);
+
+    });
+
+}
+
+
+
+function refDataUrlFitsApi(dataUrl: string) {
+
+    return dataUrl.length <= REF_MAX_DATA_URL_CHARS && getDataUrlByteSize(dataUrl) <= REF_TARGET_BYTES;
+
+}
+
+
+
+async function compressRefDataUrlForPromptHub(dataUrl: string) {
+
+    if (refDataUrlFitsApi(dataUrl)) return dataUrl;
+
+    const img = await loadImageElement(dataUrl);
+
+    const sourceW = img.naturalWidth || img.width;
+
+    const sourceH = img.naturalHeight || img.height;
+
+    if (!sourceW || !sourceH) throw new Error("参考图尺寸无效");
+
+    let maxSide = Math.min(REF_MAX_SIDE, Math.max(sourceW, sourceH));
+
+    while (maxSide >= 960) {
+
+        const scale = Math.min(1, maxSide / Math.max(sourceW, sourceH));
+
+        const w = Math.max(1, Math.round(sourceW * scale));
+
+        const h = Math.max(1, Math.round(sourceH * scale));
+
+        const canvas = document.createElement("canvas");
+
+        canvas.width = w;
+
+        canvas.height = h;
+
+        const ctx = canvas.getContext("2d");
+
+        if (!ctx) throw new Error("参考图处理失败");
+
+        ctx.fillStyle = "#fff";
+
+        ctx.fillRect(0, 0, w, h);
+
+        ctx.drawImage(img, 0, 0, w, h);
+
+        for (const quality of [0.88, 0.8, 0.72, 0.64, 0.56]) {
+
+            const next = await canvasToJpegDataUrl(canvas, quality);
+
+            if (refDataUrlFitsApi(next)) return next;
+
+        }
+
+        maxSide = Math.floor(maxSide * 0.78);
+
+    }
+
+    throw new Error("参考图过大，压缩后仍超过卡藏接口限制，请换一张较小的图");
+
+}
+
+function dataUrlMime(dataUrl: string) {
+    return dataUrl.match(/^data:([^;]+);base64,/i)?.[1]?.toLowerCase() || "image/jpeg";
+}
+
+function imageExtForMime(mime: string) {
+    if (mime.includes("png")) return "png";
+    if (mime.includes("webp")) return "webp";
+    return "jpg";
+}
+
+function base64UrlDecode(value: string) {
+    const normalized = value.replace(/-/g, "+").replace(/_/g, "/");
+    const padded = normalized.padEnd(Math.ceil(normalized.length / 4) * 4, "=");
+    const binary = atob(padded);
+    const bytes = new Uint8Array(binary.length);
+    for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
+    return new TextDecoder().decode(bytes);
+}
+
+function promptHubUserId(session: PromptHubSession) {
+    const explicit = String(session.user?.id || "").trim();
+    if (explicit) return explicit;
+    try {
+        const payload = JSON.parse(base64UrlDecode(String(session.access_token || "").split(".")[1] || ""));
+        return typeof payload?.sub === "string" ? payload.sub.trim() : "";
+    } catch {
+        return "";
+    }
+}
+
+async function dataUrlToBlob(dataUrl: string) {
+    const res = await fetch(dataUrl);
+    if (!res.ok) throw new Error("参考图读取失败");
+    return res.blob();
+}
+
+async function uploadPromptHubReferenceImage(session: PromptHubSession, dataUrl: string, opts: { apiBase?: string; signal?: AbortSignal }) {
+    const userId = promptHubUserId(session);
+    if (!userId) throw new Error("参考图上传失败：Prompt Hub 登录信息缺少用户 ID，请重新登录 Prompt Hub");
+
+    const apiBase = normalizeApiBase(opts.apiBase);
+    const mime = dataUrlMime(dataUrl);
+    const ext = imageExtForMime(mime);
+    const blob = await dataUrlToBlob(dataUrl);
+    const path = `${userId}/imagegen/canvas/${nanoid()}.${ext}`;
+    const uploadUrl = `${apiBase}/api/v1/media/upload?path=${encodeURIComponent(path)}`;
+    const res = await fetch(uploadUrl, {
+        method: "POST",
+        headers: {
+            Authorization: `Bearer ${session.access_token}`,
+            "Content-Type": mime,
+        },
+        body: blob,
+        signal: opts.signal,
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || data.ok === false) {
+        const message = promptHubErrorMessage(data, res.status);
+        throw new Error(`参考图上传失败：${message}`);
+    }
+    const ref = data?.data?.ref;
+    if (typeof ref !== "string" || !ref.trim()) throw new Error("参考图上传失败：Prompt Hub 未返回图片引用");
+    return ref.trim();
+}
+
+
+
+async function referenceImagesToRefUrls(session: PromptHubSession, references: ReferenceImage[], opts: { apiBase?: string; signal?: AbortSignal; onStage?: (stage: PromptHubCanvasGenerationStage) => void }) {
 
     const urls: string[] = [];
+    const selectedReferences = references.slice(0, 8);
 
-    for (const image of references.slice(0, 8)) {
+    for (let index = 0; index < selectedReferences.length; index += 1) {
+        const image = selectedReferences[index];
+        opts.onStage?.({ progress: 12 + Math.round((index / Math.max(selectedReferences.length, 1)) * 14), stage: `上传参考图 ${index + 1}/${selectedReferences.length}` });
 
         const dataUrl = await imageToDataUrl(image);
 
-        if (dataUrl) urls.push(dataUrl);
+        if (dataUrl) {
+            const compressed = await compressRefDataUrlForPromptHub(dataUrl);
+            urls.push(await uploadPromptHubReferenceImage(session, compressed, opts));
+            opts.onStage?.({ progress: 12 + Math.round(((index + 1) / Math.max(selectedReferences.length, 1)) * 14), stage: `参考图已上传 ${urls.length}/${selectedReferences.length}` });
+        }
 
+    }
+
+    if (selectedReferences.length && !urls.length) {
+        throw new Error("参考图上传失败：没有读到可上传的图片，请检查上游图片节点是否仍存在");
     }
 
     return urls;
@@ -286,114 +509,149 @@ async function downloadJobImageAsDataUrl(
 
 
 
-async function runOnePromptHubJob(opts: PromptHubCanvasGenerateOpts, refImageUrls?: string[]) {
-
-    const submitted = await submitPromptHubGeneration(opts.session, {
-
-        prompt: opts.prompt,
-
-        model: opts.model,
-
-        resolution: opts.resolution,
-
-        quality: opts.quality,
-
-        refImageUrls,
-
-        apiBase: opts.apiBase,
-
-        signal: opts.signal,
-
-    });
-
-    if (!submitted?.jobId) throw new Error("卡藏未返回任务 ID");
-
-    const job = await pollPromptHubGenerationJob(opts.session, submitted.jobId, {
-
-        apiBase: opts.apiBase,
-
-        signal: opts.signal,
-
-    });
-
-    const dataUrl = await downloadJobImageAsDataUrl(opts.session, submitted.jobId, {
-
-        apiBase: opts.apiBase,
-
-        signal: opts.signal,
-
-        fallbackUrl: job.imageUrl,
-
-    });
-
-    return {
-
-        items: [{ id: nanoid(), dataUrl }] satisfies PromptHubCanvasImageItem[],
-
-        creditsRemaining: job.creditsRemaining ?? submitted.creditsRemaining,
-
-    };
-
+async function downloadJobImageByIndex(
+    session: PromptHubSession,
+    jobId: string,
+    index: number,
+    opts: { apiBase?: string; signal?: AbortSignal; fallbackUrl?: string | null },
+) {
+    const apiBase = normalizeApiBase(opts.apiBase);
+    const suffix = index > 0 ? `?index=${index}` : "";
+    let lastError: unknown;
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+        try {
+            const res = await fetch(`${apiBase}/api/v1/generate/jobs/${encodeURIComponent(jobId)}/image${suffix}`, {
+                headers: { Authorization: `Bearer ${session.access_token}` },
+                signal: opts.signal,
+            });
+            if (!res.ok) {
+                const hint = res.status === 404 ? "（图片可能尚未归档到 R2）" : "";
+                throw new Error(`下载卡藏生成图失败 (${res.status})${hint}`);
+            }
+            return await blobToDataUrl(await res.blob());
+        } catch (error) {
+            lastError = error;
+            if (opts.signal?.aborted) throw error;
+        }
+    }
+    const fallback = String(opts.fallbackUrl || "").trim();
+    if (fallback.startsWith("http")) {
+        return downloadImageAsDataUrl(fallback, opts.signal);
+    }
+    throw new Error(formatFetchError(lastError, `下载第 ${index + 1} 张`));
 }
 
+async function downloadAllJobImages(
+    session: PromptHubSession,
+    jobId: string,
+    job: PromptHubGenerationJob,
+    opts: { apiBase?: string; signal?: AbortSignal; onStage?: (stage: PromptHubCanvasGenerationStage) => void },
+) {
+    const urls = collectPromptHubJobImageUrls(job);
+    if (!urls.length) throw new Error("卡藏接口没有返回图片");
 
+    const items: PromptHubCanvasImageItem[] = [];
+    const errors: string[] = [];
+    for (let index = 0; index < urls.length; index += 1) {
+        if (opts.signal?.aborted) throw new Error("已取消生成");
+        opts.onStage?.({ progress: Math.min(94, 84 + Math.round((index / Math.max(urls.length, 1)) * 10)), stage: `下载结果 ${index + 1}/${urls.length}` });
+        try {
+            const dataUrl = await downloadJobImageByIndex(session, jobId, index, {
+                apiBase: opts.apiBase,
+                signal: opts.signal,
+                fallbackUrl: urls[index],
+            });
+            items.push({ id: nanoid(), dataUrl });
+            opts.onStage?.({ progress: Math.min(96, 84 + Math.round(((index + 1) / Math.max(urls.length, 1)) * 10)), stage: `结果已下载 ${items.length}/${urls.length}` });
+        } catch (error) {
+            errors.push(formatFetchError(error, `第 ${index + 1} 张`));
+        }
+    }
+    if (!items.length) {
+        throw new Error(errors.join("；") || "卡藏接口没有返回图片");
+    }
+    return items;
+}
+
+async function runOnePromptHubJob(opts: PromptHubCanvasGenerateOpts, refImageUrls?: string[], jobCount = 1) {
+    opts.onStage?.({ progress: 30, stage: refImageUrls?.length ? "提交参考图生成任务" : "提交生成任务" });
+    const submitted = await submitPromptHubGeneration(opts.session, {
+        prompt: opts.prompt,
+        model: opts.model,
+        resolution: opts.resolution,
+        quality: opts.quality,
+        count: jobCount > 1 ? jobCount : undefined,
+        refImageUrls,
+        apiBase: opts.apiBase,
+        signal: opts.signal,
+    });
+    if (!submitted?.jobId) throw new Error("卡藏未返回任务 ID");
+    opts.onStage?.({ progress: 36, stage: "已提交上游，等待结果" });
+    const job = await pollPromptHubGenerationJob(opts.session, submitted.jobId, {
+        apiBase: opts.apiBase,
+        signal: opts.signal,
+        onPoll: (attempt, currentJob) => {
+            const statusText = currentJob?.status === "completed" ? "上游已完成" : currentJob?.status === "failed" ? "上游生成失败" : "上游生成中";
+            opts.onStage?.({ progress: Math.min(82, 38 + attempt * 2), stage: statusText });
+        },
+    });
+    opts.onStage?.({ progress: 84, stage: "下载生成结果" });
+    const items = await downloadAllJobImages(opts.session, submitted.jobId, job, {
+        apiBase: opts.apiBase,
+        signal: opts.signal,
+        onStage: opts.onStage,
+    });
+    return {
+        items,
+        creditsRemaining: job.creditsRemaining ?? submitted.creditsRemaining,
+    };
+}
 
 /** 画布生图：走卡藏 /api/v1/generate，积分在服务端扣除 */
-
 export async function requestPromptHubCanvasImages(opts: PromptHubCanvasGenerateOpts): Promise<PromptHubCanvasImageItem[]> {
-
     const count = Math.max(1, Math.min(8, Math.floor(opts.count || 1)));
-
+    opts.onStage?.({ progress: 8, stage: opts.referenceImages?.length ? "准备参考图" : "准备提交任务" });
     const refImageUrls = opts.referenceImages?.length
-
-        ? await referenceImagesToRefUrls(opts.referenceImages)
-
+        ? await referenceImagesToRefUrls(opts.session, opts.referenceImages, { apiBase: opts.apiBase, signal: opts.signal, onStage: opts.onStage })
         : undefined;
 
-
-
     if (count === 1) {
-
         const { items } = await runOnePromptHubJob(opts, refImageUrls);
-
         if (!items.length) throw new Error("卡藏接口没有返回图片");
-
         return items;
-
     }
 
-
-
     const merged: PromptHubCanvasImageItem[] = [];
-
     const errors: string[] = [];
 
-    for (let i = 0; i < count; i += 1) {
+    try {
+        const batch = await runOnePromptHubJob(opts, refImageUrls, count);
+        merged.push(...batch.items);
+    } catch (error) {
+        errors.push(formatFetchError(error, "批量生成"));
+    }
 
+    while (merged.length < count) {
         if (opts.signal?.aborted) throw new Error("已取消生成");
-
+        if (errors.length >= count && merged.length === 0) break;
+        if (errors.length >= count * 2) break;
         try {
-
             const { items } = await runOnePromptHubJob(opts, refImageUrls);
-
+            if (!items.length) {
+                errors.push("接口返回空结果");
+                continue;
+            }
             merged.push(...items);
-
         } catch (error) {
-
-            errors.push(formatFetchError(error, `第 ${i + 1} 张`));
-
+            errors.push(formatFetchError(error, `第 ${merged.length + 1} 张`));
         }
-
     }
 
     if (!merged.length) {
-
         throw new Error(errors.join("；") || "卡藏接口没有返回图片");
-
     }
 
     return merged.slice(0, count);
-
 }
 
 

@@ -257,9 +257,9 @@ function parseImagePayload(payload: ImageApiResponse) {
 
 function readAxiosError(error: unknown, fallback: string) {
     if (axios.isCancel(error)) return "请求已取消";
-    if (axios.isAxiosError<{ error?: { message?: string }; msg?: string; code?: number }>(error)) {
+    if (axios.isAxiosError(error)) {
         const responseData = error.response?.data;
-        return responseData?.msg || responseData?.error?.message || readStatusError(error.response?.status, fallback);
+        return responseErrorMessage(responseData) || readStatusError(error.response?.status, fallback);
     }
     if (error instanceof DOMException && error.name === "AbortError") return "请求已取消";
     return error instanceof Error ? error.message : fallback;
@@ -368,10 +368,11 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function responseErrorMessage(value: unknown) {
     if (!isRecord(value)) return "";
-    const error = isRecord(value.error) ? value.error : undefined;
+    const rawError = value.error;
+    const error = isRecord(rawError) ? rawError : undefined;
     const response = isRecord(value.response) ? value.response : undefined;
     const responseError = response && isRecord(response.error) ? response.error : undefined;
-    return stringValue(value.msg) || stringValue(error?.message) || stringValue(responseError?.message);
+    return stringValue(value.msg) || stringValue(value.message) || stringValue(error?.message) || stringValue(error?.details) || stringValue(rawError) || stringValue(responseError?.message) || stringValue(value.code);
 }
 
 function stringValue(value: unknown) {

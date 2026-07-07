@@ -330,27 +330,28 @@ export default function VideoPage() {
         }
     };
 
-    const previewGenerationLog = (log: GenerationLog) => {
-        setPreviewLog(log);
+    const previewGenerationLog = async (log: GenerationLog) => {
+        const hydratedLog = await normalizeLog(log, "full");
+        setPreviewLog(hydratedLog);
         setLogsOpen(false);
-        setPrompt(log.prompt);
-        setReferences(log.references || []);
-        setVideoReferences(log.videoReferences || []);
-        setAudioReferences(log.audioReferences || []);
-        if (log.config.videoModel || log.model) updateConfig("videoModel", log.config.videoModel || log.model);
-        if (log.config.size) updateConfig("size", log.config.size);
-        if (log.config.vquality) updateConfig("vquality", log.config.vquality);
-        if (log.config.videoSeconds) updateConfig("videoSeconds", log.config.videoSeconds);
-        if (log.config.videoGenerateAudio) updateConfig("videoGenerateAudio", log.config.videoGenerateAudio);
-        if (log.config.videoWatermark) updateConfig("videoWatermark", log.config.videoWatermark);
-        setResults(log.status === "生成中" ? [{ id: log.id, status: "pending" }] : log.video ? [{ id: log.video.id, status: "success", video: log.video }] : [{ id: log.id, status: "failed", error: log.error || "生成失败" }]);
+        setPrompt(hydratedLog.prompt);
+        setReferences(hydratedLog.references || []);
+        setVideoReferences(hydratedLog.videoReferences || []);
+        setAudioReferences(hydratedLog.audioReferences || []);
+        if (hydratedLog.config.videoModel || hydratedLog.model) updateConfig("videoModel", hydratedLog.config.videoModel || hydratedLog.model);
+        if (hydratedLog.config.size) updateConfig("size", hydratedLog.config.size);
+        if (hydratedLog.config.vquality) updateConfig("vquality", hydratedLog.config.vquality);
+        if (hydratedLog.config.videoSeconds) updateConfig("videoSeconds", hydratedLog.config.videoSeconds);
+        if (hydratedLog.config.videoGenerateAudio) updateConfig("videoGenerateAudio", hydratedLog.config.videoGenerateAudio);
+        if (hydratedLog.config.videoWatermark) updateConfig("videoWatermark", hydratedLog.config.videoWatermark);
+        setResults(hydratedLog.status === "生成中" ? [{ id: hydratedLog.id, status: "pending" }] : hydratedLog.video ? [{ id: hydratedLog.video.id, status: "success", video: hydratedLog.video }] : [{ id: hydratedLog.id, status: "failed", error: hydratedLog.error || "生成失败" }]);
     };
 
     return (
         <div className="flex h-full flex-col overflow-hidden bg-stone-50 text-stone-900 dark:bg-stone-950 dark:text-stone-100">
             <main className="grid min-h-0 flex-1 grid-cols-1 gap-3 overflow-y-auto p-3 lg:grid-cols-[300px_minmax(0,1fr)] lg:overflow-hidden xl:grid-cols-[320px_minmax(0,1fr)]">
                 <aside className="thin-scrollbar hidden min-h-0 overflow-y-auto rounded-lg border border-stone-200 bg-card p-4 shadow-sm dark:border-stone-800 lg:block">
-                    <LogPanel logs={logs} selectedLogIds={selectedLogIds} activeLogId={previewLog?.id} onSelectedLogIdsChange={setSelectedLogIds} onCreateSession={createSession} onDeleteSelected={() => setDeleteConfirmOpen(true)} onPreviewLog={previewGenerationLog} />
+                    <LogPanel logs={logs} selectedLogIds={selectedLogIds} activeLogId={previewLog?.id} onSelectedLogIdsChange={setSelectedLogIds} onCreateSession={createSession} onDeleteSelected={() => setDeleteConfirmOpen(true)} onPreviewLog={(log) => void previewGenerationLog(log)} />
                 </aside>
 
                 <section className="grid gap-3 lg:min-h-0 lg:overflow-hidden xl:grid-cols-[420px_minmax(0,1fr)]">
@@ -509,9 +510,9 @@ export default function VideoPage() {
                 }}
             />
             <Drawer title="生成记录" placement="bottom" size="large" open={logsOpen} onClose={() => setLogsOpen(false)}>
-                <LogPanel logs={logs} selectedLogIds={selectedLogIds} activeLogId={previewLog?.id} onSelectedLogIdsChange={setSelectedLogIds} onCreateSession={createSession} onDeleteSelected={() => setDeleteConfirmOpen(true)} onPreviewLog={previewGenerationLog} />
+                <LogPanel logs={logs} selectedLogIds={selectedLogIds} activeLogId={previewLog?.id} onSelectedLogIdsChange={setSelectedLogIds} onCreateSession={createSession} onDeleteSelected={() => setDeleteConfirmOpen(true)} onPreviewLog={(log) => void previewGenerationLog(log)} />
             </Drawer>
-            <Drawer title="参数" placement="bottom" height="82vh" open={settingsOpen} onClose={() => setSettingsOpen(false)}>
+            <Drawer title="参数" placement="bottom" size="82vh" open={settingsOpen} onClose={() => setSettingsOpen(false)}>
                 <div className="grid grid-cols-2 gap-3 pb-4">
                     <GenerationSettings config={effectiveConfig} model={model} updateConfig={updateConfig} openConfigDialog={openConfigDialog} />
                 </div>
@@ -675,32 +676,39 @@ async function readStoredLogs() {
         await logStore.iterate<GenerationLog, void>((value) => {
             logs.push(value);
         });
-        return (await Promise.all(logs.map(normalizeLog))).sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+        return (await Promise.all(logs.map((log) => normalizeLog(log, "summary")))).sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
     } catch {
         return [];
     }
 }
 
-async function normalizeLog(log: Partial<GenerationLog>): Promise<GenerationLog> {
-    const video = log.video?.storageKey ? { ...log.video, url: await resolveMediaUrl(log.video.storageKey, log.video.url) } : log.video;
-    const videoReferences = await Promise.all(
-        (log.videoReferences || []).map(async (item) => ({
-            ...item,
-            url: item.storageKey ? await resolveMediaUrl(item.storageKey, item.url) : item.url,
-        })),
-    );
-    const audioReferences = await Promise.all(
-        (log.audioReferences || []).map(async (item) => ({
-            ...item,
-            url: item.storageKey ? await resolveMediaUrl(item.storageKey, item.url) : item.url,
-        })),
-    );
-    const references = await Promise.all(
-        (log.references || []).map(async (item) => ({
-            ...item,
-            dataUrl: await resolveImageUrl(item.storageKey, item.dataUrl),
-        })),
-    );
+async function normalizeLog(log: Partial<GenerationLog>, mode: "summary" | "full" = "summary"): Promise<GenerationLog> {
+    const shouldHydrateAll = mode === "full";
+    const video = shouldHydrateAll && log.video?.storageKey ? { ...log.video, url: await resolveMediaUrl(log.video.storageKey, log.video.url) } : log.video;
+    const videoReferences = shouldHydrateAll
+        ? await Promise.all(
+              (log.videoReferences || []).map(async (item) => ({
+                  ...item,
+                  url: item.storageKey ? await resolveMediaUrl(item.storageKey, item.url) : item.url,
+              })),
+          )
+        : (log.videoReferences || []).map((item) => ({ ...item, url: item.url || "" }));
+    const audioReferences = shouldHydrateAll
+        ? await Promise.all(
+              (log.audioReferences || []).map(async (item) => ({
+                  ...item,
+                  url: item.storageKey ? await resolveMediaUrl(item.storageKey, item.url) : item.url,
+              })),
+          )
+        : (log.audioReferences || []).map((item) => ({ ...item, url: item.url || "" }));
+    const references = shouldHydrateAll
+        ? await Promise.all(
+              (log.references || []).map(async (item) => ({
+                  ...item,
+                  dataUrl: await resolveImageUrl(item.storageKey, item.dataUrl),
+              })),
+          )
+        : (log.references || []).map((item) => ({ ...item, dataUrl: item.dataUrl || "" }));
     const config = normalizeLogConfig(log);
     return {
         id: log.id || nanoid(),

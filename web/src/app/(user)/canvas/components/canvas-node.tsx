@@ -136,6 +136,9 @@ export const CanvasNode = React.memo(function CanvasNode({
     const hasAudioContent = data.type === CanvasNodeType.Audio && Boolean(data.metadata?.content);
     const isBatchRoot = data.type === CanvasNodeType.Image && Boolean(data.metadata?.isBatchRoot) && batchCount > 1;
     const isBatchChild = data.type === CanvasNodeType.Image && Boolean(data.metadata?.batchRootId);
+    const nodeTypeLabel = canvasNodeTypeLabel(data.type);
+    const nodeTypeIcon = canvasNodeTypeIcon(data.type);
+    const nodeTypeLabelOutside = data.type === CanvasNodeType.Image || data.type === CanvasNodeType.Video;
     const leftHandleActive = activeConnectHandle?.nodeId === data.id && activeConnectHandle.handleType === "target";
     const rightHandleActive = activeConnectHandle?.nodeId === data.id && activeConnectHandle.handleType === "source";
     const textareaRef = useRef<CanvasResourceMentionTextareaHandle | null>(null);
@@ -299,10 +302,17 @@ export const CanvasNode = React.memo(function CanvasNode({
     }, [handleResizeMove, handleResizeUp]);
 
     const showSelectionChrome = isSelected && !isGroupPackaged;
-    const leftHandleVisible = showSelectionChrome || hovered || connectHover === "left" || leftHandleActive || (isConnecting && connectionDropSides?.includes("left"));
+    const leftConnectionDrop = Boolean(connectionDropSides?.includes("left"));
+    const rightConnectionDrop = Boolean(connectionDropSides?.includes("right"));
+    const leftHandleVisible =
+        (showSelectionChrome || hovered || connectHover === "left" || leftHandleActive || (isConnecting && leftConnectionDrop)) &&
+        connectHover !== "right" &&
+        !rightHandleActive;
     const rightHandleVisible =
         data.type !== CanvasNodeType.Config &&
-        (showSelectionChrome || hovered || connectHover === "right" || rightHandleActive || (isConnecting && connectionDropSides?.includes("right")));
+        (showSelectionChrome || hovered || connectHover === "right" || rightHandleActive || (isConnecting && rightConnectionDrop)) &&
+        connectHover !== "left" &&
+        !leftHandleActive;
 
     const borderColor = showSelectionChrome
         ? theme.node.activeStroke
@@ -338,6 +348,13 @@ export const CanvasNode = React.memo(function CanvasNode({
             }}
             onContextMenu={(event) => onContextMenu(event, data.id)}
         >
+            {nodeTypeLabelOutside ? (
+                <div className="canvas-node-type-badge canvas-node-type-badge-external pointer-events-none absolute left-0 top-0 z-[115] -translate-y-[calc(100%+8px)]">
+                    {nodeTypeIcon}
+                    {nodeTypeLabel}
+                </div>
+            ) : null}
+
             <div
                 className="relative h-full w-full overflow-visible rounded-3xl border"
                 style={{
@@ -381,6 +398,12 @@ export const CanvasNode = React.memo(function CanvasNode({
                     setTextFullscreenOpen(true);
                 }}
             >
+                {!nodeTypeLabelOutside ? (
+                    <div className="canvas-node-type-badge pointer-events-none absolute left-3 top-3 z-[115]">
+                        {nodeTypeLabel}
+                    </div>
+                ) : null}
+
                 <div
                     className={`relative flex h-full w-full rounded-[inherit] ${isBatchRoot ? "overflow-visible" : "overflow-hidden"} ${data.type === CanvasNodeType.Text ? "items-stretch" : "items-center justify-center"}`}
                     style={
@@ -447,10 +470,25 @@ export const CanvasNode = React.memo(function CanvasNode({
                 <ConnectionHandlePlus side="right" visible={rightHandleVisible} emphasized={rightHandleActive} onHoverChange={(active) => setConnectHover((current) => (active ? "right" : current === "right" ? null : current))} onConnectStart={(event) => onConnectStart(event, data.id, "source")} onConnectMenu={onConnectMenu ? () => onConnectMenu(data.id, "source") : undefined} />
             ) : null}
 
-            {showPanel && renderPanel ? <div className="absolute left-1/2 top-full z-[70] w-[min(640px,calc(100vw-48px))] -translate-x-1/2 pt-4">{renderPanel(data)}</div> : null}
+            {showPanel && renderPanel ? <div className="canvas-node-panel-anchor absolute left-1/2 top-full z-[70] -translate-x-1/2 pt-5">{renderPanel(data)}</div> : null}
         </div>
     );
 });
+
+function canvasNodeTypeLabel(type: CanvasNodeType) {
+    if (type === CanvasNodeType.Image) return "图片节点";
+    if (type === CanvasNodeType.Video) return "视频节点";
+    if (type === CanvasNodeType.Audio) return "音频节点";
+    if (type === CanvasNodeType.Config) return "生成配置";
+    return "文本节点";
+}
+
+function canvasNodeTypeIcon(type: CanvasNodeType) {
+    if (type === CanvasNodeType.Image) return <ImageIcon className="size-3.5" strokeWidth={2.2} />;
+    if (type === CanvasNodeType.Video) return <Video className="size-3.5" strokeWidth={2.2} />;
+    if (type === CanvasNodeType.Audio) return <Music2 className="size-3.5" strokeWidth={2.2} />;
+    return null;
+}
 
 function NodeContent(props: NodeContentRendererProps) {
     if (props.node.type === CanvasNodeType.Config && props.renderNodeContent) return props.renderNodeContent(props.node);
@@ -901,24 +939,72 @@ function ConnectionHandlePlus({
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const pointerRef = useRef<{ x: number; y: number; dragging: boolean } | null>(null);
     const [hot, setHot] = useState(false);
+    const [pressed, setPressed] = useState(false);
+    const [pulling, setPulling] = useState(false);
+    const [magnetOffset, setMagnetOffset] = useState({ x: 0, y: 0 });
 
-    const resetPointer = () => {
+    const resetPointer = useCallback(() => {
         pointerRef.current = null;
-    };
+        setPressed(false);
+        setPulling(false);
+        setMagnetOffset({ x: 0, y: 0 });
+    }, []);
+
+    useEffect(() => {
+        if (visible) return;
+        setHot(false);
+        resetPointer();
+        onHoverChange?.(false);
+    }, [onHoverChange, resetPointer, visible]);
+
+    useEffect(() => {
+        const resetAll = () => resetPointer();
+        window.addEventListener("pointerup", resetAll);
+        window.addEventListener("pointercancel", resetAll);
+        window.addEventListener("blur", resetAll);
+        return () => {
+            window.removeEventListener("pointerup", resetAll);
+            window.removeEventListener("pointercancel", resetAll);
+            window.removeEventListener("blur", resetAll);
+        };
+    }, [resetPointer]);
 
     const handlePointerDown = (event: React.PointerEvent<HTMLButtonElement>) => {
         event.stopPropagation();
         event.preventDefault();
         pointerRef.current = { x: event.clientX, y: event.clientY, dragging: false };
+        setPressed(true);
         event.currentTarget.setPointerCapture(event.pointerId);
     };
 
+    const updateMagnet = (event: React.PointerEvent<HTMLButtonElement>) => {
+        const rect = event.currentTarget.getBoundingClientRect();
+        const dx = event.clientX - (rect.left + rect.width / 2);
+        const dy = event.clientY - (rect.top + rect.height / 2);
+        const distance = Math.hypot(dx, dy);
+        const range = 96;
+        const maxPull = 22;
+
+        if (!distance || distance > range) {
+            setMagnetOffset({ x: 0, y: 0 });
+            return;
+        }
+
+        const pull = 1 - Math.pow(1 - distance / range, 2);
+        setMagnetOffset({
+            x: (dx / distance) * maxPull * pull,
+            y: (dy / distance) * maxPull * pull,
+        });
+    };
+
     const handlePointerMove = (event: React.PointerEvent<HTMLButtonElement>) => {
+        updateMagnet(event);
         if (!pointerRef.current || pointerRef.current.dragging) return;
         const dx = event.clientX - pointerRef.current.x;
         const dy = event.clientY - pointerRef.current.y;
         if (dx * dx + dy * dy <= 100) return;
         pointerRef.current.dragging = true;
+        setPulling(true);
         if (event.currentTarget.hasPointerCapture(event.pointerId)) {
             event.currentTarget.releasePointerCapture(event.pointerId);
         }
@@ -931,20 +1017,45 @@ function ConnectionHandlePlus({
         resetPointer();
     };
 
+    const expanded = hot || emphasized || pulling || pressed;
+    const pressedExpanded = pressed || pulling;
+    const outerSize = 132;
+    const coreSize = pressedExpanded ? 56 : expanded ? 48 : 40;
+    const iconSize = pressedExpanded ? "size-7" : expanded ? "size-5" : "size-5";
+    const offset = -(outerSize / 2 + 30);
+    const coreBackground = pressedExpanded
+        ? `radial-gradient(circle at 34% 22%, rgba(255,255,255,.2), transparent 44%), linear-gradient(180deg, color-mix(in srgb, ${theme.node.panel} 76%, ${theme.accent.solid} 24%), color-mix(in srgb, ${theme.node.panel} 88%, #000000))`
+        : expanded
+          ? `radial-gradient(circle at 34% 22%, rgba(255,255,255,.14), transparent 42%), linear-gradient(180deg, color-mix(in srgb, ${theme.toolbar.panel} 82%, ${theme.accent.solid} 18%), color-mix(in srgb, ${theme.node.panel} 92%, #000000))`
+          : `linear-gradient(180deg, color-mix(in srgb, ${theme.toolbar.panel} 88%, transparent), color-mix(in srgb, ${theme.node.panel} 92%, transparent))`;
+    const coreShadow = pressedExpanded
+        ? `inset 0 1px 0 rgba(255,255,255,.24), inset 0 -10px 18px rgba(0,0,0,.18), 0 0 0 7px ${theme.accent.soft}, 0 16px 38px rgba(0,0,0,.3)`
+        : expanded
+          ? `inset 0 1px 0 rgba(255,255,255,.18), inset 0 -8px 16px rgba(0,0,0,.14), 0 0 0 5px ${theme.accent.soft}, 0 12px 28px rgba(0,0,0,.24)`
+          : "inset 0 1px 0 rgba(255,255,255,.08), 0 3px 10px rgba(0,0,0,.12)";
+    const coreBorderColor = pressedExpanded ? theme.accent.solid : expanded ? `color-mix(in srgb, ${theme.accent.solid} 72%, transparent)` : "rgba(255,255,255,.14)";
+
     return (
         <button
             type="button"
             data-connection-handle
             aria-label={side === "left" ? "添加输入或拖拽连线" : "添加节点或拖拽连线"}
-            className={`absolute top-1/2 z-[110] flex size-24 -translate-y-1/2 items-center justify-center rounded-full transition-opacity duration-150 ${
-                side === "left" ? "-left-12" : "-right-12"
-            } pointer-events-auto ${visible ? "opacity-100" : "opacity-0"}`}
+            className={`absolute top-1/2 z-[110] flex -translate-y-1/2 items-center justify-center rounded-full transition-opacity duration-150 pointer-events-auto ${visible ? "opacity-100" : "opacity-0 pointer-events-none"}`}
+            style={
+                {
+                    width: outerSize,
+                    height: outerSize,
+                    [side === "left" ? "left" : "right"]: offset,
+                } as React.CSSProperties
+            }
             onPointerEnter={() => {
                 setHot(true);
                 onHoverChange?.(true);
             }}
             onPointerLeave={() => {
                 setHot(false);
+                setMagnetOffset({ x: 0, y: 0 });
+                if (!pointerRef.current) resetPointer();
                 onHoverChange?.(false);
             }}
             onPointerDown={handlePointerDown}
@@ -953,20 +1064,19 @@ function ConnectionHandlePlus({
             onPointerCancel={resetPointer}
         >
             <span
-                className="grid size-11 place-items-center rounded-full border transition duration-200 hover:scale-105 active:scale-95"
+                className="grid place-items-center rounded-full border transition duration-150"
                 style={{
-                    background: hot || emphasized ? theme.accent.solid : theme.node.panel,
-                    borderColor: hot || emphasized ? theme.accent.solid : theme.node.stroke,
-                    color: hot || emphasized ? theme.accent.contrast : theme.node.muted,
-                    boxShadow: hot
-                        ? `0 0 0 4px ${theme.accent.soft}, 0 8px 22px rgba(0,0,0,.28)`
-                        : emphasized
-                          ? `0 0 0 4px ${theme.accent.soft}, 0 6px 18px rgba(0,0,0,.22)`
-                          : "0 4px 14px rgba(0,0,0,.18)",
+                    width: coreSize,
+                    height: coreSize,
+                    transform: `translate3d(${magnetOffset.x}px, ${magnetOffset.y}px, 0) scale(${pressedExpanded ? 1.1 : expanded ? 1.04 : 1})`,
+                    background: coreBackground,
+                    borderColor: coreBorderColor,
+                    color: expanded ? theme.node.text : theme.node.muted,
+                    boxShadow: coreShadow,
                 }}
                 title={side === "left" ? "点击添加输入 · 按住拖拽连线" : "点击添加节点 · 按住拖拽连线"}
             >
-                <Plus className="size-5" strokeWidth={2.5} />
+                <Plus className={iconSize} strokeWidth={2.5} />
             </span>
         </button>
     );

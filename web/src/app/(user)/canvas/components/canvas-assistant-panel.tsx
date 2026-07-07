@@ -21,13 +21,14 @@ import { CanvasPromptLibrary } from "./canvas-prompt-library";
 import { AgentChatComposer, AgentChatMessage, AgentModeSwitch, AgentPanelTabs, AgentWorkingMessage, type CanvasAgentChatMessage, type CanvasAgentMode } from "./canvas-agent-chat-ui";
 import { CanvasLocalAgentPanel } from "./canvas-local-agent-panel";
 import { ShortDramaAgentPresetButton } from "./short-drama-agent-preset-button";
+import { useCompactCanvasViewport } from "./use-compact-canvas-viewport";
 import { NODE_DEFAULT_SIZE } from "../constants";
 import { CanvasNodeType, type CanvasAssistantMessage, type CanvasAssistantReference, type CanvasAssistantSession, type CanvasNodeData } from "../types";
 import { useCanvasAgentStore, type CanvasAgentCreativeMode } from "../stores/use-canvas-agent-store";
 import { summarizeCanvasAgentOps, type CanvasAgentOp, type CanvasAgentSnapshot } from "../utils/canvas-agent-ops";
 import {
     CANVAS_AGENT_KNOWLEDGE_DISCLOSURE_CONTEXT,
-    CREATIVE_KNOWLEDGE_CORE_CONTEXT,
+    CREATIVE_AGENT_KNOWLEDGE_CONTEXT,
     isShortDramaAgentPresetPrompt,
     SHORT_DRAMA_AGENT_MODE_CONTEXT,
     shouldDiscloseCanvasAgentKnowledge,
@@ -162,6 +163,7 @@ export function CanvasAssistantPanel({ nodes, selectedNodeIds, snapshot, session
     const confirmTools = useCanvasAgentStore((state) => state.confirmTools);
     const creativeMode = useCanvasAgentStore((state) => state.creativeMode);
     const setAgentState = useCanvasAgentStore((state) => state.setAgentState);
+    const compactViewport = useCompactCanvasViewport();
     const [width, setWidth] = useState(520);
     const [view, setView] = useState<OnlineAgentTab>("chat");
     const [prompt, setPrompt] = useState("");
@@ -478,6 +480,7 @@ export function CanvasAssistantPanel({ nodes, selectedNodeIds, snapshot, session
     };
 
     const startResize = () => {
+        if (compactViewport) return;
         const move = (event: MouseEvent) => setWidth(Math.min(760, Math.max(320, window.innerWidth - event.clientX)));
         const stop = () => {
             setResizing(false);
@@ -540,7 +543,7 @@ export function CanvasAssistantPanel({ nodes, selectedNodeIds, snapshot, session
             {view === "setup" ? (
                 <OnlineAgentSetupView theme={theme} activeModel={activeModel} onOpenConfig={() => openConfigDialog(true)} />
             ) : (
-                <div className="thin-scrollbar min-h-0 flex-1 space-y-4 overflow-y-auto px-4 py-4">
+                <div className="thin-scrollbar min-h-0 flex-1 space-y-4 overflow-y-auto px-3 py-3 sm:px-4 sm:py-4">
                     {view === "history" ? (
                         <AssistantHistory
                             sessions={historySessions}
@@ -639,21 +642,24 @@ export function CanvasAssistantPanel({ nodes, selectedNodeIds, snapshot, session
 
     return (
         <motion.div
-            className="flex shrink-0"
-            initial={{ width: 0, opacity: 0 }}
-            animate={{ width: closing ? 0 : width + 1, opacity: closing ? 0 : 1 }}
+            data-canvas-no-zoom
+            className={compactViewport ? "fixed z-[120]" : "flex shrink-0"}
+            initial={compactViewport ? { opacity: 0, y: 24 } : { width: 0, opacity: 0 }}
+            animate={compactViewport ? { opacity: closing ? 0 : 1, y: closing ? 24 : 0 } : { width: closing ? 0 : width + 1, opacity: closing ? 0 : 1 }}
             transition={{ duration: resizing ? 0 : PANEL_MOTION_SECONDS, ease: [0.22, 1, 0.36, 1] }}
-            style={{ overflow: "clip", pointerEvents: closing ? "none" : undefined }}
+            style={compactViewport ? { inset: "56px 8px 8px", overflow: "clip", pointerEvents: closing ? "none" : undefined } : { overflow: "clip", pointerEvents: closing ? "none" : undefined }}
         >
             <motion.aside
-                className="relative flex shrink-0 flex-col border-l"
-                initial={{ x: 48 }}
-                animate={{ x: closing ? 28 : 0 }}
+                className={`canvas-assistant-panel relative flex shrink-0 flex-col ${compactViewport ? "h-full rounded-2xl border shadow-2xl backdrop-blur-xl" : "border-l"}`}
+                initial={compactViewport ? false : { x: 48 }}
+                animate={compactViewport ? { x: 0 } : { x: closing ? 28 : 0 }}
                 transition={{ duration: resizing ? 0 : PANEL_MOTION_SECONDS, ease: [0.22, 1, 0.36, 1] }}
-                style={{ width, background: theme.node.panel, borderColor: theme.node.stroke, color: theme.node.text }}
+                style={{ width: compactViewport ? "100%" : width, background: theme.node.panel, borderColor: theme.node.stroke, color: theme.node.text }}
             >
-                <button type="button" className="absolute inset-y-0 left-0 z-40 w-4 -translate-x-1/2 cursor-col-resize" onMouseDown={startResize} aria-label="调整右侧面板宽度" />
-                <header className="flex h-14 items-center justify-between border-b px-4" style={{ borderColor: theme.node.stroke }}>
+                {compactViewport ? null : (
+                    <button type="button" className="absolute inset-y-0 left-0 z-40 w-4 -translate-x-1/2 cursor-col-resize" onMouseDown={startResize} aria-label="调整右侧面板宽度" />
+                )}
+                <header className={`flex items-center justify-between border-b ${compactViewport ? "min-h-14 flex-wrap gap-2 px-3 py-2" : "h-14 px-4"}`} style={{ borderColor: theme.node.stroke }}>
                     <div className="flex min-w-0 items-center gap-2">
                         <span className="grid size-8 place-items-center rounded-lg">
                             <Bot className="size-4" />
@@ -665,11 +671,11 @@ export function CanvasAssistantPanel({ nodes, selectedNodeIds, snapshot, session
                             </div>
                         </div>
                     </div>
-                    <div className="flex shrink-0 items-center gap-2">
+                    <div className={`flex shrink-0 items-center gap-2 ${compactViewport ? "min-w-0 flex-1 justify-end overflow-x-auto" : ""}`}>
                         <AgentModeSwitch value={agentMode} theme={theme} onChange={onAgentModeChange} />
                         <label className="flex items-center gap-1.5 text-xs" style={{ color: theme.node.muted }}>
                             <Switch size="small" checked={confirmTools} onChange={(confirmTools) => setAgentState({ confirmTools })} />
-                            工具确认
+                            <span className="hidden min-[420px]:inline">工具确认</span>
                         </label>
                         <Tooltip title="收起对话">
                             <Button type="text" shape="circle" className="!h-8 !w-8 !min-w-8" style={iconButtonStyle} icon={<PanelRightClose className="size-4" />} onClick={collapse} />
@@ -1288,7 +1294,7 @@ async function buildToolAgentMessages(snapshot: CanvasAgentSnapshot, history: Ca
     const systemPrompt = [
         ONLINE_AGENT_PROMPT,
         shouldDiscloseCanvasAgentKnowledge(userMessage.text, creativeMode) ? CANVAS_AGENT_KNOWLEDGE_DISCLOSURE_CONTEXT : "",
-        shouldUseCanvasCreativeKnowledge(userMessage.text, creativeMode) && creativeMode !== "short_drama" ? CREATIVE_KNOWLEDGE_CORE_CONTEXT : "",
+        shouldUseCanvasCreativeKnowledge(userMessage.text, creativeMode) && creativeMode !== "short_drama" ? CREATIVE_AGENT_KNOWLEDGE_CONTEXT : "",
         creativeMode === "short_drama" ? SHORT_DRAMA_AGENT_MODE_CONTEXT : "",
     ]
         .filter(Boolean)

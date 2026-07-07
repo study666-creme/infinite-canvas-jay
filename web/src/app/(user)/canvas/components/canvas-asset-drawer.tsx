@@ -9,6 +9,7 @@ import { canvasThemes } from "@/lib/canvas-theme";
 import { useThemeStore } from "@/stores/use-theme-store";
 import { MyAssetsPanel, type InsertAssetPayload } from "./asset-library-panel";
 import { PromptHubCardsTab } from "./prompt-hub-cards-tab";
+import { useCompactCanvasViewport } from "./use-compact-canvas-viewport";
 
 type CanvasAssetDrawerProps = {
     open: boolean;
@@ -17,12 +18,12 @@ type CanvasAssetDrawerProps = {
 };
 
 const DRAWER_WIDTH_STORAGE_KEY = "infinite-canvas:asset-drawer-width";
-const MIN_DRAWER_WIDTH = 360;
+const MIN_DRAWER_WIDTH = 280;
 const DEFAULT_DRAWER_WIDTH = 520;
 const MAX_DRAWER_WIDTH = 920;
 
 function clampDrawerWidth(value: number) {
-    const viewportMax = typeof window === "undefined" ? MAX_DRAWER_WIDTH : Math.max(MIN_DRAWER_WIDTH, window.innerWidth - 32);
+    const viewportMax = typeof window === "undefined" ? MAX_DRAWER_WIDTH : Math.max(MIN_DRAWER_WIDTH, window.innerWidth - (window.innerWidth < 640 ? 16 : 32));
     return Math.min(Math.max(value, MIN_DRAWER_WIDTH), Math.min(MAX_DRAWER_WIDTH, viewportMax));
 }
 
@@ -35,6 +36,7 @@ export function CanvasAssetDrawer({ open, onClose, onInsert }: CanvasAssetDrawer
     });
     const resizeStartRef = useRef<{ x: number; width: number } | null>(null);
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
+    const compactViewport = useCompactCanvasViewport();
 
     useEffect(() => {
         if (open) setTab("assets");
@@ -53,6 +55,7 @@ export function CanvasAssetDrawer({ open, onClose, onInsert }: CanvasAssetDrawer
 
     const startResize = useCallback(
         (event: ReactPointerEvent<HTMLButtonElement>) => {
+            if (compactViewport) return;
             event.preventDefault();
             event.stopPropagation();
             resizeStartRef.current = { x: event.clientX, width: drawerWidth };
@@ -78,20 +81,20 @@ export function CanvasAssetDrawer({ open, onClose, onInsert }: CanvasAssetDrawer
             window.addEventListener("pointerup", stopResize);
             window.addEventListener("pointercancel", stopResize);
         },
-        [drawerWidth],
+        [compactViewport, drawerWidth],
     );
 
     return (
         <aside
             data-canvas-no-zoom
-            className={`canvas-asset-drawer pointer-events-none absolute inset-y-0 left-0 z-[80] transition-transform duration-200 ${open ? "translate-x-0" : "-translate-x-full"}`}
-            style={{ width: drawerWidth, maxWidth: "calc(100vw - 24px)" }}
+            className={`canvas-asset-drawer pointer-events-none absolute z-[80] transition-transform duration-200 ${compactViewport ? "inset-y-2 left-2" : "inset-y-0 left-0"} ${open ? "translate-x-0" : "-translate-x-full"}`}
+            style={compactViewport ? { width: "calc(100vw - 16px)", maxWidth: "calc(100vw - 16px)" } : { width: drawerWidth, maxWidth: "calc(100vw - 24px)" }}
             onMouseDown={(event) => event.stopPropagation()}
             onPointerDown={(event) => event.stopPropagation()}
             onWheelCapture={(event) => event.stopPropagation()}
         >
             <div
-                className="pointer-events-auto relative flex h-full min-h-0 flex-col border-r px-4 py-4 shadow-2xl backdrop-blur-xl"
+                className={`pointer-events-auto relative flex h-full min-h-0 flex-col backdrop-blur-xl ${compactViewport ? "rounded-2xl border px-3 py-3 shadow-xl" : "border-r px-4 py-4 shadow-2xl"}`}
                 style={{
                     background: `${theme.toolbar.panel}f7`,
                     borderColor: theme.toolbar.border,
@@ -116,7 +119,7 @@ export function CanvasAssetDrawer({ open, onClose, onInsert }: CanvasAssetDrawer
                     onChange={(value) => setTab(String(value))}
                 />
                 <div className="min-h-0 flex-1 pt-4">{tab === "assets" ? <MyAssetsPanel compact onInsert={onInsert} /> : <PromptHubCardsTab compact />}</div>
-                <button type="button" aria-label="调整我的资产侧边栏宽度" className="absolute -right-1 top-0 h-full w-2 cursor-ew-resize rounded-r-lg transition hover:bg-white/20" onPointerDown={startResize} />
+                {compactViewport ? null : <button type="button" aria-label="调整我的资产侧边栏宽度" className="absolute -right-1 top-0 h-full w-2 cursor-ew-resize rounded-r-lg transition hover:bg-white/20" onPointerDown={startResize} />}
             </div>
         </aside>
     );

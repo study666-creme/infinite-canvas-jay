@@ -19,3 +19,9 @@ description: 当前项目后续值得处理的事项
 ## 其它
 
 - 本地 Agent 接入后续：按[本地 Agent 接入规划](/docs/progress/local-agent-integration-plan)把 Claude Code CLI Adapter 升级为 Claude Agent SDK Adapter，并完善工具队列体验。
+
+## 性能与本地数据结构
+
+- [ ] 拆分画布本地持久化：当前 `infinite-canvas:canvas_store` 会一次性读取所有项目详情，项目/节点/会话变多后 `/canvas` 列表首屏会慢。建议拆成项目索引和项目详情两层存储，并设计旧数据兼容迁移。
+- [ ] 评估“我的素材”首屏懒加载：`asset_store` 恢复时仍可能解析大量图片/视频 URL，素材量大时可能拖慢素材库或资产选择弹窗；后续可改成列表只读元数据，插入/预览时再解析媒体。
+- [ ] 为生图历史增加大数据量回归样例：至少覆盖 100+ 图片记录、视频记录、参考图记录，验证 `/image` 和 `/video` 首屏不会一次性读取所有原图。

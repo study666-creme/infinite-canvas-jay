@@ -140,6 +140,183 @@
 }
 
 @layer utilities {
+    .has-app-cursor,
+    .has-app-cursor * {
+        cursor: none !important;
+    }
+
+    .has-app-cursor [class*="cursor-ew-resize"],
+    .has-app-cursor [class*="cursor-col-resize"] {
+        cursor: ew-resize !important;
+    }
+
+    .has-app-cursor [class*="cursor-ns-resize"],
+    .has-app-cursor [class*="cursor-row-resize"] {
+        cursor: ns-resize !important;
+    }
+
+    .has-app-cursor [class*="cursor-nwse-resize"] {
+        cursor: nwse-resize !important;
+    }
+
+    .has-app-cursor [class*="cursor-nesw-resize"] {
+        cursor: nesw-resize !important;
+    }
+
+    .app-cursor {
+        --app-cursor-size: 44px;
+        pointer-events: none;
+        position: fixed;
+        inset: 0;
+        z-index: 2147483647;
+        opacity: 0;
+        transition: opacity 160ms ease;
+    }
+
+    .app-cursor.is-visible {
+        opacity: 1;
+    }
+
+    .app-cursor-halo,
+    .app-cursor-pointer {
+        position: fixed;
+        left: 0;
+        top: 0;
+        will-change: transform;
+    }
+
+    .app-cursor-halo {
+        width: var(--app-cursor-size);
+        height: var(--app-cursor-size);
+        border-radius: 999px;
+        border: 1px solid color-mix(in srgb, var(--app-cursor-accent) 62%, transparent);
+        background:
+            radial-gradient(circle at 48% 46%, color-mix(in srgb, var(--app-cursor-accent) 22%, transparent) 0 34%, transparent 68%),
+            color-mix(in srgb, var(--app-cursor-soft) 68%, transparent);
+        backdrop-filter: blur(2px) saturate(1.18);
+        -webkit-backdrop-filter: blur(2px) saturate(1.18);
+        box-shadow:
+            0 0 0 1px rgba(255, 255, 255, 0.08),
+            0 0 24px color-mix(in srgb, var(--app-cursor-accent) 28%, transparent),
+            0 12px 34px var(--app-cursor-shadow);
+        opacity: 0;
+        transform-origin: center;
+        transition:
+            width 110ms cubic-bezier(0.2, 0.9, 0.2, 1),
+            height 110ms cubic-bezier(0.2, 0.9, 0.2, 1),
+            margin 110ms cubic-bezier(0.2, 0.9, 0.2, 1),
+            border-color 110ms ease,
+            background 110ms ease,
+            opacity 90ms ease;
+    }
+
+    .app-cursor-pointer {
+        width: 28px;
+        height: 32px;
+        transform-origin: 6px 6px;
+        transition: transform 45ms linear;
+    }
+
+    .app-cursor-arrow {
+        width: 28px;
+        height: 32px;
+        overflow: visible;
+        filter:
+            drop-shadow(0 2px 4px rgba(0, 0, 0, 0.28))
+            drop-shadow(0 8px 18px var(--app-cursor-shadow));
+        transform-origin: 7px 7px;
+        transition:
+            opacity 90ms ease,
+            transform 100ms cubic-bezier(0.2, 0.9, 0.2, 1),
+            filter 100ms ease;
+    }
+
+    .app-cursor-arrow-shell {
+        fill: var(--app-cursor-fill);
+        stroke: var(--app-cursor-edge);
+        stroke-linejoin: round;
+        stroke-width: 1.15;
+    }
+
+    .app-cursor-arrow-core {
+        fill: color-mix(in srgb, var(--app-cursor-accent) 18%, transparent);
+        opacity: 0.92;
+    }
+
+    .app-cursor-textbar {
+        position: absolute;
+        left: 10px;
+        top: 2px;
+        width: 2px;
+        height: 26px;
+        border-radius: 999px;
+        background: var(--app-cursor-fill);
+        box-shadow:
+            -4px 0 0 -0.5px color-mix(in srgb, var(--app-cursor-fill) 74%, transparent),
+            4px 0 0 -0.5px color-mix(in srgb, var(--app-cursor-fill) 74%, transparent),
+            0 8px 18px var(--app-cursor-shadow);
+        opacity: 0;
+        transform: translateX(-5px) scaleY(0.72);
+        transition:
+            opacity 90ms ease,
+            transform 100ms cubic-bezier(0.2, 0.9, 0.2, 1);
+    }
+
+    .app-cursor.has-halo .app-cursor-halo {
+        opacity: 1;
+    }
+
+    .app-cursor.is-link .app-cursor-halo {
+        width: 58px;
+        height: 58px;
+        margin: -7px 0 0 -7px;
+        border-color: color-mix(in srgb, var(--app-cursor-accent) 82%, transparent);
+        background:
+            radial-gradient(circle at 50% 50%, color-mix(in srgb, var(--app-cursor-accent) 30%, transparent) 0 30%, transparent 68%),
+            color-mix(in srgb, var(--app-cursor-soft) 82%, transparent);
+    }
+
+    .app-cursor.is-link .app-cursor-arrow {
+        transform: scale(0.84);
+        filter:
+            drop-shadow(0 1px 3px rgba(0, 0, 0, 0.24))
+            drop-shadow(0 0 16px color-mix(in srgb, var(--app-cursor-accent) 36%, transparent));
+    }
+
+    .app-cursor.is-drag .app-cursor-halo {
+        width: 68px;
+        height: 68px;
+        margin: -12px 0 0 -12px;
+        border-style: dashed;
+        border-color: color-mix(in srgb, var(--app-cursor-accent) 88%, transparent);
+        background: color-mix(in srgb, var(--app-cursor-soft) 56%, transparent);
+    }
+
+    .app-cursor.is-drag .app-cursor-arrow {
+        transform: rotate(-8deg) scale(0.88);
+    }
+
+    .app-cursor.is-text .app-cursor-halo {
+        width: 34px;
+        height: 34px;
+        margin: 5px 0 0 5px;
+        opacity: 0.45;
+    }
+
+    .app-cursor.is-text .app-cursor-arrow {
+        opacity: 0;
+        transform: scale(0.6);
+    }
+
+    .app-cursor.is-text .app-cursor-textbar {
+        opacity: 1;
+        transform: translateX(-5px) scaleY(1);
+    }
+
+    .app-cursor.is-down .app-cursor-arrow {
+        transform: scale(0.78);
+    }
+
     .ai-title-aurora {
         background: linear-gradient(90deg, #111827 0%, #111827 36%, #6b7280 54%, #111827 72%, #111827 100%);
         background-size: 220% 100%;
@@ -695,8 +872,94 @@
     }
 
     .canvas-composer-icon.ant-btn {
-        flex: 0 0 32px;
-        width: 32px;
+        flex: 0 0 60px;
+        width: 60px;
+        min-width: 60px;
+        height: 60px !important;
+        border-radius: 999px !important;
+        font-size: 20px;
+    }
+
+    .canvas-composer-icon.ant-btn .ant-btn-icon svg,
+    .canvas-composer-mode-button svg,
+    .canvas-composer-model-picker svg {
+        width: 24px;
+        height: 24px;
+    }
+
+    .canvas-node-panel-anchor {
+        width: clamp(1080px, 82vw, 1680px);
+        max-width: none;
+        min-width: 0;
+    }
+
+    .canvas-composer-shell {
+        border: 1px solid rgba(255, 255, 255, 0.12);
+        border-radius: 30px;
+        display: flex;
+        min-height: clamp(440px, 54vh, 560px);
+        flex-direction: column;
+        padding: 30px 38px 24px;
+        backdrop-filter: blur(32px) saturate(1.18);
+        -webkit-backdrop-filter: blur(32px) saturate(1.18);
+        box-shadow:
+            0 34px 110px rgba(0, 0, 0, 0.38),
+            0 0 0 1px rgba(255, 255, 255, 0.05),
+            inset 0 1px 0 rgba(255, 255, 255, 0.1);
+    }
+
+    .canvas-composer-reference-block {
+        margin-bottom: 18px;
+        border-radius: 22px;
+        border-width: 1px;
+        border-style: solid;
+        padding: 20px 24px;
+    }
+
+    .canvas-composer-reference-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 14px;
+        margin-bottom: 14px;
+        font-size: 18px;
+        font-weight: 600;
+        letter-spacing: 0;
+        opacity: 0.82;
+    }
+
+    .canvas-composer-reference-hint {
+        border-radius: 999px;
+        padding: 5px 12px;
+        font-size: 15px;
+        font-weight: 500;
+        opacity: 0.62;
+        background: rgba(255, 255, 255, 0.06);
+    }
+
+    .canvas-composer-editor {
+        display: flex;
+        min-height: 0;
+        flex: 1 1 auto;
+    }
+
+    .canvas-composer-input {
+        min-height: 240px;
+        flex: 1 1 auto;
+        font-size: 32px;
+        line-height: 1.36;
+        overflow-y: auto;
+        padding-right: 44px !important;
+    }
+
+    .canvas-composer-input::placeholder {
+        opacity: 0.58;
+    }
+
+    .canvas-composer-toolbar {
+        margin-top: auto !important;
+        border-top: 1px solid rgba(255, 255, 255, 0.08);
+        padding-top: 24px;
     }
 
     .canvas-generation-action-button.ant-btn {
@@ -719,17 +982,6 @@
             transform 180ms cubic-bezier(0.2, 0.9, 0.2, 1);
     }
 
-    .canvas-generation-action-button.ant-btn::before {
-        content: "";
-        position: absolute;
-        inset: -60% -35%;
-        z-index: -1;
-        background: linear-gradient(112deg, transparent 24%, rgba(255, 255, 255, 0.1) 42%, rgba(255, 255, 255, 0.55) 50%, rgba(255, 255, 255, 0.12) 58%, transparent 76%);
-        opacity: 0.78;
-        transform: translate3d(-56%, 0, 0) rotate(9deg);
-        transition: transform 480ms cubic-bezier(0.2, 0.9, 0.2, 1);
-    }
-
     .canvas-generation-action-button.ant-btn:not(:disabled):hover {
         filter: brightness(1.04) saturate(1.04);
         transform: translateY(-1px);
@@ -738,10 +990,6 @@
             inset 0 -1px 0 rgba(0, 0, 0, 0.12),
             0 16px 36px rgba(0, 0, 0, 0.22),
             0 0 0 1px rgba(0, 0, 0, 0.04) !important;
-    }
-
-    .canvas-generation-action-button.ant-btn:not(:disabled):hover::before {
-        transform: translate3d(56%, 0, 0) rotate(9deg);
     }
 
     .canvas-generation-action-button.ant-btn:not(:disabled):active {
@@ -769,12 +1017,50 @@
         filter: none;
     }
 
+    .canvas-generation-action-button.ant-btn.is-running:disabled {
+        cursor: progress !important;
+        border-color: rgba(255, 255, 255, 0.18) !important;
+        background:
+            linear-gradient(180deg, rgba(255, 255, 255, 0.16), rgba(255, 255, 255, 0.06)),
+            rgba(56, 38, 35, 0.92) !important;
+        box-shadow:
+            inset 0 1px 0 rgba(255, 255, 255, 0.16),
+            0 12px 30px rgba(0, 0, 0, 0.24),
+            0 0 22px rgba(236, 226, 210, 0.12) !important;
+        color: rgba(255, 255, 255, 0.92) !important;
+        animation: canvas-generation-button-breathe 1.55s ease-in-out infinite;
+    }
+
     .canvas-composer-tools {
         container-type: inline-size;
+        gap: 1rem;
+    }
+
+    .canvas-composer-tools > button,
+    .canvas-composer-tools > .ant-btn,
+    .canvas-composer-tools > span > button,
+    .canvas-composer-tools > span > .ant-btn {
+        min-width: 60px !important;
+        max-width: 380px !important;
+        height: 60px !important;
+        border-radius: 999px !important;
+        font-size: 20px !important;
+    }
+
+    .canvas-composer-tools > button svg,
+    .canvas-composer-tools > .ant-btn svg,
+    .canvas-composer-tools > span > button svg,
+    .canvas-composer-tools > span > .ant-btn svg {
+        width: 24px;
+        height: 24px;
     }
 
     .canvas-composer-mode-button {
-        width: 32px;
+        width: 60px;
+        min-width: 60px;
+        min-height: 60px;
+        height: 60px !important;
+        font-size: 20px;
     }
 
     .canvas-composer-tools .canvas-composer-mode-button span,
@@ -785,28 +1071,49 @@
     }
 
     .canvas-composer-tools .canvas-composer-model-picker {
-        width: 32px;
-        min-width: 32px;
+        width: 60px;
+        min-width: 60px;
+        height: 60px !important;
         justify-content: center;
         gap: 0;
         padding-inline: 0;
+        font-size: 20px;
     }
 
-    @container (min-width: 440px) {
+    @media (max-width: 900px) {
+        .canvas-node-panel-anchor {
+            width: min(760px, calc(100vw - 24px));
+            max-width: calc(100vw - 32px);
+            min-width: 0;
+        }
+
+        .canvas-composer-shell {
+            min-height: min(520px, calc(100vh - 96px));
+            border-radius: 24px;
+            padding: 22px 20px 16px;
+        }
+
+        .canvas-composer-input {
+            min-height: 220px;
+            font-size: 24px;
+        }
+    }
+
+    @container (min-width: 360px) {
         .canvas-composer-mode-button {
-            padding-inline: 8px;
+            padding-inline: 16px;
             width: auto;
         }
 
         .canvas-composer-tools .canvas-composer-mode-button span {
             display: inline;
-            font-size: 12px;
+            font-size: 20px;
             line-height: 1;
         }
 
         .canvas-composer-icon.ant-btn {
             flex: 0 1 auto;
-            max-width: 170px;
+            max-width: 300px;
             width: auto !important;
         }
 
@@ -817,10 +1124,10 @@
 
         .canvas-composer-tools .canvas-composer-model-picker {
             width: auto;
-            min-width: 9rem;
+            min-width: 17rem;
             justify-content: flex-start;
-            gap: 0.5rem;
-            padding-inline: 0.75rem;
+            gap: 0.85rem;
+            padding-inline: 1.3rem;
         }
 
         .canvas-composer-tools .canvas-model-picker-text,
@@ -832,6 +1139,42 @@
     .canvas-control-select.ant-select-focused .ant-select-selector,
     .canvas-control-number.ant-input-number-focused {
         border-color: #a8a29e !important;
+    }
+
+    .canvas-node-type-badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        border-radius: 999px;
+        padding: 5px 10px;
+        background: rgba(18, 18, 20, 0.74);
+        border: 1px solid rgba(255, 255, 255, 0.14);
+        color: rgba(255, 255, 255, 0.82);
+        font-size: 15px;
+        font-weight: 650;
+        line-height: 1.15;
+        box-shadow: 0 8px 22px rgba(0, 0, 0, 0.18);
+        backdrop-filter: blur(12px);
+        -webkit-backdrop-filter: blur(12px);
+        white-space: nowrap;
+    }
+
+    .canvas-node-type-badge svg {
+        flex: 0 0 auto;
+    }
+
+    .canvas-node-type-badge-external {
+        border: 0;
+        border-radius: 0;
+        padding: 0;
+        background: transparent;
+        color: rgba(245, 245, 247, 0.95);
+        font-size: 14px;
+        font-weight: 700;
+        box-shadow: none;
+        text-shadow: 0 2px 8px rgba(0, 0, 0, 0.42);
+        backdrop-filter: none;
+        -webkit-backdrop-filter: none;
     }
 
     .dark .canvas-control-select.ant-select .ant-select-selector,

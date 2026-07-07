@@ -26,6 +26,7 @@ export function CanvasVideoReferenceStrip({ references, variant = "panel", class
     const activeLabelSet = new Set(activeLabels);
     const clickable = Boolean(onInsertReference);
     const removable = Boolean(onRemoveReference);
+    const isPanel = variant === "panel";
     const isNode = variant === "node";
     const isOverlay = variant === "overlay";
 
@@ -87,9 +88,11 @@ export function CanvasVideoReferenceStrip({ references, variant = "panel", class
                             disabled={!clickable}
                         >
                             <ReferencePreview reference={reference} />
-                            <div className="pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/80 via-black/35 to-transparent px-1.5 pb-1.5 pt-5">
-                                <span className="block truncate text-[10px] font-medium tracking-wide text-white/95">{reference.label}</span>
-                            </div>
+                            {!isPanel ? (
+                                <div className="pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/80 via-black/35 to-transparent px-1.5 pb-1.5 pt-5">
+                                    <span className="block truncate text-[10px] font-medium tracking-wide text-white/95">{reference.label}</span>
+                                </div>
+                            ) : null}
                             {clickable && !removable ? (
                                 <span
                                     className="pointer-events-none absolute right-1 top-1 grid size-5 place-items-center rounded-full opacity-0 shadow-lg transition group-hover:opacity-100"

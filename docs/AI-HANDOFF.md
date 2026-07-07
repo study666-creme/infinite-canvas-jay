@@ -62,6 +62,12 @@ Known remaining structural issue:
   - project detail: nodes, connections, chatSessions, viewport
 - Do not attempt that migration casually; it changes persisted data shape and needs a compatibility plan.
 
+## Canvas Generation Cancellation Notes
+
+- Deleting a node during generation must abort every request that shares the same generation controller, not only the deleted target node. Batch image slots, Prompt Hub sidecar nodes, video nodes, and audio nodes can all share one run.
+- Before async generation code writes results back into the canvas after an API call, upload, or media save, check that the generation request is still active. Otherwise deleted error/loading nodes can reappear when a late promise resolves.
+- Clearing the canvas should abort all tracked generation requests before removing nodes.
+
 ## Validation Commands
 
 From `D:\canvas\infinite-canvas\web`:
@@ -128,3 +134,10 @@ Current behavior:
 Caution:
 
 - Do not claim the agent owns complete books, full video transcripts, or real-time trend data. It has an original summarized knowledge core and can use user-provided samples or notes to specialize further.
+
+## Canvas Mobile Usability
+
+- Compact canvas view is detected with `useCompactCanvasViewport` (`max-width: 900px`, or coarse pointer under 1180px).
+- On compact view, the Agent panel is a fixed overlay below the top bar instead of a right sidebar, and the asset drawer uses the available screen width without a resize handle.
+- Touch canvas gestures live in `InfiniteCanvas`: empty-canvas single-finger drag pans the viewport, two-finger pinch zooms around the gesture midpoint, and desktop mouse drag still creates the selection box.
+- Mobile toolbar/zoom controls intentionally trade the zoom slider for pinch zoom and move the compact zoom buttons above the bottom toolbar.

@@ -64,6 +64,7 @@ type GenerationLogConfig = Pick<AiConfig, "model" | "imageModel" | "quality" | "
 type UpdateAiConfig = <K extends keyof AiConfig>(key: K, value: AiConfig[K]) => void;
 
 const LOG_STORE_KEY = "infinite-canvas:image_generation_logs";
+const LOG_THUMBNAIL_LIMIT = 3;
 const RESULT_ACTION_BUTTON_CLASS = "min-w-0 px-1.5 [&_.ant-btn-icon]:shrink-0 [&>span:last-child]:min-w-0 [&>span:last-child]:truncate";
 const logStore = localforage.createInstance({ name: "infinite-canvas", storeName: "image_generation_logs" });
 
@@ -257,15 +258,16 @@ export default function ImagePage() {
     const refreshLogs = async () => setLogs(await readStoredLogs());
 
     const previewGenerationLog = async (log: GenerationLog) => {
-        setPreviewLog(log);
+        const hydratedLog = await normalizeLog(log, "full");
+        setPreviewLog(hydratedLog);
         setLogsOpen(false);
-        setPrompt(log.prompt);
-        setReferences(log.references || []);
-        if (log.config.imageModel || log.model) updateConfig("imageModel", log.config.imageModel || log.model);
-        if (log.config.quality) updateConfig("quality", log.config.quality);
-        if (log.config.size) updateConfig("size", log.config.size);
-        if (log.config.count) updateConfig("count", log.config.count);
-        setResults(log.images.map((image) => ({ id: image.id, status: "success", image })));
+        setPrompt(hydratedLog.prompt);
+        setReferences(hydratedLog.references || []);
+        if (hydratedLog.config.imageModel || hydratedLog.model) updateConfig("imageModel", hydratedLog.config.imageModel || hydratedLog.model);
+        if (hydratedLog.config.quality) updateConfig("quality", hydratedLog.config.quality);
+        if (hydratedLog.config.size) updateConfig("size", hydratedLog.config.size);
+        if (hydratedLog.config.count) updateConfig("count", hydratedLog.config.count);
+        setResults(hydratedLog.images.map((image) => ({ id: image.id, status: "success", image })));
     };
 
     const buildRequestSnapshot = () => {
@@ -693,26 +695,41 @@ async function readStoredLogs() {
         await logStore.iterate<GenerationLog, void>((value) => {
             values.push(value);
         });
-        const logs = await Promise.all(values.map(normalizeLog));
+        const logs = await Promise.all(values.map((value) => normalizeLog(value, "summary")));
         return logs.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
     } catch {
         return [];
     }
 }
 
-async function normalizeLog(log: Partial<GenerationLog>): Promise<GenerationLog> {
-    const references = await Promise.all(
-        (log.references || []).map(async (item) => ({
-            ...item,
-            dataUrl: await resolveImageUrl(item.storageKey, item.dataUrl),
-        })),
-    );
-    const images = await Promise.all(
-        (log.images || []).map(async (item) => ({
-            ...item,
-            dataUrl: await resolveImageUrl(item.storageKey, item.dataUrl),
-        })),
-    );
+async function normalizeLog(log: Partial<GenerationLog>, mode: "summary" | "full" = "summary"): Promise<GenerationLog> {
+    const shouldHydrateAll = mode === "full";
+    const rawReferences = log.references || [];
+    const rawImages = log.images || [];
+    const references = shouldHydrateAll
+        ? await Promise.all(
+              rawReferences.map(async (item) => ({
+                  ...item,
+                  dataUrl: await resolveImageUrl(item.storageKey, item.dataUrl),
+              })),
+          )
+        : rawReferences.map((item) => ({ ...item, dataUrl: item.dataUrl || "" }));
+    const images = shouldHydrateAll
+        ? await Promise.all(
+              rawImages.map(async (item) => ({
+                  ...item,
+                  dataUrl: await resolveImageUrl(item.storageKey, item.dataUrl),
+              })),
+          )
+        : rawImages.map((item) => ({ ...item, dataUrl: item.dataUrl || "" }));
+    const thumbnailImages = shouldHydrateAll
+        ? images
+        : await Promise.all(
+              rawImages.slice(0, LOG_THUMBNAIL_LIMIT).map(async (item) => ({
+                  ...item,
+                  dataUrl: await resolveImageUrl(item.storageKey, item.dataUrl),
+              })),
+          );
     const config = normalizeLogConfig(log);
     return {
         id: log.id || nanoid(),
@@ -731,7 +748,7 @@ async function normalizeLog(log: Partial<GenerationLog>): Promise<GenerationLog>
         quality: log.quality || config.quality || "",
         status: log.status || "成功",
         images,
-        thumbnails: images.map((image) => image.dataUrl).filter(Boolean),
+        thumbnails: thumbnailImages.map((image) => image.dataUrl).filter(Boolean),
     };
 }
 

@@ -225,8 +225,8 @@ export function AgentChatComposer({
                         style={{ color: theme.node.text }}
                         placeholder={placeholder}
                     />
-                    <div className="mt-2 flex items-center justify-between gap-2">
-                        <div className="flex min-w-0 items-center gap-1">
+                    <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
+                        <div className="thin-scrollbar flex min-w-0 max-w-full flex-1 items-center gap-1 overflow-x-auto">
                             {onAddFiles ? (
                                 <>
                                     <input ref={fileInputRef} hidden type="file" accept="image/*" multiple onChange={(event) => {

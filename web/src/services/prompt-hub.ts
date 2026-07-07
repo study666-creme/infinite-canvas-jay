@@ -82,6 +82,38 @@ export type PromptHubGenerationJob = {
     message?: string;
 };
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+    return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
+
+function stringField(value: unknown) {
+    return typeof value === "string" ? value.trim() : "";
+}
+
+function compactJson(value: unknown) {
+    if (!value) return "";
+    if (typeof value === "string") return value.trim();
+    try {
+        return JSON.stringify(value).slice(0, 300);
+    } catch {
+        return "";
+    }
+}
+
+function promptHubErrorCode(payload: unknown) {
+    if (!isRecord(payload)) return "";
+    const error = payload.error;
+    return stringField(payload.code) || (typeof payload.code === "number" ? String(payload.code) : "") || (isRecord(error) ? stringField(error.code) : stringField(error));
+}
+
+function promptHubErrorMessage(payload: unknown, status: number) {
+    if (!isRecord(payload)) return `HTTP ${status}`;
+    const error = payload.error;
+    const details = isRecord(error) ? error.details : payload.details;
+    const message = stringField(payload.message) || stringField(payload.msg) || (isRecord(error) ? stringField(error.message) : stringField(error)) || compactJson(details) || promptHubErrorCode(payload);
+    return message || `HTTP ${status}`;
+}
+
 async function phAuthFetch(
     path: string,
     session: PromptHubSession,
@@ -99,8 +131,8 @@ async function phAuthFetch(
     });
     const data = await res.json().catch(() => ({}));
     if (!res.ok || data.ok === false) {
-        const code = data.code || data.error || "";
-        const msg = data.message || code || `HTTP ${res.status}`;
+        const code = promptHubErrorCode(data);
+        const msg = promptHubErrorMessage(data, res.status);
         if (res.status === 402 || code === "INSUFFICIENT_CREDITS") {
             throw new Error(`积分不足：${msg}`);
         }
@@ -245,7 +277,7 @@ export async function submitPromptHubGeneration(
 export async function pollPromptHubGenerationJob(
     session: PromptHubSession,
     jobId: string,
-    opts: { apiBase?: string; signal?: AbortSignal } = {},
+    opts: { apiBase?: string; signal?: AbortSignal; onPoll?: (attempt: number, job: PromptHubGenerationJob) => void } = {},
 ): Promise<PromptHubGenerationJob> {
     const apiBase = normalizeApiBase(opts.apiBase || PROMPT_HUB_DEFAULTS.apiBase);
     for (let i = 0; i < 90; i += 1) {
@@ -258,6 +290,7 @@ export async function pollPromptHubGenerationJob(
             signal: opts.signal,
         });
         const job = data.data as PromptHubGenerationJob;
+        opts.onPoll?.(i + 1, job);
         if (job.status === "failed") {
             throw new Error(job.errorMessage || job.message || "卡藏生图失败");
         }

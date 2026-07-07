@@ -1,7 +1,7 @@
 import type { NextRequest } from "next/server";
 
 export const runtime = "nodejs";
-export const dynamic = "force-dynamic";
+export const revalidate = 3600;
 
 type Prompt = {
     id: string;
@@ -30,6 +30,7 @@ const youMindNanoBananaProRawBase = "https://raw.githubusercontent.com/YouMind-O
 const davidWuGptImage2RawBase = "https://raw.githubusercontent.com/davidwuw0811-boop/awesome-gpt-image2-prompts/main";
 const gptImage2CaseFiles = ["README.md", "cases/ad-creative.md", "cases/character.md", "cases/comparison.md", "cases/ecommerce.md", "cases/portrait.md", "cases/poster.md", "cases/ui.md"];
 const cacheTtlMs = 1000 * 60 * 60;
+const remoteFetchTimeoutMs = 2500;
 
 const categories: PromptCategory[] = [
     { category: "gpt-image-2-prompts", githubUrl: "https://github.com/EvoLinkAI/awesome-gpt-image-2-API-and-Prompts", build: buildGptImage2Prompts },
@@ -178,7 +179,7 @@ function defaultPrompt(id: string, title: string, prompt: string, coverUrl: stri
 }
 
 async function fetchText(baseUrl: string, file: string) {
-    const response = await fetch(`${baseUrl}/${file}`, { cache: "no-store" });
+    const response = await fetch(`${baseUrl}/${file}`, { next: { revalidate }, signal: AbortSignal.timeout(remoteFetchTimeoutMs) });
     if (!response.ok) throw new Error(`${file} 拉取失败`);
     return response.text();
 }

@@ -26,7 +26,6 @@ export function AppCursor() {
     const themeName = useThemeStore((state) => state.theme);
     const theme = canvasThemes[themeName];
     const rootRef = useRef<HTMLDivElement | null>(null);
-    const haloRef = useRef<HTMLDivElement | null>(null);
     const pointerRef = useRef<HTMLDivElement | null>(null);
     const [enabled, setEnabled] = useState(false);
 
@@ -50,9 +49,8 @@ export function AppCursor() {
         }
 
         const root = rootRef.current;
-        const halo = haloRef.current;
         const pointer = pointerRef.current;
-        if (!root || !halo || !pointer) return;
+        if (!root || !pointer) return;
 
         document.documentElement.classList.add("has-app-cursor");
         let targetX = window.innerWidth / 2;
@@ -62,7 +60,6 @@ export function AppCursor() {
         const hide = () => root.classList.remove("is-visible");
         const setMode = (mode: CursorMode) => {
             applyMode(root, mode);
-            root.classList.toggle("has-halo", mode !== "default");
         };
 
         const move = (event: PointerEvent) => {
@@ -70,7 +67,6 @@ export function AppCursor() {
             targetX = event.clientX;
             targetY = event.clientY;
             pointer.style.transform = `translate3d(${targetX - 4}px, ${targetY - 3}px, 0)`;
-            halo.style.transform = `translate3d(${targetX - 22}px, ${targetY - 22}px, 0)`;
             setMode(cursorModeFromTarget(event.target));
             show();
         };
@@ -116,10 +112,9 @@ export function AppCursor() {
                     "--app-cursor-edge": themeName === "dark" ? "rgba(255,255,255,.62)" : "rgba(29,29,31,.44)",
                     "--app-cursor-fill": themeName === "dark" ? "rgba(245,245,247,.94)" : "rgba(29,29,31,.92)",
                     "--app-cursor-shadow": themeName === "dark" ? "rgba(0,0,0,.45)" : "rgba(31,29,26,.22)",
-                } as CSSProperties
+            } as CSSProperties
             }
         >
-            <div ref={haloRef} className="app-cursor-halo" />
             <div ref={pointerRef} className="app-cursor-pointer">
                 <svg className="app-cursor-arrow" viewBox="0 0 28 32" focusable="false">
                     <path className="app-cursor-arrow-shell" d="M4.3 3.1 23.2 18.4l-8.1 1.1-4.4 8.8L4.3 3.1Z" />

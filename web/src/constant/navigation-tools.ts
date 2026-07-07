@@ -1,4 +1,4 @@
-import { FileText, ImagePlus, Images, Maximize2, Video } from "lucide-react";
+import { ImagePlus, Images, Maximize2, Video } from "lucide-react";
 
 export const navigationTools = [
     {
@@ -15,11 +15,6 @@ export const navigationTools = [
         slug: "video",
         label: "视频创作台",
         icon: Video,
-    },
-    {
-        slug: "prompts",
-        label: "提示词库",
-        icon: FileText,
     },
     {
         slug: "assets",

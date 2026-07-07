@@ -499,7 +499,7 @@ export async function savePromptHubQuickCard(
             title: input.title || prompt.slice(0, 48) || "画布图片",
             imageBase64,
             sourceUrl: input.sourceUrl || null,
-            tags: input.tags || ["#无限画布"],
+            tags: input.tags || ["#卡藏画布"],
             publishToCommunity: input.publishToCommunity === true,
         }),
     });

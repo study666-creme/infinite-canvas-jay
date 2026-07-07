@@ -7,8 +7,8 @@ import "./globals.css";
 import React from "react";
 
 export const metadata: Metadata = {
-    title: "Prompt Canvas · 无限画布",
-    description: "Prompt Canvas — 与 Prompt Hub 卡片库联动的无限画布创作工具",
+    title: "卡藏 提示词画布",
+    description: "卡藏提示词画布 — 面向 AI 图像与视频创作的提示词、素材和节点工作台",
 };
 
 export default function RootLayout({

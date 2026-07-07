@@ -35,11 +35,24 @@ type CanvasStore = {
 const initialViewport: ViewportTransform = { x: 0, y: 0, k: 1 };
 const CANVAS_STORE_KEY = "infinite-canvas:canvas_store";
 type PersistedCanvasState = Pick<CanvasStore, "projects">;
+const LEGACY_DEFAULT_TITLE_RE = /^无限画布(?:\s+(\d+))?$/;
 let saveTimer: ReturnType<typeof setTimeout> | null = null;
 let queuedPersistState: PersistedCanvasState | null = null;
 let pendingPersistPayload: string | null = null;
 let persistPending = false;
 let persistStatusListeners = new Set<(pending: boolean) => void>();
+
+function normalizeCanvasProjectTitle(title: string) {
+    const match = title.match(LEGACY_DEFAULT_TITLE_RE);
+    return match ? `卡藏画布${match[1] ? ` ${match[1]}` : ""}` : title;
+}
+
+function normalizeCanvasProjects(projects: CanvasProject[]) {
+    return projects.map((project) => {
+        const title = normalizeCanvasProjectTitle(project.title);
+        return title === project.title ? project : { ...project, title };
+    });
+}
 
 function notifyPersistStatus(pending: boolean) {
     persistPending = pending;
@@ -169,6 +182,14 @@ export const useCanvasStore = create<CanvasStore>()(
                 ({
                     projects: state.projects,
                 }) as StorageValue<CanvasStore>["state"],
+            merge: (persistedState, currentState) => {
+                const state = persistedState as Partial<CanvasStore> | undefined;
+                return {
+                    ...currentState,
+                    ...state,
+                    projects: normalizeCanvasProjects(state?.projects || currentState.projects),
+                };
+            },
             onRehydrateStorage: () => () => {
                 useCanvasStore.setState({ hydrated: true });
             },

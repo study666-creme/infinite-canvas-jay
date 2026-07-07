@@ -25,14 +25,10 @@ export function AppTopNav() {
                     <div className="mx-auto flex h-full max-w-7xl items-stretch justify-between gap-5 px-6">
                         <div className="flex min-w-0 items-center">
                             <Link href="/" className="flex h-full shrink-0 items-center gap-2 text-sm font-semibold leading-none tracking-tight text-stone-950 transition hover:text-stone-600 dark:text-stone-100 dark:hover:text-stone-300">
-                                <span
-                                    className="size-5 shrink-0 bg-current"
-                                    style={{
-                                        mask: "url(/logo.svg) center / contain no-repeat",
-                                        WebkitMask: "url(/logo.svg) center / contain no-repeat",
-                                    }}
-                                />
-                                <span className="text-base font-medium">Prompt Canvas</span>
+                                <span className="grid size-7 shrink-0 place-items-center rounded-xl bg-stone-950 text-[13px] font-semibold text-white shadow-sm dark:bg-white dark:text-black">
+                                    藏
+                                </span>
+                                <span className="text-base font-medium">卡藏 提示词画布</span>
                             </Link>
 
                             <button

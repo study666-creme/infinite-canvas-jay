@@ -1,5 +1,8 @@
 import express, { type NextFunction, type Request, type Response } from "express";
+import { spawn, spawnSync } from "node:child_process";
+import fs from "node:fs";
 import os, { type NetworkInterfaceInfo } from "node:os";
+import path from "node:path";
 
 import { DEFAULT_PORT, ensureCanvasWorkspace, loadConfig, saveConfig, updateCanvasWorkspace, type CanvasAgentConfig } from "./config.js";
 import { CanvasSession } from "./canvas-session.js";
@@ -95,6 +98,13 @@ export function startHttpServer() {
         void runCodexTurn(withAgentPrompt(String(req.body?.prompt || "")), emit, attachments, { threadId, cwd: workspace.workspacePath });
         res.json({ ok: true, threadId });
     }));
+    app.post("/agent/git/push", route(async (req, res) => {
+        const workspace = ensureCanvasWorkspace(config, String(req.body?.canvasId || ""));
+        const remote = safeGitRef(String(req.body?.remote || "origin"), "origin");
+        const branch = safeGitRef(String(req.body?.branch || "main"), "main");
+        const result = await runGitPush(workspace.workspacePath, remote, branch);
+        res.json({ ok: true, workspace, remote, branch, ...result });
+    }));
     app.post("/agent/claude/turn", (req, res) => {
         runClaudeTurn(withAgentPrompt(String(req.body?.prompt || "")), emit);
         res.json({ ok: true });
@@ -149,4 +159,47 @@ function lanUrls(port: number) {
         .flat()
         .filter((item): item is NetworkInterfaceInfo => Boolean(item && item.family === "IPv4" && !item.internal))
         .map((item) => `http://${item.address}:${port}`);
+}
+
+function safeGitRef(value: string, fallback: string) {
+    const ref = value.trim() || fallback;
+    if (!/^[a-zA-Z0-9._/-]+$/.test(ref) || ref.includes("..") || ref.startsWith("/") || ref.endsWith("/")) throw new Error("git push 参数不安全");
+    return ref;
+}
+
+function runGitPush(cwd: string, remote: string, branch: string) {
+    const repoPath = resolveGitWorkspace(cwd);
+    return new Promise<{ repoPath: string; stdout: string; stderr: string }>((resolve, reject) => {
+        const child = spawn("git", ["push", remote, `HEAD:${branch}`], { cwd: repoPath, windowsHide: true });
+        let stdout = "";
+        let stderr = "";
+        child.stdout?.on("data", (chunk) => (stdout += chunk.toString()));
+        child.stderr?.on("data", (chunk) => (stderr += chunk.toString()));
+        child.on("error", reject);
+        child.on("close", (code) => {
+            if (code === 0) return resolve({ repoPath, stdout: stdout.trim(), stderr: stderr.trim() });
+            reject(new Error(`git push 失败 (${code ?? "unknown"}): ${(stderr || stdout || "no output").trim()}`));
+        });
+    });
+}
+
+function resolveGitWorkspace(cwd: string) {
+    const current = gitTopLevel(cwd);
+    if (current) return current;
+    try {
+        const children = fs.readdirSync(cwd, { withFileTypes: true });
+        for (const item of children) {
+            if (!item.isDirectory()) continue;
+            const repo = gitTopLevel(path.join(cwd, item.name));
+            if (repo) return repo;
+        }
+    } catch {
+        // Let git return the actionable error below.
+    }
+    return cwd;
+}
+
+function gitTopLevel(cwd: string) {
+    const result = spawnSync("git", ["rev-parse", "--show-toplevel"], { cwd, encoding: "utf8", windowsHide: true });
+    return result.status === 0 ? result.stdout.trim() : "";
 }

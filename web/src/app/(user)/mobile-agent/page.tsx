@@ -1,7 +1,7 @@
 "use client";
 
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
-import { CheckCircle2, Copy, FolderGit2, LoaderCircle, PlugZap, RotateCcw, SendHorizontal, Settings2, TerminalSquare, Trash2, X } from "lucide-react";
+import { CheckCircle2, Copy, FolderGit2, LoaderCircle, PlugZap, RotateCcw, SendHorizontal, Settings2, TerminalSquare, Trash2, UploadCloud, X } from "lucide-react";
 
 type MessageRole = "user" | "assistant" | "tool" | "error" | "status";
 type MobileMessage = { id: string; role: MessageRole; title?: string; text: string; streamId?: string };
@@ -9,6 +9,7 @@ type Settings = { agentUrl: string; token: string; canvasId: string; threadId: s
 type Workspace = { canvasId: string; workspacePath: string; activeThreadId?: string };
 type AgentEvent = { type?: string; item?: Record<string, unknown>; usage?: unknown; message?: string };
 type PendingRun = { threadId: string; canvasId: string; prompt: string; startedAt: number };
+type ConnectionStatus = "idle" | "connecting" | "connected" | "offline" | "error";
 
 const settingsKey = "kazang-mobile-codex:settings";
 const messagesKey = "kazang-mobile-codex:messages";
@@ -150,10 +151,13 @@ export default function MobileAgentPage() {
     const [connected, setConnected] = useState(false);
     const [connecting, setConnecting] = useState(false);
     const [sending, setSending] = useState(false);
+    const [pushing, setPushing] = useState(false);
     const [settingsOpen, setSettingsOpen] = useState(false);
     const [workspace, setWorkspace] = useState<Workspace | null>(null);
     const [activeThreadId, setActiveThreadId] = useState("");
     const [copiedId, setCopiedId] = useState("");
+    const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>("idle");
+    const [connectionMessage, setConnectionMessage] = useState("");
     const [hydrated, setHydrated] = useState(false);
     const eventSourceRef = useRef<EventSource | null>(null);
     const pollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -162,7 +166,7 @@ export default function MobileAgentPage() {
     const activeThreadIdRef = useRef("");
     const scrollerRef = useRef<HTMLDivElement>(null);
 
-    const canSend = useMemo(() => connected && Boolean(input.trim()) && !sending, [connected, input, sending]);
+    const canSend = useMemo(() => Boolean(input.trim()) && !sending, [input, sending]);
 
     useEffect(() => {
         const loadedSettings = sanitizeSettings(readJson<Partial<Settings>>(localStorage.getItem(settingsKey), {}));
@@ -379,10 +383,13 @@ export default function MobileAgentPage() {
         }
     };
 
-    const connect = async () => {
+    const connect = async (options: { quiet?: boolean } = {}) => {
         eventSourceRef.current?.close();
         setConnecting(true);
         setConnected(false);
+        setConnectionStatus("connecting");
+        setConnectionMessage("正在连接电脑 Agent...");
+        if (!options.quiet) pushMessage({ id: createId(), role: "status", text: "正在连接电脑 Agent..." });
         try {
             const agentEndpoint = validateAgentUrl(settings.agentUrl);
             if (agentEndpoint !== settings.agentUrl.trim()) updateSettings({ agentUrl: agentEndpoint });
@@ -413,13 +420,17 @@ export default function MobileAgentPage() {
 
             setConnected(true);
             setConnecting(false);
-            pushMessage({ id: createId(), role: "status", text: "已连接电脑 Codex" });
+            setConnectionStatus("connected");
+            setConnectionMessage("已连接电脑 Codex");
+            if (!options.quiet) pushMessage({ id: createId(), role: "status", text: "已连接电脑 Codex" });
 
             const source = new EventSource(withToken(settings.agentUrl, `/events?clientId=mobile-codex-${Date.now()}`, settings.token));
             eventSourceRef.current = source;
             source.addEventListener("hello", () => {
                 setConnected(true);
                 setConnecting(false);
+                setConnectionStatus("connected");
+                setConnectionMessage("实时通道已连接");
             });
             source.addEventListener("agent_event", (event) => {
                 const data = parseEventData<AgentEvent>(event);
@@ -432,8 +443,8 @@ export default function MobileAgentPage() {
                 pushMessage({ id: createId(), role: "error", title: "Agent", text: data?.message || "Agent 出错" });
             });
             source.addEventListener("agent_done", () => {
-                const threadId = activeThreadId || normalizeThreadId(settings.threadId);
-                const canvasId = normalizeCanvasId(settings.canvasId);
+                const threadId = activeThreadIdRef.current || normalizeThreadId(settingsRef.current.threadId);
+                const canvasId = normalizeCanvasId(settingsRef.current.canvasId);
                 const pendingPrompt = pendingPromptRef.current;
                 if (!threadId) {
                     pendingPromptRef.current = "";
@@ -452,11 +463,44 @@ export default function MobileAgentPage() {
             });
             source.onerror = () => {
                 setConnecting(false);
+                setConnectionStatus("offline");
+                setConnectionMessage("实时通道断开；发送和同步仍会尝试通过 HTTP 继续");
             };
+            return true;
         } catch (error) {
             setConnecting(false);
             setConnected(false);
-            pushMessage({ id: createId(), role: "error", title: "连接失败", text: error instanceof Error ? error.message : String(error) });
+            const message = error instanceof Error ? error.message : String(error);
+            setConnectionStatus("error");
+            setConnectionMessage(message);
+            pushMessage({ id: createId(), role: "error", title: "连接失败", text: message });
+            return false;
+        }
+    };
+
+    const pushCurrentCommit = async () => {
+        if (pushing) return;
+        if (!settings.agentUrl.trim() || !settings.token.trim()) {
+            setSettingsOpen(true);
+            pushMessage({ id: createId(), role: "error", title: "无法推送", text: "请先填写 Agent URL 和 Token。" });
+            return;
+        }
+        if (!connected) {
+            const ok = await connect({ quiet: true });
+            if (!ok) return;
+        }
+        setPushing(true);
+        pushMessage({ id: createId(), role: "status", text: "正在让电脑执行 git push origin HEAD:main..." });
+        try {
+            const data = await agentFetch<{ stdout?: string; stderr?: string; remote?: string; branch?: string }>("/agent/git/push", {
+                method: "POST",
+                body: JSON.stringify({ canvasId: normalizeCanvasId(settings.canvasId), remote: "origin", branch: "main" }),
+            });
+            pushMessage({ id: createId(), role: "tool", title: "Git push", text: data.stdout || data.stderr || `已推送到 ${data.remote || "origin"}/${data.branch || "main"}` });
+        } catch (error) {
+            pushMessage({ id: createId(), role: "error", title: "推送失败", text: error instanceof Error ? error.message : String(error) });
+        } finally {
+            setPushing(false);
         }
     };
 
@@ -480,6 +524,17 @@ export default function MobileAgentPage() {
         event?.preventDefault();
         const prompt = input.trim();
         if (!prompt || sending) return;
+        if (!settings.agentUrl.trim() || !settings.token.trim()) {
+            setConnectionStatus("error");
+            setConnectionMessage("请先填写 Agent URL 和 Token");
+            setSettingsOpen(true);
+            pushMessage({ id: createId(), role: "error", title: "发送失败", text: "请先填写 Agent URL 和 Token。" });
+            return;
+        }
+        if (!connected) {
+            const ok = await connect({ quiet: true });
+            if (!ok) return;
+        }
         setInput("");
         setSending(true);
         pendingPromptRef.current = prompt;
@@ -487,7 +542,7 @@ export default function MobileAgentPage() {
         upsertStreamMessage({ id: "turn-status", role: "status", text: "Codex 正在处理..." });
         try {
             const canvasId = normalizeCanvasId(settings.canvasId);
-            const targetThreadId = activeThreadId || normalizeThreadId(settings.threadId);
+            const targetThreadId = activeThreadIdRef.current || normalizeThreadId(settingsRef.current.threadId);
             if (targetThreadId) writePendingRun({ threadId: targetThreadId, canvasId, prompt, startedAt: Date.now() });
             const data = await agentFetch<{ threadId?: string }>("/agent/codex/turn", {
                 method: "POST",
@@ -531,6 +586,23 @@ export default function MobileAgentPage() {
                     </button>
                 </div>
             </header>
+
+            {connectionMessage ? (
+                <div
+                    className={[
+                        "shrink-0 border-b px-4 py-2 text-xs leading-5",
+                        connectionStatus === "connected"
+                            ? "border-emerald-500/15 bg-emerald-500/10 text-emerald-800 dark:text-emerald-100"
+                            : connectionStatus === "connecting"
+                              ? "border-sky-500/15 bg-sky-500/10 text-sky-800 dark:text-sky-100"
+                              : connectionStatus === "error"
+                                ? "border-red-500/15 bg-red-500/10 text-red-800 dark:text-red-100"
+                                : "border-amber-500/15 bg-amber-500/10 text-amber-800 dark:text-amber-100",
+                    ].join(" ")}
+                >
+                    {connectionMessage}
+                </div>
+            ) : null}
 
             {sending ? (
                 <div className="shrink-0 border-b border-black/10 bg-amber-500/10 px-4 py-2 text-xs leading-5 text-amber-800 dark:border-white/10 dark:text-amber-100">
@@ -587,7 +659,7 @@ export default function MobileAgentPage() {
                             if (event.key === "Enter" && !event.shiftKey) void submit();
                         }}
                         rows={1}
-                        placeholder={connected ? "让 Codex 继续做项目任务..." : "先连接电脑 Agent"}
+                        placeholder={connected ? "让 Codex 继续做项目任务..." : "可以先输入，发送时会尝试连接电脑 Agent"}
                         className="max-h-36 min-h-10 flex-1 bg-transparent px-3 py-2 text-[16px] leading-6 outline-none placeholder:text-stone-400"
                     />
                     <button type="submit" disabled={!canSend} className="grid size-10 shrink-0 place-items-center rounded-2xl bg-stone-950 text-white transition enabled:hover:scale-[1.03] disabled:opacity-35 dark:bg-white dark:text-black" aria-label="发送">
@@ -645,6 +717,10 @@ export default function MobileAgentPage() {
                             <button type="button" className="inline-flex h-11 items-center justify-center gap-2 rounded-xl border border-black/10 bg-white text-sm font-medium dark:border-white/10 dark:bg-white/[0.06]" onClick={() => void newThread()} disabled={!connected}>
                                 <RotateCcw className="size-4" />
                                 新对话
+                            </button>
+                            <button type="button" className="col-span-2 inline-flex h-11 items-center justify-center gap-2 rounded-xl border border-black/10 bg-white text-sm font-medium disabled:opacity-45 dark:border-white/10 dark:bg-white/[0.06]" onClick={() => void pushCurrentCommit()} disabled={pushing || !settings.agentUrl.trim() || !settings.token.trim()}>
+                                {pushing ? <LoaderCircle className="size-4 animate-spin" /> : <UploadCloud className="size-4" />}
+                                推送当前提交到 main
                             </button>
                             <button type="button" className="col-span-2 inline-flex h-11 items-center justify-center gap-2 rounded-xl border border-black/10 bg-white text-sm font-medium dark:border-white/10 dark:bg-white/[0.06]" onClick={() => setMessages([])}>
                                 <Trash2 className="size-4" />

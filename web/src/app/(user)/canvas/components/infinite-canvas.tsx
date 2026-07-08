@@ -389,16 +389,19 @@ export function InfiniteCanvas({ containerRef, worldLayerRef, viewport, backgrou
             if (finishTouchPointer(event, true)) return;
             stopPanning();
         };
+        const handleMouseUp = () => {
+            stopPanning({ deselectIfClick: true });
+        };
 
         window.addEventListener("pointermove", handlePointerMove);
         window.addEventListener("pointerup", handlePointerUp);
         window.addEventListener("pointercancel", handlePointerCancel);
-        window.addEventListener("mouseup", handlePointerUp);
+        window.addEventListener("mouseup", handleMouseUp);
         return () => {
             window.removeEventListener("pointermove", handlePointerMove);
             window.removeEventListener("pointerup", handlePointerUp);
             window.removeEventListener("pointercancel", handlePointerCancel);
-            window.removeEventListener("mouseup", handlePointerUp);
+            window.removeEventListener("mouseup", handleMouseUp);
         };
     }, [applyTouchPinch, finishTouchPointer, queueViewportChange, stopPanning]);
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { type MouseEvent, useCallback, useEffect, useRef, useState } from "react";
 import { Moon, Sun } from "lucide-react";
 import { flushSync } from "react-dom";
 
@@ -83,10 +83,12 @@ function getThemeTransitionClipPaths(variant: TransitionVariant, cx: number, cy:
     }
 }
 
-export const AnimatedThemeToggler = ({ children, className, duration = 400, variant, fromCenter = false, theme, targetTheme, onThemeChange, ...props }: AnimatedThemeTogglerProps) => {
+export const AnimatedThemeToggler = ({ children, className, duration = 400, variant, fromCenter = false, theme, targetTheme, onThemeChange, disabled, onClick, ...props }: AnimatedThemeTogglerProps) => {
     const shape = variant ?? "circle";
     const [isDark, setIsDark] = useState(false);
+    const [isTransitioning, setIsTransitioning] = useState(false);
     const buttonRef = useRef<HTMLButtonElement>(null);
+    const transitionActiveRef = useRef(false);
 
     useEffect(() => {
         if (theme) {
@@ -111,7 +113,7 @@ export const AnimatedThemeToggler = ({ children, className, duration = 400, vari
 
     const toggleTheme = useCallback(() => {
         const button = buttonRef.current;
-        if (!button) return;
+        if (!button || transitionActiveRef.current) return;
 
         const viewportWidth = window.visualViewport?.width ?? window.innerWidth;
         const viewportHeight = window.visualViewport?.height ?? window.innerHeight;
@@ -138,7 +140,8 @@ export const AnimatedThemeToggler = ({ children, className, duration = 400, vari
             onThemeChange?.(nextTheme);
         };
 
-        if (typeof document.startViewTransition !== "function") {
+        const prefersReducedMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+        if (prefersReducedMotion || typeof document.startViewTransition !== "function") {
             applyTheme();
             return;
         }
@@ -146,20 +149,32 @@ export const AnimatedThemeToggler = ({ children, className, duration = 400, vari
         const clipPath = getThemeTransitionClipPaths(shape, x, y, maxRadius, viewportWidth, viewportHeight);
 
         const root = document.documentElement;
+        transitionActiveRef.current = true;
+        setIsTransitioning(true);
         root.dataset.magicuiThemeVt = "active";
         root.style.setProperty("--magicui-theme-toggle-vt-duration", `${duration}ms`);
         // Pin the collapsed clip-path via CSS so Firefox does not paint the new
         // theme unclipped between snapshot and the ready.then() JS animation.
         root.style.setProperty("--magicui-theme-vt-clip-from", clipPath[0]);
         const cleanup = () => {
+            transitionActiveRef.current = false;
+            setIsTransitioning(false);
             delete root.dataset.magicuiThemeVt;
             root.style.removeProperty("--magicui-theme-toggle-vt-duration");
             root.style.removeProperty("--magicui-theme-vt-clip-from");
         };
 
-        const transition = document.startViewTransition(() => {
-            flushSync(applyTheme);
-        });
+        let transition: ViewTransition;
+        try {
+            transition = document.startViewTransition(() => {
+                flushSync(applyTheme);
+            });
+        } catch {
+            cleanup();
+            applyTheme();
+            return;
+        }
+
         if (typeof transition?.finished?.finally === "function") {
             transition.finished.finally(cleanup);
         } else {
@@ -168,25 +183,35 @@ export const AnimatedThemeToggler = ({ children, className, duration = 400, vari
 
         const ready = transition?.ready;
         if (ready && typeof ready.then === "function") {
-            ready.then(() => {
-                document.documentElement.animate(
-                    {
-                        clipPath,
-                    },
-                    {
-                        duration,
-                        // Star: linear avoids easing overshoot that fights polygon interpolation at t→1; VT group duration is synced above.
-                        easing: shape === "star" ? "linear" : "ease-in-out",
-                        fill: "forwards",
-                        pseudoElement: "::view-transition-new(root)",
-                    },
-                );
-            });
+            ready
+                .then(() => {
+                    document.documentElement.animate(
+                        {
+                            clipPath,
+                        },
+                        {
+                            duration,
+                            // Star: linear avoids easing overshoot that fights polygon interpolation at t→1; VT group duration is synced above.
+                            easing: shape === "star" ? "linear" : "ease-in-out",
+                            fill: "forwards",
+                            pseudoElement: "::view-transition-new(root)",
+                        },
+                    );
+                })
+                .catch(cleanup);
         }
     }, [shape, fromCenter, duration, isDark, targetTheme, onThemeChange]);
 
+    const handleClick = useCallback(
+        (event: MouseEvent<HTMLButtonElement>) => {
+            onClick?.(event);
+            if (!event.defaultPrevented) toggleTheme();
+        },
+        [onClick, toggleTheme],
+    );
+
     return (
-        <button type="button" ref={buttonRef} onClick={toggleTheme} className={cn(className)} {...props}>
+        <button type="button" ref={buttonRef} onClick={handleClick} disabled={disabled || isTransitioning} className={cn(className)} {...props}>
             {children ?? (isDark ? <Sun /> : <Moon />)}
             <span className="sr-only">{props["aria-label"] || "切换主题"}</span>
         </button>

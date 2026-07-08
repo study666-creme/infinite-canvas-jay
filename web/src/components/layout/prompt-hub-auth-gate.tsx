@@ -154,12 +154,13 @@ export function PromptHubAuthGate({ children }: { children: ReactNode }) {
                             />
                         </label>
                         <details className="rounded-2xl border border-black/10 bg-white/54 px-4 py-3 text-sm dark:border-white/10 dark:bg-white/[0.04]">
-                            <summary className="cursor-pointer font-medium">服务地址</summary>
+                            <summary className="cursor-pointer font-medium">高级：卡藏 API 地址</summary>
                             <input
                                 value={apiBase}
                                 onChange={(event) => setApiBase(event.target.value)}
                                 className="mt-3 h-11 w-full rounded-xl border border-black/10 bg-white px-3 text-[15px] outline-none focus:border-stone-500 dark:border-white/10 dark:bg-white/[0.06]"
                             />
+                            <p className="mt-2 text-xs leading-5 text-stone-500 dark:text-stone-400">通常不用修改。这里连接卡片库登录、积分、模型和生成接口，不是画布网址。</p>
                         </details>
                         <button
                             type="submit"

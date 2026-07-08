@@ -1,10 +1,15 @@
-import { ImagePlus, Images, Maximize2, Video } from "lucide-react";
+import { ImagePlus, Images, Maximize2, MessageCircle, Video } from "lucide-react";
 
 export const navigationTools = [
     {
         slug: "canvas",
         label: "我的画布",
         icon: Maximize2,
+    },
+    {
+        slug: "mobile-agent",
+        label: "移动对话",
+        icon: MessageCircle,
     },
     {
         slug: "image",

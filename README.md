@@ -39,6 +39,17 @@ cd web
 npm run build
 ```
 
+## 手机移动对话
+
+打开 `/mobile-agent` 可以在手机上直接发送文字消息并接收回复，不需要接入龙虾或 ChatGPT 账号登录。
+
+两种使用方式：
+
+- 服务器方式：在部署环境配置 `OPENAI_API_KEY`、`OPENAI_BASE_URL`、`OPENAI_MODEL` 和 `MOBILE_AGENT_ACCESS_TOKEN`，手机页面只填写访问口令。
+- 本机方式：不配置服务器 `OPENAI_API_KEY`，在手机页面填写自己的 API Key、Base URL 和模型；配置会保存在手机浏览器本地。
+
+如果服务器配置了 `OPENAI_API_KEY`，建议一定配置 `MOBILE_AGENT_ACCESS_TOKEN`，避免公开接口被别人刷你的额度。
+
 ## 部署
 
 推荐部署到 Vercel，并把 Root Directory 设置为 `web`。更多部署、WebDAV、视频网关和故障排查内容见 [DEPLOY.md](DEPLOY.md)。

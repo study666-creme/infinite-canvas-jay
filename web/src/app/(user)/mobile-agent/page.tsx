@@ -18,6 +18,7 @@ const defaultSettings: Settings = {
     threadId: "",
     workspacePath: "",
 };
+const legacyDefaultWorkspacePath = "D:\\canvas\\infinite-canvas";
 
 function createId() {
     return typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
@@ -33,7 +34,48 @@ function readJson<T>(value: string | null, fallback: T): T {
 }
 
 function endpoint(value: string) {
-    return value.trim().replace(/\/+$/, "");
+    const raw = value.trim();
+    try {
+        return new URL(raw).origin;
+    } catch {
+        return raw.replace(/\/+$/, "");
+    }
+}
+
+function isCanvasWebUrl(value: string) {
+    const raw = value.trim();
+    if (!raw) return false;
+    try {
+        const url = new URL(raw);
+        const host = url.hostname.toLowerCase();
+        const currentHost = typeof window === "undefined" ? "" : window.location.hostname.toLowerCase();
+        const path = url.pathname.toLowerCase();
+        return host === currentHost || host === "canvas.prompt-hubs.com" || host === "infinite-canvas-jay.vercel.app" || path === "/mobile-agent" || path.startsWith("/mobile-agent/") || path === "/canvas" || path.startsWith("/canvas/");
+    } catch {
+        return /(?:^|\/)(mobile-agent|canvas)(?:\/|$)/i.test(raw);
+    }
+}
+
+function sanitizeSettings(value: Partial<Settings>) {
+    const next = { ...defaultSettings, ...value };
+    if (next.workspacePath.trim().toLowerCase() === legacyDefaultWorkspacePath.toLowerCase()) next.workspacePath = "";
+    if (isCanvasWebUrl(next.agentUrl)) next.agentUrl = "";
+    return next;
+}
+
+function validateAgentUrl(value: string) {
+    const raw = value.trim();
+    if (!raw) throw new Error("请先填写 canvas-agent 的 HTTPS 地址");
+    if (isCanvasWebUrl(raw)) throw new Error("Agent URL 填成了画布网页地址。这里要填 cloudflared / Tailscale / VPS 反代出来的 canvas-agent 地址。");
+    let url: URL;
+    try {
+        url = new URL(raw);
+    } catch {
+        throw new Error("Agent URL 不是有效网址");
+    }
+    const local = ["localhost", "127.0.0.1"].includes(url.hostname);
+    if (url.protocol !== "https:" && !local) throw new Error("手机远程连接需要 HTTPS Agent URL");
+    return endpoint(raw);
 }
 
 function normalizeCanvasId(value: string) {
@@ -97,7 +139,7 @@ export default function MobileAgentPage() {
     const canSend = useMemo(() => connected && Boolean(input.trim()) && !sending, [connected, input, sending]);
 
     useEffect(() => {
-        setSettings({ ...defaultSettings, ...readJson<Partial<Settings>>(localStorage.getItem(settingsKey), {}) });
+        setSettings(sanitizeSettings(readJson<Partial<Settings>>(localStorage.getItem(settingsKey), {})));
         setMessages(readJson<MobileMessage[]>(localStorage.getItem(messagesKey), []));
         return () => eventSourceRef.current?.close();
     }, []);
@@ -176,6 +218,8 @@ export default function MobileAgentPage() {
         setConnecting(true);
         setConnected(false);
         try {
+            const agentEndpoint = validateAgentUrl(settings.agentUrl);
+            if (agentEndpoint !== settings.agentUrl.trim()) updateSettings({ agentUrl: agentEndpoint });
             const canvasId = normalizeCanvasId(settings.canvasId);
             const threadId = normalizeThreadId(settings.threadId);
             if (settings.workspacePath.trim()) {

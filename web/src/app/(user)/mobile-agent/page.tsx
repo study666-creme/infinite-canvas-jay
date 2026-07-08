@@ -5,7 +5,7 @@ import { CheckCircle2, Copy, FolderGit2, LoaderCircle, PlugZap, RotateCcw, SendH
 
 type MessageRole = "user" | "assistant" | "tool" | "error" | "status";
 type MobileMessage = { id: string; role: MessageRole; title?: string; text: string; streamId?: string };
-type Settings = { agentUrl: string; token: string; canvasId: string; workspacePath: string };
+type Settings = { agentUrl: string; token: string; canvasId: string; threadId: string; workspacePath: string };
 type Workspace = { canvasId: string; workspacePath: string; activeThreadId?: string };
 type AgentEvent = { type?: string; item?: Record<string, unknown>; usage?: unknown; message?: string };
 
@@ -15,7 +15,8 @@ const defaultSettings: Settings = {
     agentUrl: "",
     token: "",
     canvasId: "default",
-    workspacePath: "D:\\canvas\\infinite-canvas",
+    threadId: "",
+    workspacePath: "",
 };
 
 function createId() {
@@ -33,6 +34,20 @@ function readJson<T>(value: string | null, fallback: T): T {
 
 function endpoint(value: string) {
     return value.trim().replace(/\/+$/, "");
+}
+
+function normalizeCanvasId(value: string) {
+    const raw = value.trim();
+    if (!raw) return "default";
+    const match = raw.match(/(?:^|\/)canvas\/([^/?#]+)/i);
+    return decodeURIComponent(match?.[1] || raw.replace(/^\/?canvas\//i, "")).trim() || "default";
+}
+
+function normalizeThreadId(value: string) {
+    const raw = value.trim();
+    if (!raw) return "";
+    const match = raw.match(/(?:codex:\/\/threads\/|\/threads\/)([^/?#]+)/i);
+    return decodeURIComponent(match?.[1] || raw).trim();
 }
 
 function withToken(base: string, path: string, token: string) {
@@ -161,18 +176,30 @@ export default function MobileAgentPage() {
         setConnecting(true);
         setConnected(false);
         try {
+            const canvasId = normalizeCanvasId(settings.canvasId);
+            const threadId = normalizeThreadId(settings.threadId);
             if (settings.workspacePath.trim()) {
                 const data = await agentFetch<{ workspace?: Workspace }>("/agent/codex/workspace", {
                     method: "POST",
-                    body: JSON.stringify({ canvasId: settings.canvasId.trim() || "default", workspacePath: settings.workspacePath.trim() }),
+                    body: JSON.stringify({ canvasId, workspacePath: settings.workspacePath.trim() }),
                 });
                 setWorkspace(data.workspace || null);
                 setActiveThreadId(data.workspace?.activeThreadId || "");
             }
 
-            const data = await agentFetch<{ workspace?: Workspace }>(`/agent/codex/workspace?canvasId=${encodeURIComponent(settings.canvasId.trim() || "default")}`);
+            const data = await agentFetch<{ workspace?: Workspace }>(`/agent/codex/workspace?canvasId=${encodeURIComponent(canvasId)}`);
             setWorkspace(data.workspace || null);
-            setActiveThreadId(data.workspace?.activeThreadId || "");
+            setActiveThreadId(threadId || data.workspace?.activeThreadId || "");
+
+            if (threadId) {
+                const resumed = await agentFetch<{ workspace?: Workspace; messages?: MobileMessage[] }>(`/agent/codex/threads/${encodeURIComponent(threadId)}/resume`, {
+                    method: "POST",
+                    body: JSON.stringify({ canvasId }),
+                });
+                setWorkspace(resumed.workspace || data.workspace || null);
+                setActiveThreadId(threadId);
+                if (resumed.messages?.length) setMessages(resumed.messages);
+            }
 
             const source = new EventSource(withToken(settings.agentUrl, `/events?clientId=mobile-codex-${Date.now()}`, settings.token));
             eventSourceRef.current = source;
@@ -206,10 +233,11 @@ export default function MobileAgentPage() {
         try {
             const data = await agentFetch<{ workspace?: Workspace; thread?: { id?: string } }>("/agent/codex/threads/new", {
                 method: "POST",
-                body: JSON.stringify({ canvasId: settings.canvasId.trim() || "default" }),
+                body: JSON.stringify({ canvasId: normalizeCanvasId(settings.canvasId) }),
             });
             setWorkspace(data.workspace || workspace);
             setActiveThreadId(data.thread?.id || data.workspace?.activeThreadId || "");
+            if (data.thread?.id || data.workspace?.activeThreadId) updateSettings({ threadId: data.thread?.id || data.workspace?.activeThreadId || "" });
             setMessages([]);
             pushMessage({ id: createId(), role: "status", text: "已创建新 Codex 对话" });
         } catch (error) {
@@ -227,9 +255,12 @@ export default function MobileAgentPage() {
         try {
             const data = await agentFetch<{ threadId?: string }>("/agent/codex/turn", {
                 method: "POST",
-                body: JSON.stringify({ prompt, canvasId: settings.canvasId.trim() || "default", threadId: activeThreadId || undefined }),
+                body: JSON.stringify({ prompt, canvasId: normalizeCanvasId(settings.canvasId), threadId: activeThreadId || normalizeThreadId(settings.threadId) || undefined }),
             });
-            if (data.threadId) setActiveThreadId(data.threadId);
+            if (data.threadId) {
+                setActiveThreadId(data.threadId);
+                updateSettings({ threadId: data.threadId });
+            }
         } catch (error) {
             setSending(false);
             pushMessage({ id: createId(), role: "error", title: "发送失败", text: error instanceof Error ? error.message : String(error) });
@@ -332,23 +363,32 @@ export default function MobileAgentPage() {
 
                         <div className="mt-5 space-y-4">
                             <p className="rounded-2xl border border-amber-500/20 bg-amber-500/10 px-3 py-2 text-xs leading-5 text-amber-800 dark:text-amber-100">
-                                这里连接 canvas-agent 的 HTTPS 地址，不是 New API 或创作 Agent API。可用 Cloudflare Tunnel、Tailscale Funnel 或 VPS 反代地址；不要把 17371 端口无鉴权裸露到公网。
+                                Agent URL 是 canvas-agent 的 HTTPS 服务地址，不是画布网页地址、New API 地址或创作 Agent API。可用 Cloudflare Tunnel、Tailscale Funnel 或 VPS 反代地址；不要把 17371 端口无鉴权裸露到公网。
                             </p>
                             <label className="block">
                                 <span className="text-sm font-medium">Agent URL</span>
                                 <input value={settings.agentUrl} onChange={(event) => updateSettings({ agentUrl: event.target.value })} placeholder="https://your-canvas-agent.example.com" className="mt-2 h-11 w-full rounded-xl border border-black/10 bg-white px-3 outline-none focus:border-stone-500 dark:border-white/10 dark:bg-white/[0.06]" />
+                                <span className="mt-1 block text-xs leading-5 text-stone-500 dark:text-stone-400">填暴露 canvas-agent 的地址，不填 https://canvas.prompt-hubs.com。</span>
                             </label>
                             <label className="block">
                                 <span className="text-sm font-medium">Token</span>
                                 <input value={settings.token} onChange={(event) => updateSettings({ token: event.target.value })} type="password" autoComplete="new-password" className="mt-2 h-11 w-full rounded-xl border border-black/10 bg-white px-3 outline-none focus:border-stone-500 dark:border-white/10 dark:bg-white/[0.06]" />
+                                <span className="mt-1 block text-xs leading-5 text-stone-500 dark:text-stone-400">canvas-agent 启动输出的 Connect token，不是 Codex API Key。</span>
                             </label>
                             <label className="block">
                                 <span className="text-sm font-medium">Workspace</span>
                                 <input value={settings.workspacePath} onChange={(event) => updateSettings({ workspacePath: event.target.value })} className="mt-2 h-11 w-full rounded-xl border border-black/10 bg-white px-3 outline-none focus:border-stone-500 dark:border-white/10 dark:bg-white/[0.06]" />
+                                <span className="mt-1 block text-xs leading-5 text-stone-500 dark:text-stone-400">可留空使用 agent 已保存的工作区；要覆盖时填运行 agent 那台机器上的项目路径。</span>
                             </label>
                             <label className="block">
                                 <span className="text-sm font-medium">Canvas ID</span>
-                                <input value={settings.canvasId} onChange={(event) => updateSettings({ canvasId: event.target.value })} className="mt-2 h-11 w-full rounded-xl border border-black/10 bg-white px-3 outline-none focus:border-stone-500 dark:border-white/10 dark:bg-white/[0.06]" />
+                                <input value={settings.canvasId} onChange={(event) => updateSettings({ canvasId: event.target.value })} placeholder="/canvas/019f..." className="mt-2 h-11 w-full rounded-xl border border-black/10 bg-white px-3 outline-none focus:border-stone-500 dark:border-white/10 dark:bg-white/[0.06]" />
+                                <span className="mt-1 block text-xs leading-5 text-stone-500 dark:text-stone-400">只用于区分画布工作区。可填完整 /canvas/019...，不是 Codex 会话。</span>
+                            </label>
+                            <label className="block">
+                                <span className="text-sm font-medium">Codex Thread ID</span>
+                                <input value={settings.threadId} onChange={(event) => updateSettings({ threadId: event.target.value })} placeholder="codex://threads/019f..." className="mt-2 h-11 w-full rounded-xl border border-black/10 bg-white px-3 outline-none focus:border-stone-500 dark:border-white/10 dark:bg-white/[0.06]" />
+                                <span className="mt-1 block text-xs leading-5 text-stone-500 dark:text-stone-400">要继续指定 Codex 会话就填这里；可填完整 codex://threads/... 或只填 ID。</span>
                             </label>
                         </div>
 

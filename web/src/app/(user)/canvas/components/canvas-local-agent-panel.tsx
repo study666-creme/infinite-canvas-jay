@@ -723,7 +723,7 @@ function AgentConnectView({ theme, url, token, enabled, connected, activity, con
                                 连接 Token
                                 <span className="font-normal opacity-70">Connect token</span>
                             </span>
-                            <Input.Password size="large" prefix={<KeyRound className="mr-1 size-4" style={{ color: theme.node.faint }} />} value={token} onChange={(event) => onTokenChange(event.target.value)} placeholder="自动发现，或手动填入 Connect token" />
+                            <Input.Password size="large" autoComplete="new-password" prefix={<KeyRound className="mr-1 size-4" style={{ color: theme.node.faint }} />} value={token} onChange={(event) => onTokenChange(event.target.value)} placeholder="自动发现，或手动填入 Connect token" />
                         </label>
                         {connectError ? (
                             <div className="rounded-md border px-2.5 py-2 text-xs leading-5" style={{ borderColor: "rgba(220,38,38,.35)", color: "#dc2626" }}>

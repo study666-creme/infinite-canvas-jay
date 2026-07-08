@@ -211,6 +211,7 @@ export function AppConfigModal() {
 
     return (
         <Modal
+            className="app-config-modal"
             title={
                 <div>
                     <div className="text-lg font-semibold">配置与用户偏好</div>
@@ -223,12 +224,13 @@ export function AppConfigModal() {
             onCancel={() => setConfigDialogOpen(false)}
             styles={{ body: { maxHeight: "72vh", overflowY: "auto", paddingRight: 12 } }}
             footer={
-                <Button type="primary" onClick={finishConfig}>
+                <Button type="primary" className="w-full sm:w-auto" onClick={finishConfig}>
                     完成
                 </Button>
             }
         >
             <Tabs
+                className="app-config-tabs"
                 activeKey={activeTab}
                 onChange={setActiveTab}
                 items={[
@@ -237,22 +239,24 @@ export function AppConfigModal() {
                         label: "渠道",
                         children: (
                             <Form layout="vertical" requiredMark={false}>
-                                <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-stone-200 p-3 dark:border-stone-800">
-                                    <div className="min-w-0 flex-1">
-                                        <div className="flex w-fit max-w-full flex-wrap items-center gap-1.5 rounded-md border border-amber-300 bg-amber-50 px-2.5 py-1.5 text-xs text-amber-900 dark:border-amber-700/60 dark:bg-amber-950/30 dark:text-amber-100">
-                                            <CircleAlert className="size-3.5 shrink-0" />
-                                            <span className="font-semibold">重要：</span>
-                                            <span>新增或拉取模型后，需要到“模型”Tab 选择可选项才会显示。</span>
-                                            <Button type="link" size="small" className="h-auto p-0 text-xs font-semibold text-amber-900 dark:text-amber-100" onClick={() => setActiveTab("models")}>
-                                                去模型设置
-                                            </Button>
+                                <div className="mb-4 grid gap-3 rounded-lg border border-stone-200 p-3 dark:border-stone-800 md:flex md:items-center md:justify-between">
+                                    <div className="min-w-0">
+                                        <div className="flex max-w-full items-start gap-2 rounded-md border border-amber-300 bg-amber-50 px-2.5 py-2 text-xs leading-5 text-amber-900 dark:border-amber-700/60 dark:bg-amber-950/30 dark:text-amber-100 md:w-fit md:items-center">
+                                            <CircleAlert className="mt-0.5 size-3.5 shrink-0 md:mt-0" />
+                                            <div className="min-w-0">
+                                                <span className="font-semibold">重要：</span>
+                                                <span>新增或拉取模型后，需要到“模型”Tab 选择可选项才会显示。</span>
+                                                <Button type="link" size="small" className="ml-1 h-auto p-0 text-xs font-semibold text-amber-900 dark:text-amber-100" onClick={() => setActiveTab("models")}>
+                                                    去模型设置
+                                                </Button>
+                                            </div>
                                         </div>
                                     </div>
-                                    <div className="flex shrink-0 gap-2">
-                                        <Button icon={<RefreshCw className="size-4" />} loading={Boolean(loadingChannelId)} onClick={() => void refreshAllModels()}>
+                                    <div className="grid grid-cols-2 gap-2 md:flex md:shrink-0">
+                                        <Button className="w-full" icon={<RefreshCw className="size-4" />} loading={Boolean(loadingChannelId)} onClick={() => void refreshAllModels()}>
                                             拉取全部
                                         </Button>
-                                        <Button type="primary" icon={<Plus className="size-4" />} onClick={addChannel}>
+                                        <Button type="primary" className="w-full" icon={<Plus className="size-4" />} onClick={addChannel}>
                                             新增渠道
                                         </Button>
                                     </div>
@@ -285,7 +289,7 @@ export function AppConfigModal() {
                                                     <Input value={channel.baseUrl} onChange={(event) => updateChannel(channel.id, { baseUrl: event.target.value })} />
                                                 </Form.Item>
                                                 <Form.Item label="API Key" className="mb-0">
-                                                    <Input.Password value={channel.apiKey} onChange={(event) => updateChannel(channel.id, { apiKey: event.target.value })} />
+                                                    <Input.Password value={channel.apiKey} autoComplete="new-password" onChange={(event) => updateChannel(channel.id, { apiKey: event.target.value })} />
                                                 </Form.Item>
                                                 <Form.Item label="模型列表" className="mb-0 md:col-span-2">
                                                     <Select mode="tags" showSearch allowClear maxTagCount="responsive" placeholder="输入模型名，或点击拉取模型" value={channel.models} onChange={(models) => updateChannel(channel.id, { models })} />
@@ -428,7 +432,7 @@ export function AppConfigModal() {
                                             <Input value={webdav.username} autoComplete="username" onChange={(event) => updateWebdavConfig("username", event.target.value)} />
                                         </Form.Item>
                                         <Form.Item label="密码 / 应用密码" className="mb-0">
-                                            <Input.Password value={webdav.password} autoComplete="current-password" onChange={(event) => updateWebdavConfig("password", event.target.value)} />
+                                            <Input.Password value={webdav.password} autoComplete="new-password" onChange={(event) => updateWebdavConfig("password", event.target.value)} />
                                         </Form.Item>
                                     </div>
                                     <div className="mt-4 flex flex-wrap items-center gap-2">

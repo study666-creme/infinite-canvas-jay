@@ -1205,6 +1205,53 @@
         box-shadow: 0 18px 54px rgba(0, 0, 0, 0.45);
     }
 
+    .app-config-modal .ant-modal-content {
+        max-height: calc(100dvh - 32px);
+        overflow: hidden;
+    }
+
+    .app-config-modal .ant-modal-body {
+        min-height: 0;
+    }
+
+    .app-config-tabs .ant-tabs-nav {
+        margin-bottom: 18px;
+    }
+
+    @media (max-width: 640px) {
+        .app-config-modal {
+            max-width: calc(100vw - 20px);
+            margin: 10px auto;
+        }
+
+        .app-config-modal .ant-modal-content {
+            max-height: calc(100dvh - 20px);
+            border-radius: 22px;
+        }
+
+        .app-config-modal .ant-modal-body {
+            max-height: calc(100dvh - 196px) !important;
+            padding-right: 0 !important;
+            overscroll-behavior: contain;
+        }
+
+        .app-config-modal .ant-modal-footer {
+            padding-bottom: calc(16px + env(safe-area-inset-bottom));
+        }
+
+        .app-config-tabs .ant-tabs-nav-wrap {
+            overflow-x: auto;
+        }
+
+        .app-config-tabs .ant-tabs-nav-list {
+            min-width: max-content;
+        }
+
+        .app-config-tabs .ant-form-item {
+            margin-bottom: 14px;
+        }
+    }
+
     .canvas-node-info-modal .ant-modal-header {
         padding-right: 0;
     }

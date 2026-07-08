@@ -12,7 +12,7 @@ type AgentEvent = { type?: string; item?: Record<string, unknown>; usage?: unkno
 const settingsKey = "kazang-mobile-codex:settings";
 const messagesKey = "kazang-mobile-codex:messages";
 const defaultSettings: Settings = {
-    agentUrl: "https://your-codex-agent.example.com",
+    agentUrl: "https://agent.prompt-hubs.com",
     token: "",
     canvasId: "default",
     workspacePath: "D:\\canvas\\infinite-canvas",
@@ -340,7 +340,7 @@ export default function MobileAgentPage() {
                             </label>
                             <label className="block">
                                 <span className="text-sm font-medium">Token</span>
-                                <input value={settings.token} onChange={(event) => updateSettings({ token: event.target.value })} type="password" className="mt-2 h-11 w-full rounded-xl border border-black/10 bg-white px-3 outline-none focus:border-stone-500 dark:border-white/10 dark:bg-white/[0.06]" />
+                                <input value={settings.token} onChange={(event) => updateSettings({ token: event.target.value })} type="password" autoComplete="new-password" className="mt-2 h-11 w-full rounded-xl border border-black/10 bg-white px-3 outline-none focus:border-stone-500 dark:border-white/10 dark:bg-white/[0.06]" />
                             </label>
                             <label className="block">
                                 <span className="text-sm font-medium">Workspace</span>

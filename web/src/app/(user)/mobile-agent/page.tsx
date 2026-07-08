@@ -134,6 +134,8 @@ export default function MobileAgentPage() {
     const [activeThreadId, setActiveThreadId] = useState("");
     const [copiedId, setCopiedId] = useState("");
     const eventSourceRef = useRef<EventSource | null>(null);
+    const pollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const pendingPromptRef = useRef("");
     const scrollerRef = useRef<HTMLDivElement>(null);
 
     const canSend = useMemo(() => connected && Boolean(input.trim()) && !sending, [connected, input, sending]);
@@ -141,7 +143,10 @@ export default function MobileAgentPage() {
     useEffect(() => {
         setSettings(sanitizeSettings(readJson<Partial<Settings>>(localStorage.getItem(settingsKey), {})));
         setMessages(readJson<MobileMessage[]>(localStorage.getItem(messagesKey), []));
-        return () => eventSourceRef.current?.close();
+        return () => {
+            eventSourceRef.current?.close();
+            stopThreadPoll();
+        };
     }, []);
 
     useEffect(() => {
@@ -168,6 +173,36 @@ export default function MobileAgentPage() {
 
     const updateSettings = (patch: Partial<Settings>) => setSettings((value) => ({ ...value, ...patch }));
 
+    function stopThreadPoll() {
+        if (!pollTimerRef.current) return;
+        clearTimeout(pollTimerRef.current);
+        pollTimerRef.current = null;
+    }
+
+    function sameText(a: string, b: string) {
+        return a.trim().replace(/\s+/g, " ") === b.trim().replace(/\s+/g, " ");
+    }
+
+    function promptIndex(items: MobileMessage[], prompt: string) {
+        if (!prompt.trim()) return -1;
+        for (let index = items.length - 1; index >= 0; index -= 1) {
+            if (items[index]?.role === "user" && sameText(items[index].text, prompt)) return index;
+        }
+        return -1;
+    }
+
+    function hasReplyAfterPrompt(items: MobileMessage[], prompt: string) {
+        const index = promptIndex(items, prompt);
+        return index >= 0 && items.slice(index + 1).some((item) => item.role === "assistant" || item.role === "error");
+    }
+
+    function applyThreadMessages(items: MobileMessage[] | undefined, pendingPrompt = "") {
+        if (!items?.length) return [];
+        if (pendingPrompt && promptIndex(items, pendingPrompt) < 0) return items;
+        setMessages(items);
+        return items;
+    }
+
     const agentFetch = async <T,>(path: string, init?: RequestInit) => {
         const response = await fetch(`${endpoint(settings.agentUrl)}${path}`, {
             ...init,
@@ -176,6 +211,43 @@ export default function MobileAgentPage() {
         const payload = (await response.json().catch(() => ({}))) as T & { error?: string; msg?: string };
         if (!response.ok) throw new Error(payload.error || payload.msg || `Agent 请求失败：${response.status}`);
         return payload;
+    };
+
+    const refreshThreadMessages = async (threadId: string, canvasId: string, pendingPrompt = "") => {
+        const data = await agentFetch<{ workspace?: Workspace; messages?: MobileMessage[] }>(`/agent/codex/threads/${encodeURIComponent(threadId)}?canvasId=${encodeURIComponent(canvasId)}`);
+        if (data.workspace) {
+            setWorkspace(data.workspace);
+            setActiveThreadId(data.workspace.activeThreadId || threadId);
+        }
+        return applyThreadMessages(data.messages, pendingPrompt);
+    };
+
+    const pollThreadUntilReply = (threadId: string, canvasId: string, prompt: string) => {
+        stopThreadPoll();
+        let attempts = 0;
+        const tick = async () => {
+            attempts += 1;
+            try {
+                const items = await refreshThreadMessages(threadId, canvasId, prompt);
+                if (hasReplyAfterPrompt(items, prompt)) {
+                    pendingPromptRef.current = "";
+                    setSending(false);
+                    stopThreadPoll();
+                    return;
+                }
+            } catch (error) {
+                if (attempts >= 2) pushMessage({ id: createId(), role: "error", title: "刷新失败", text: error instanceof Error ? error.message : String(error) });
+            }
+            if (attempts >= 60) {
+                pendingPromptRef.current = "";
+                setSending(false);
+                stopThreadPoll();
+                pushMessage({ id: createId(), role: "status", text: "Codex 还没返回结果。可以点右上角连接按钮刷新会话记录。" });
+                return;
+            }
+            pollTimerRef.current = setTimeout(tick, attempts < 4 ? 1500 : 3000);
+        };
+        pollTimerRef.current = setTimeout(tick, 1200);
     };
 
     const handleAgentEvent = (event: AgentEvent) => {
@@ -188,11 +260,13 @@ export default function MobileAgentPage() {
         }
         if (event.type === "turn.completed") {
             setSending(false);
-            upsertStreamMessage({ id: `done-${Date.now()}`, role: "status", text: "本轮完成" });
+            if (!pendingPromptRef.current) stopThreadPoll();
+            upsertStreamMessage({ id: `done-${Date.now()}`, role: "status", text: pendingPromptRef.current ? "本轮完成，正在同步记录..." : "本轮完成" });
             return;
         }
         if (event.type === "error") {
             setSending(false);
+            stopThreadPoll();
             pushMessage({ id: createId(), role: "error", title: "Codex", text: normalizeText(event.message || itemField(item, "message")) || "Codex 出错" });
             return;
         }
@@ -245,12 +319,15 @@ export default function MobileAgentPage() {
                 if (resumed.messages?.length) setMessages(resumed.messages);
             }
 
+            setConnected(true);
+            setConnecting(false);
+            pushMessage({ id: createId(), role: "status", text: "已连接电脑 Codex" });
+
             const source = new EventSource(withToken(settings.agentUrl, `/events?clientId=mobile-codex-${Date.now()}`, settings.token));
             eventSourceRef.current = source;
             source.addEventListener("hello", () => {
                 setConnected(true);
                 setConnecting(false);
-                pushMessage({ id: createId(), role: "status", text: "已连接电脑 Codex" });
             });
             source.addEventListener("agent_event", (event) => {
                 const data = parseEventData<AgentEvent>(event);
@@ -259,11 +336,28 @@ export default function MobileAgentPage() {
             source.addEventListener("agent_error", (event) => {
                 const data = parseEventData<{ message?: string }>(event);
                 setSending(false);
+                stopThreadPoll();
                 pushMessage({ id: createId(), role: "error", title: "Agent", text: data?.message || "Agent 出错" });
             });
-            source.addEventListener("agent_done", () => setSending(false));
+            source.addEventListener("agent_done", () => {
+                const threadId = activeThreadId || normalizeThreadId(settings.threadId);
+                const canvasId = normalizeCanvasId(settings.canvasId);
+                const pendingPrompt = pendingPromptRef.current;
+                if (!threadId) {
+                    pendingPromptRef.current = "";
+                    setSending(false);
+                    stopThreadPoll();
+                    return;
+                }
+                void refreshThreadMessages(threadId, canvasId, pendingPrompt).then((items) => {
+                    if (!pendingPrompt || hasReplyAfterPrompt(items, pendingPrompt)) {
+                        pendingPromptRef.current = "";
+                        setSending(false);
+                        stopThreadPoll();
+                    }
+                });
+            });
             source.onerror = () => {
-                setConnected(false);
                 setConnecting(false);
             };
         } catch (error) {
@@ -295,18 +389,24 @@ export default function MobileAgentPage() {
         if (!prompt || sending) return;
         setInput("");
         setSending(true);
+        pendingPromptRef.current = prompt;
         pushMessage({ id: createId(), role: "user", text: prompt });
+        upsertStreamMessage({ id: "turn-status", role: "status", text: "Codex 正在处理..." });
         try {
+            const canvasId = normalizeCanvasId(settings.canvasId);
             const data = await agentFetch<{ threadId?: string }>("/agent/codex/turn", {
                 method: "POST",
-                body: JSON.stringify({ prompt, canvasId: normalizeCanvasId(settings.canvasId), threadId: activeThreadId || normalizeThreadId(settings.threadId) || undefined }),
+                body: JSON.stringify({ prompt, canvasId, threadId: activeThreadId || normalizeThreadId(settings.threadId) || undefined }),
             });
             if (data.threadId) {
                 setActiveThreadId(data.threadId);
                 updateSettings({ threadId: data.threadId });
+                pollThreadUntilReply(data.threadId, canvasId, prompt);
             }
         } catch (error) {
             setSending(false);
+            pendingPromptRef.current = "";
+            stopThreadPoll();
             pushMessage({ id: createId(), role: "error", title: "发送失败", text: error instanceof Error ? error.message : String(error) });
         }
     };
@@ -371,7 +471,7 @@ export default function MobileAgentPage() {
                                 <FolderGit2 className="size-5" />
                             </div>
                             <h1 className="mt-5 text-2xl font-semibold">手机操作 Codex</h1>
-                            <p className="mt-2 max-w-sm text-sm leading-6 text-stone-500 dark:text-stone-400">{connected ? "已连接电脑 Agent" : "连接电脑 Agent 后开始"}</p>
+                            <p className="mt-2 max-w-sm text-sm leading-6 text-stone-500 dark:text-stone-400">{connected ? "回复会显示在本页，桌面窗口可能不会实时同步" : "连接电脑 Agent 后开始"}</p>
                         </section>
                     )}
                 </div>

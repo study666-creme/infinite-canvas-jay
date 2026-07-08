@@ -5,7 +5,8 @@
 ## 部署前须知
 
 - 主应用是 `web/` 目录下的 Next.js 应用，构建产物为 standalone 模式。
-- **AI API Key、画布项目、素材与生成记录默认保存在访问者的浏览器本地**，服务端不持久化用户创作数据。
+- **AI API Key、画布项目、素材与生成记录默认保存在访问者的浏览器本地**，服务端不持久化用户创作数据；线上页面会先要求登录卡藏账号，画布与资产按卡藏用户 ID 分桶。
+- `/api/prompt-hub-media`、`/api/qianfan-proxy`、`/webdav-proxy` 会校验卡藏 Bearer token，避免未登录访问者白嫖线上代理流量。
 - 当前版本 AI 请求由**浏览器前台**直连用户配置的 OpenAI 兼容接口；部署前端本身**不需要**在服务器配置 API Key。
 - 本地文件夹保存（File System Access API）仅 Chrome / Edge 等支持该 API 的浏览器可用。
 - 项目处于活跃开发阶段，存储格式可能调整，公网多人共用前请自行评估风险（见 README 提示）。
@@ -109,6 +110,7 @@ https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2Fstudy666-
 |------|------|
 | `NEXT_PUBLIC_APP_VERSION` | 由 `next.config.ts` 从根目录 `VERSION` 读取，一般无需手动设置 |
 | `NEXT_PUBLIC_DOC_URL` | 文档站地址，默认 `https://docs.canvas.best` |
+| `PROMPT_HUB_API_BASE` | 服务端校验卡藏 token 的 API 地址，默认 `https://api.prompt-hubs.com` |
 
 根目录 **不要** 放 `vercel.json`（含 `rootDirectory` 会导致 Vercel 新建项目报错）。构建配置见 `web/vercel.json`；**Root Directory 只在 Vercel 控制台设为 `web`**。
 
@@ -220,6 +222,18 @@ npm start
 
 更完整的说明、代码路径与待办见 **[docs/content/docs/overview/video-playback.mdx](docs/content/docs/overview/video-playback.mdx)**。
 
+## 远程 Codex Agent
+
+Vercel 只托管网页，不能直接运行你电脑上的 Codex、读写本地仓库或执行部署命令。远程使用 `/mobile-agent` 时，需要另行运行 `canvas-agent`，并把它放到受保护的 HTTPS 地址后面。
+
+推荐顺序：
+
+1. Tailscale / ZeroTier：只让自己的设备进内网，线上画布里填内网 HTTPS/Funnel 地址。
+2. Cloudflare Tunnel：把本机 `17371` 映射成 HTTPS 域名，并保留 `Connect token`。
+3. VPS / 自托管：在服务器上放仓库工作区和 `canvas-agent`，再通过 Nginx/Caddy 反代 HTTPS。
+
+不要直接把 `17371` 裸露到公网。卡藏登录只保护网页入口；如果别人拿到 Agent URL 和 token，仍然可以绕过网页直接调用你的 Agent。
+
 ## New API 跳转
 
 使用 New API 等系统时，可用带参数的跳转自动填配置：
@@ -231,11 +245,13 @@ https://你的部署域名?apiKey={key}&baseUrl={address}
 ## 部署后检查清单
 
 - [ ] 首页与 `/canvas` 可正常打开
+- [ ] 未登录时会进入卡藏登录页；登录后画布、资产、生成工作台可进入
 - [ ] 配置弹窗可保存 Base URL / API Key（存于浏览器 localStorage）
 - [ ] 文生图 / 视频生成请求发往预期网关（在浏览器网络面板确认）
 - [ ] **视频**：网关含 `/v1/media/fetch`；生成后节点能播放或已知失败已记录（见 [video-playback.mdx](docs/content/docs/overview/video-playback.mdx)）
 - [ ] 若启用本地文件夹保存，在 Chrome/Edge 中授权目录并可读写
 - [ ] Prompt Hub：设置里能登录；**插入素材 → Prompt Hub 卡片库** 能列出并插入
+- [ ] 远程 Codex：`/mobile-agent` 使用 HTTPS Agent URL + Connect token；未裸露 `17371`
 - [ ] README 与 LICENSE 仍包含上游版权声明
 
 ## 开源协议与「能不能商用」

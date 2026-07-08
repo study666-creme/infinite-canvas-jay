@@ -30,6 +30,8 @@ Codex app 插件会读取启动输出里的 Local URL 和 Connect token，并直
 
 Canvas Agent 默认只监听 `127.0.0.1`。网页第一次带正确 token 连接后，Canvas Agent 会记录该网页 Origin；之后其他 Origin 不能复用这个本地 Agent，除非用户清理 `~/.infinite-canvas/canvas-agent.json` 里的 `origins`。
 
+远程使用线上画布时，请把 Canvas Agent 放在受保护的 HTTPS 地址后面（Tailscale/ZeroTier、Cloudflare Tunnel、VPS 反代均可），再在 `/mobile-agent` 填入 HTTPS Agent URL 和 Connect token。不要把 `17371` 无鉴权裸露到公网；卡藏登录只保护网页入口，Agent URL + token 仍是执行本机 Codex 的关键凭证。
+
 ## 发布
 
 `canvas-agent` 使用自己的 `package.json` 版本号，不跟仓库根目录 `VERSION` 绑定。推送到 `main` 后，GitHub Actions 会检查 npm 上是否已经存在当前包版本；不存在时才发布 `@basketikun/canvas-agent`。

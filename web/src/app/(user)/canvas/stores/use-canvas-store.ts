@@ -3,6 +3,8 @@ import { persist, type PersistStorage, type StorageValue } from "zustand/middlew
 
 import { nanoid } from "nanoid";
 import { localForageStorage } from "@/lib/localforage-storage";
+import { accountScopedStorageKey, currentPromptHubStorageKey, promptHubStorageUserKey } from "@/lib/prompt-hub-auth";
+import type { PromptHubSession } from "@/services/prompt-hub";
 import type { CanvasBackgroundMode } from "@/lib/canvas-theme";
 import type { CanvasAssistantSession, CanvasConnection, CanvasNodeData, ViewportTransform } from "../types";
 
@@ -34,6 +36,7 @@ type CanvasStore = {
 
 const initialViewport: ViewportTransform = { x: 0, y: 0, k: 1 };
 const CANVAS_STORE_KEY = "infinite-canvas:canvas_store";
+let canvasStorageUserKey = currentPromptHubStorageKey();
 type PersistedCanvasState = Pick<CanvasStore, "projects">;
 const LEGACY_DEFAULT_TITLE_RE = /^无限画布(?:\s+(\d+))?$/;
 let saveTimer: ReturnType<typeof setTimeout> | null = null;
@@ -78,13 +81,42 @@ export async function flushCanvasStore() {
     }
     const payload = pendingPersistPayload;
     pendingPersistPayload = null;
-    await localForageStorage.setItem(CANVAS_STORE_KEY, payload);
+    await localForageStorage.setItem(canvasPersistKey(CANVAS_STORE_KEY), payload);
     notifyPersistStatus(false);
+}
+
+export async function prepareCanvasStorageForSession(session: PromptHubSession | null) {
+    const nextUserKey = promptHubStorageUserKey(session);
+    if (!session?.access_token || nextUserKey === "anonymous") return;
+    const nextKey = accountScopedStorageKey(CANVAS_STORE_KEY, nextUserKey);
+    const existing = await localForageStorage.getItem(nextKey);
+    if (existing) return;
+    const legacy = await localForageStorage.getItem(CANVAS_STORE_KEY);
+    if (legacy) await localForageStorage.setItem(nextKey, legacy);
+}
+
+export function setCanvasStorageUserFromSession(session: PromptHubSession | null) {
+    const nextUserKey = promptHubStorageUserKey(session);
+    if (nextUserKey === canvasStorageUserKey) return;
+    canvasStorageUserKey = nextUserKey;
+    if (saveTimer) {
+        clearTimeout(saveTimer);
+        saveTimer = null;
+    }
+    queuedPersistState = null;
+    pendingPersistPayload = null;
+    notifyPersistStatus(false);
+    useCanvasStore.setState({ hydrated: false, projects: [] });
+    void useCanvasStore.persist.rehydrate();
+}
+
+function canvasPersistKey(name: string) {
+    return accountScopedStorageKey(name, canvasStorageUserKey);
 }
 
 const canvasStorage: PersistStorage<CanvasStore> = {
     getItem: async (name) => {
-        const value = await localForageStorage.getItem(name);
+        const value = await localForageStorage.getItem(canvasPersistKey(name));
         if (typeof value !== "string") return null;
         try {
             const parsed = JSON.parse(value) as StorageValue<CanvasStore>;
@@ -109,10 +141,10 @@ const canvasStorage: PersistStorage<CanvasStore> = {
                 notifyPersistStatus(false);
                 return;
             }
-            void Promise.resolve(localForageStorage.setItem(name, payload)).finally(() => notifyPersistStatus(false));
+            void Promise.resolve(localForageStorage.setItem(canvasPersistKey(name), payload)).finally(() => notifyPersistStatus(false));
         }, 400);
     },
-    removeItem: (name) => localForageStorage.removeItem(name),
+    removeItem: (name) => localForageStorage.removeItem(canvasPersistKey(name)),
 };
 
 export const useCanvasStore = create<CanvasStore>()(

@@ -1,8 +1,12 @@
 import { NextRequest } from "next/server";
+import { requirePromptHubAuth } from "@/lib/server/prompt-hub-auth";
 
 export const runtime = "nodejs";
 
 export async function GET(request: NextRequest) {
+    const authError = await requirePromptHubAuth(request);
+    if (authError) return authError;
+
     const target = request.nextUrl.searchParams.get("url") || "";
     let url: URL;
     try {

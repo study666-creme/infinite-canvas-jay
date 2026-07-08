@@ -417,7 +417,7 @@ function collectPromptHubCardImageCandidates(card: PromptHubCardListItem, apiBas
     return urls;
 }
 
-async function fetchPromptHubImageBlob(url: string) {
+async function fetchPromptHubImageBlob(url: string, session: PromptHubSession) {
     if (url.startsWith("data:")) {
         const response = await fetch(url);
         return response.blob();
@@ -432,7 +432,9 @@ async function fetchPromptHubImageBlob(url: string) {
         directError = error instanceof Error ? error : new Error("下载卡片图片失败");
     }
 
-    const proxyResponse = await fetch(`/api/prompt-hub-media?url=${encodeURIComponent(url)}`);
+    const proxyResponse = await fetch(`/api/prompt-hub-media?url=${encodeURIComponent(url)}`, {
+        headers: { Authorization: `Bearer ${session.access_token}` },
+    });
     if (proxyResponse.ok) return proxyResponse.blob();
     throw directError || new Error(`下载卡片图片失败 (${proxyResponse.status})`);
 }
@@ -466,7 +468,7 @@ export async function preparePromptHubCardForCanvas(
 
     for (const url of candidates) {
         try {
-            const blob = await fetchPromptHubImageBlob(url);
+            const blob = await fetchPromptHubImageBlob(url, session);
             if (blob.size > 0) return { kind: "image", blob, prompt, title };
         } catch {
             // Try the next candidate.

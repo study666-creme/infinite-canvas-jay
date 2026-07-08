@@ -5,8 +5,10 @@ import { persist, type PersistStorage, type StorageValue } from "zustand/middlew
 
 import { nanoid } from "nanoid";
 import { localForageStorage } from "@/lib/localforage-storage";
+import { accountScopedStorageKey, currentPromptHubStorageKey, promptHubStorageUserKey } from "@/lib/prompt-hub-auth";
 import { cleanupUnusedImages, resolveImageUrl, uploadImage } from "@/services/image-storage";
 import { cleanupUnusedMedia, resolveMediaUrl } from "@/services/file-storage";
+import type { PromptHubSession } from "@/services/prompt-hub";
 
 export type AssetKind = "text" | "image" | "video";
 export type TextAsset = AssetBase<"text"> & { data: { content: string } };
@@ -50,10 +52,33 @@ type AssetStore = {
 };
 
 const ASSET_STORE_KEY = "infinite-canvas:asset_store";
+let assetStorageUserKey = currentPromptHubStorageKey();
+
+export async function prepareAssetStorageForSession(session: PromptHubSession | null) {
+    const nextUserKey = promptHubStorageUserKey(session);
+    if (!session?.access_token || nextUserKey === "anonymous") return;
+    const nextKey = accountScopedStorageKey(ASSET_STORE_KEY, nextUserKey);
+    const existing = await localForageStorage.getItem(nextKey);
+    if (existing) return;
+    const legacy = await localForageStorage.getItem(ASSET_STORE_KEY);
+    if (legacy) await localForageStorage.setItem(nextKey, legacy);
+}
+
+export function setAssetStorageUserFromSession(session: PromptHubSession | null) {
+    const nextUserKey = promptHubStorageUserKey(session);
+    if (nextUserKey === assetStorageUserKey) return;
+    assetStorageUserKey = nextUserKey;
+    useAssetStore.setState({ hydrated: false, folders: [], assets: [] });
+    void useAssetStore.persist.rehydrate();
+}
+
+function assetPersistKey(name: string) {
+    return accountScopedStorageKey(name, assetStorageUserKey);
+}
 
 const assetStorage: PersistStorage<AssetStore> = {
     getItem: async (name) => {
-        const value = await localForageStorage.getItem(name);
+        const value = await localForageStorage.getItem(assetPersistKey(name));
         if (!value) return null;
         const parsed = JSON.parse(value) as StorageValue<AssetStore>;
         parsed.state.folders = parsed.state.folders || [];
@@ -74,8 +99,8 @@ const assetStorage: PersistStorage<AssetStore> = {
         );
         return parsed;
     },
-    setItem: (name, value) => localForageStorage.setItem(name, JSON.stringify(value)),
-    removeItem: (name) => localForageStorage.removeItem(name),
+    setItem: (name, value) => localForageStorage.setItem(assetPersistKey(name), JSON.stringify(value)),
+    removeItem: (name) => localForageStorage.removeItem(assetPersistKey(name)),
 };
 
 export const useAssetStore = create<AssetStore>()(

@@ -1,4 +1,5 @@
 import { NextRequest } from "next/server";
+import { requirePromptHubAuth } from "@/lib/server/prompt-hub-auth";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -15,6 +16,9 @@ function isAllowedQianfanUrl(value: string) {
 }
 
 export async function POST(request: NextRequest) {
+    const authError = await requirePromptHubAuth(request);
+    if (authError) return authError;
+
     const target = request.headers.get("x-qianfan-target") || "";
     if (!target || !isAllowedQianfanUrl(target)) {
         return new Response("Invalid x-qianfan-target", { status: 400 });

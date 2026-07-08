@@ -1,4 +1,5 @@
 import { NextRequest } from "next/server";
+import { requirePromptHubAuth } from "@/lib/server/prompt-hub-auth";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -6,6 +7,9 @@ export const dynamic = "force-dynamic";
 const WEBDAV_PROXY_TIMEOUT_MS = 120000;
 
 export async function POST(request: NextRequest) {
+    const authError = await requirePromptHubAuth(request);
+    if (authError) return authError;
+
     const target = request.headers.get("x-webdav-target") || "";
     const method = (request.headers.get("x-webdav-method") || "GET").toUpperCase();
     if (!target) return new Response("Missing x-webdav-target", { status: 400 });

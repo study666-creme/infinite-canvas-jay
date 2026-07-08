@@ -1,5 +1,6 @@
 import type { AiConfig } from "@/stores/use-config-store";
 import { buildQianfanChatCompletionsUrl, isQianfanCodingEndpoint } from "@/lib/qianfan-text";
+import { promptHubAuthHeaders } from "@/services/prompt-hub-auth-client";
 import type { AiTextMessage, ResponseFunctionTool, ResponseInputMessage, ResponseToolCall, ToolResponseResult } from "@/services/api/image";
 
 type RequestOptions = { signal?: AbortSignal };
@@ -234,11 +235,13 @@ async function requestChatCompletions(config: AiConfig, body: Record<string, unk
     const targetUrl = buildQianfanChatCompletionsUrl(config.baseUrl, config.model);
     const payload = JSON.stringify({ ...body, stream: true });
     const headers = { ...aiHeaders(config), Accept: "text/event-stream", "Content-Type": "application/json" };
+    const appAuthHeaders = typeof window !== "undefined" ? await promptHubAuthHeaders() : {};
     const response =
         typeof window !== "undefined"
             ? await fetch("/api/qianfan-proxy", {
                   method: "POST",
                   headers: {
+                      ...appAuthHeaders,
                       Accept: "text/event-stream",
                       "Content-Type": "application/json",
                       "x-qianfan-target": targetUrl,

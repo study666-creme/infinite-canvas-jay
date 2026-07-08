@@ -7,7 +7,7 @@
 - 「卡藏画布」负责承载创作流程、节点关系、生成结果和 Agent 操作。
 - 「生图工作台 / 视频创作台」负责快速发起单次生成，并把有效结果沉淀回资产或画布。
 - 「我的资产」负责保存图片、视频、提示词与可复用素材。
-- 本地数据默认保存在浏览器侧，支持按项目导入导出。
+- 本地数据默认保存在浏览器侧；线上版本需要先登录卡藏账号，并按卡藏用户分桶保存画布与资产。
 
 ## 合规说明
 
@@ -39,6 +39,14 @@ cd web
 npm run build
 ```
 
+## 登录与数据
+
+线上画布沿用卡片库的卡藏账号登录。未登录用户不能进入画布、资产、生成工作台或移动 Codex 控制页。
+
+- 画布项目、资产库、AI 渠道配置仍主要保存在当前浏览器本地；画布与资产会按卡藏用户 ID 分桶，避免同一设备换账号后混用。
+- 卡藏生图、卡片库读取、Prompt Hub 媒体代理会使用当前登录 token；未登录用户不能无成本调用这些线上代理接口。
+- 远程 Codex 不会运行在 Vercel 上。要让手机远程操作项目，需要把你自己的 `canvas-agent` 放在受保护的 HTTPS 地址后面，并使用 Connect token 连接。
+
 ## 手机操作 Codex
 
 打开 `/mobile-agent` 可以把手机变成 Codex 控制台，连接电脑上的 `canvas-agent` 后继续让 Codex 读项目、改代码、跑命令和部署。
@@ -52,9 +60,9 @@ cd D:\canvas\infinite-canvas\canvas-agent
 npm run dev
 ```
 
-启动后终端会输出 `Connect token` 和可访问地址。手机和电脑在同一网络时，打开 `http://电脑局域网IP:3000/mobile-agent`，填入 `http://电脑局域网IP:17371`、token 和工作目录即可。
+启动后终端会输出 `Connect token` 和可访问地址。同局域网可填入 `http://电脑局域网IP:17371`。远程使用线上画布时，请通过 Cloudflare Tunnel、Tailscale Funnel、ZeroTier 内网地址或 VPS 反代提供 **HTTPS Agent URL**，再在 `/mobile-agent` 填入该地址、token 和工作目录。
 
-公网使用建议走 Tailscale、ZeroTier 或 Cloudflare Tunnel，不要直接裸露 `17371` 端口。
+不要把 `17371` 端口无鉴权裸露到公网；任何拿到 Agent URL 和 token 的人都能让你的本机 Codex 执行项目任务。
 
 ## 部署
 

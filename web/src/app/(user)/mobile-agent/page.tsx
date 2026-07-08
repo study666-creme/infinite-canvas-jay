@@ -12,7 +12,7 @@ type AgentEvent = { type?: string; item?: Record<string, unknown>; usage?: unkno
 const settingsKey = "kazang-mobile-codex:settings";
 const messagesKey = "kazang-mobile-codex:messages";
 const defaultSettings: Settings = {
-    agentUrl: "https://agent.prompt-hubs.com",
+    agentUrl: "",
     token: "",
     canvasId: "default",
     workspacePath: "D:\\canvas\\infinite-canvas",
@@ -332,11 +332,11 @@ export default function MobileAgentPage() {
 
                         <div className="mt-5 space-y-4">
                             <p className="rounded-2xl border border-amber-500/20 bg-amber-500/10 px-3 py-2 text-xs leading-5 text-amber-800 dark:text-amber-100">
-                                远程使用请填 HTTPS Agent 地址，例如 Cloudflare Tunnel、Tailscale Funnel 或 VPS 反代地址；不要把 17371 端口无鉴权裸露到公网。
+                                这里连接 canvas-agent 的 HTTPS 地址，不是 New API 或创作 Agent API。可用 Cloudflare Tunnel、Tailscale Funnel 或 VPS 反代地址；不要把 17371 端口无鉴权裸露到公网。
                             </p>
                             <label className="block">
                                 <span className="text-sm font-medium">Agent URL</span>
-                                <input value={settings.agentUrl} onChange={(event) => updateSettings({ agentUrl: event.target.value })} className="mt-2 h-11 w-full rounded-xl border border-black/10 bg-white px-3 outline-none focus:border-stone-500 dark:border-white/10 dark:bg-white/[0.06]" />
+                                <input value={settings.agentUrl} onChange={(event) => updateSettings({ agentUrl: event.target.value })} placeholder="https://your-canvas-agent.example.com" className="mt-2 h-11 w-full rounded-xl border border-black/10 bg-white px-3 outline-none focus:border-stone-500 dark:border-white/10 dark:bg-white/[0.06]" />
                             </label>
                             <label className="block">
                                 <span className="text-sm font-medium">Token</span>

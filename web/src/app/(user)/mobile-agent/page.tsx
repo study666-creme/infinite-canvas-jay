@@ -1,28 +1,41 @@
 "use client";
 
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
-import { CheckCircle2, Copy, FolderGit2, LoaderCircle, PlugZap, RotateCcw, SendHorizontal, Settings2, TerminalSquare, Trash2, UploadCloud, X } from "lucide-react";
+import { CheckCircle2, Copy, FolderGit2, GitBranch, LoaderCircle, PlugZap, RefreshCcw, RotateCcw, SendHorizontal, Settings2, TerminalSquare, Trash2, UploadCloud, X } from "lucide-react";
 
 type MessageRole = "user" | "assistant" | "tool" | "error" | "status";
 type MobileMessage = { id: string; role: MessageRole; title?: string; text: string; streamId?: string };
-type Settings = { agentUrl: string; token: string; canvasId: string; threadId: string; workspacePath: string };
+type Settings = { agentUrl: string; token: string; canvasId: string; threadId: string; workspacePath: string; gitRepoPath: string };
 type Workspace = { canvasId: string; workspacePath: string; activeThreadId?: string };
 type AgentEvent = { type?: string; item?: Record<string, unknown>; usage?: unknown; message?: string };
 type PendingRun = { threadId: string; canvasId: string; prompt: string; startedAt: number };
 type ConnectionStatus = "idle" | "connecting" | "connected" | "offline" | "error";
+type GitRemoteInfo = { name: string; url: string };
+type GitRepoInfo = {
+    repoPath: string;
+    branch: string;
+    defaultRemote: string;
+    defaultBranch: string;
+    remotes: GitRemoteInfo[];
+    dirty: boolean;
+    statusShort: string[];
+    warnings: string[];
+    pushBlocked: boolean;
+};
 
 const settingsKey = "kazang-mobile-codex:settings";
 const messagesKey = "kazang-mobile-codex:messages";
 const pendingRunKey = "kazang-mobile-codex:pending-run";
 const pendingRunMaxAge = 1000 * 60 * 60 * 12;
+const legacyDefaultWorkspacePath = "D:\\canvas\\infinite-canvas";
 const defaultSettings: Settings = {
     agentUrl: "",
     token: "",
     canvasId: "default",
     threadId: "",
     workspacePath: "",
+    gitRepoPath: "",
 };
-const legacyDefaultWorkspacePath = "D:\\canvas\\infinite-canvas";
 
 function createId() {
     return typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
@@ -69,16 +82,16 @@ function sanitizeSettings(value: Partial<Settings>) {
 
 function validateAgentUrl(value: string) {
     const raw = value.trim();
-    if (!raw) throw new Error("请先填写 canvas-agent 的 HTTPS 地址");
+    if (!raw) throw new Error("请先填写 canvas-agent 的 HTTPS 服务地址。");
     if (isCanvasWebUrl(raw)) throw new Error("Agent URL 填成了画布网页地址。这里要填 cloudflared / Tailscale / VPS 反代出来的 canvas-agent 地址。");
     let url: URL;
     try {
         url = new URL(raw);
     } catch {
-        throw new Error("Agent URL 不是有效网址");
+        throw new Error("Agent URL 不是有效网址。");
     }
     const local = ["localhost", "127.0.0.1"].includes(url.hostname);
-    if (url.protocol !== "https:" && !local) throw new Error("手机远程连接需要 HTTPS Agent URL");
+    if (url.protocol !== "https:" && !local) throw new Error("手机远程连接需要 HTTPS Agent URL。");
     return endpoint(raw);
 }
 
@@ -144,6 +157,14 @@ function clearPendingRun() {
     localStorage.removeItem(pendingRunKey);
 }
 
+function samePath(a: string, b: string) {
+    return a.trim().replaceAll("/", "\\").toLowerCase() === b.trim().replaceAll("/", "\\").toLowerCase();
+}
+
+function repoName(repoPath: string) {
+    return repoPath.split(/[\\/]/).filter(Boolean).pop() || repoPath;
+}
+
 export default function MobileAgentPage() {
     const [settings, setSettings] = useState<Settings>(defaultSettings);
     const [messages, setMessages] = useState<MobileMessage[]>([]);
@@ -159,6 +180,9 @@ export default function MobileAgentPage() {
     const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>("idle");
     const [connectionMessage, setConnectionMessage] = useState("");
     const [hydrated, setHydrated] = useState(false);
+    const [repos, setRepos] = useState<GitRepoInfo[]>([]);
+    const [reposLoading, setReposLoading] = useState(false);
+    const [repoError, setRepoError] = useState("");
     const eventSourceRef = useRef<EventSource | null>(null);
     const pollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const pendingPromptRef = useRef("");
@@ -167,6 +191,7 @@ export default function MobileAgentPage() {
     const scrollerRef = useRef<HTMLDivElement>(null);
 
     const canSend = useMemo(() => Boolean(input.trim()) && !sending, [input, sending]);
+    const selectedRepo = useMemo(() => repos.find((repo) => samePath(repo.repoPath, settings.gitRepoPath)) || null, [repos, settings.gitRepoPath]);
 
     useEffect(() => {
         const loadedSettings = sanitizeSettings(readJson<Partial<Settings>>(localStorage.getItem(settingsKey), {}));
@@ -189,8 +214,8 @@ export default function MobileAgentPage() {
     }, [activeThreadId]);
 
     useEffect(() => {
-        localStorage.setItem(settingsKey, JSON.stringify(settings));
-    }, [settings]);
+        if (hydrated) localStorage.setItem(settingsKey, JSON.stringify(settings));
+    }, [hydrated, settings]);
 
     useEffect(() => {
         localStorage.setItem(messagesKey, JSON.stringify(messages.slice(-120)));
@@ -260,9 +285,9 @@ export default function MobileAgentPage() {
         return items;
     }
 
-    const agentFetch = async <T,>(path: string, init?: RequestInit) => {
+    const agentFetch = async <T,>(targetPath: string, init?: RequestInit) => {
         const currentSettings = settingsRef.current;
-        const response = await fetch(`${endpoint(currentSettings.agentUrl)}${path}`, {
+        const response = await fetch(`${endpoint(currentSettings.agentUrl)}${targetPath}`, {
             ...init,
             headers: { "Content-Type": "application/json", "x-canvas-agent-token": currentSettings.token.trim(), ...(init?.headers || {}) },
         });
@@ -278,6 +303,30 @@ export default function MobileAgentPage() {
             setActiveThreadId(data.workspace.activeThreadId || threadId);
         }
         return applyThreadMessages(data.messages, pendingPrompt);
+    };
+
+    const refreshGitRepos = async (quiet = false) => {
+        if (!settingsRef.current.agentUrl.trim() || !settingsRef.current.token.trim()) return repos;
+        setReposLoading(true);
+        setRepoError("");
+        try {
+            const data = await agentFetch<{ workspace?: Workspace; repos?: GitRepoInfo[] }>(`/agent/git/repos?canvasId=${encodeURIComponent(normalizeCanvasId(settingsRef.current.canvasId))}`);
+            const nextRepos = data.repos || [];
+            setRepos(nextRepos);
+            if (data.workspace) setWorkspace(data.workspace);
+            const currentSelection = settingsRef.current.gitRepoPath;
+            const nextSelection = nextRepos.find((repo) => samePath(repo.repoPath, currentSelection)) || nextRepos.find((repo) => !repo.pushBlocked) || nextRepos[0];
+            if (nextSelection && !samePath(nextSelection.repoPath, currentSelection)) updateSettings({ gitRepoPath: nextSelection.repoPath });
+            if (!quiet) pushMessage({ id: createId(), role: "status", text: nextRepos.length ? `已发现 ${nextRepos.length} 个本机 Git 仓库。` : "没有发现可推送的 Git 仓库。" });
+            return nextRepos;
+        } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            setRepoError(message);
+            if (!quiet) pushMessage({ id: createId(), role: "error", title: "仓库刷新失败", text: message });
+            return repos;
+        } finally {
+            setReposLoading(false);
+        }
     };
 
     const pollThreadUntilReply = (threadId: string, canvasId: string, prompt: string) => {
@@ -303,7 +352,7 @@ export default function MobileAgentPage() {
                 setSending(false);
                 clearPendingRun();
                 stopThreadPoll();
-                pushMessage({ id: createId(), role: "status", text: "Codex 还没返回结果。可以点右上角连接按钮刷新会话记录。" });
+                pushMessage({ id: createId(), role: "status", text: "Codex 还没返回结果。回到页面或点右上角连接按钮，会继续同步当前会话记录。" });
                 return;
             }
             pollTimerRef.current = setTimeout(tick, attempts < 4 ? 1500 : 3000);
@@ -391,14 +440,17 @@ export default function MobileAgentPage() {
         setConnectionMessage("正在连接电脑 Agent...");
         if (!options.quiet) pushMessage({ id: createId(), role: "status", text: "正在连接电脑 Agent..." });
         try {
-            const agentEndpoint = validateAgentUrl(settings.agentUrl);
-            if (agentEndpoint !== settings.agentUrl.trim()) updateSettings({ agentUrl: agentEndpoint });
-            const canvasId = normalizeCanvasId(settings.canvasId);
-            const threadId = normalizeThreadId(settings.threadId);
-            if (settings.workspacePath.trim()) {
+            const agentEndpoint = validateAgentUrl(settingsRef.current.agentUrl);
+            if (agentEndpoint !== settingsRef.current.agentUrl.trim()) {
+                settingsRef.current = { ...settingsRef.current, agentUrl: agentEndpoint };
+                updateSettings({ agentUrl: agentEndpoint });
+            }
+            const canvasId = normalizeCanvasId(settingsRef.current.canvasId);
+            const threadId = normalizeThreadId(settingsRef.current.threadId);
+            if (settingsRef.current.workspacePath.trim()) {
                 const data = await agentFetch<{ workspace?: Workspace }>("/agent/codex/workspace", {
                     method: "POST",
-                    body: JSON.stringify({ canvasId, workspacePath: settings.workspacePath.trim() }),
+                    body: JSON.stringify({ canvasId, workspacePath: settingsRef.current.workspacePath.trim() }),
                 });
                 setWorkspace(data.workspace || null);
                 setActiveThreadId(data.workspace?.activeThreadId || "");
@@ -423,8 +475,9 @@ export default function MobileAgentPage() {
             setConnectionStatus("connected");
             setConnectionMessage("已连接电脑 Codex");
             if (!options.quiet) pushMessage({ id: createId(), role: "status", text: "已连接电脑 Codex" });
+            void refreshGitRepos(true);
 
-            const source = new EventSource(withToken(settings.agentUrl, `/events?clientId=mobile-codex-${Date.now()}`, settings.token));
+            const source = new EventSource(withToken(agentEndpoint, `/events?clientId=mobile-codex-${Date.now()}`, settingsRef.current.token));
             eventSourceRef.current = source;
             source.addEventListener("hello", () => {
                 setConnected(true);
@@ -480,7 +533,7 @@ export default function MobileAgentPage() {
 
     const pushCurrentCommit = async () => {
         if (pushing) return;
-        if (!settings.agentUrl.trim() || !settings.token.trim()) {
+        if (!settingsRef.current.agentUrl.trim() || !settingsRef.current.token.trim()) {
             setSettingsOpen(true);
             pushMessage({ id: createId(), role: "error", title: "无法推送", text: "请先填写 Agent URL 和 Token。" });
             return;
@@ -489,14 +542,30 @@ export default function MobileAgentPage() {
             const ok = await connect({ quiet: true });
             if (!ok) return;
         }
+        let repo = repos.find((item) => samePath(item.repoPath, settingsRef.current.gitRepoPath)) || selectedRepo;
+        if (!repo) {
+            const list = await refreshGitRepos(true);
+            repo = list.find((item) => samePath(item.repoPath, settingsRef.current.gitRepoPath)) || list.find((item) => !item.pushBlocked) || list[0];
+        }
+        if (!repo) {
+            pushMessage({ id: createId(), role: "error", title: "无法推送", text: "电脑上没有发现可推送的 Git 仓库。" });
+            return;
+        }
+        if (repo.pushBlocked) {
+            pushMessage({ id: createId(), role: "error", title: "推送已拦截", text: repo.warnings.join("\n") || "这个仓库当前不适合从手机直接 push。" });
+            return;
+        }
+        const remote = repo.defaultRemote || "origin";
+        const branch = repo.defaultBranch || "main";
         setPushing(true);
-        pushMessage({ id: createId(), role: "status", text: "正在让电脑执行 git push origin HEAD:main..." });
+        pushMessage({ id: createId(), role: "status", text: `正在让电脑执行 git push ${remote} HEAD:${branch}\n${repo.repoPath}` });
         try {
-            const data = await agentFetch<{ stdout?: string; stderr?: string; remote?: string; branch?: string }>("/agent/git/push", {
+            const data = await agentFetch<{ stdout?: string; stderr?: string; remote?: string; branch?: string; repo?: GitRepoInfo; repoPath?: string }>("/agent/git/push", {
                 method: "POST",
-                body: JSON.stringify({ canvasId: normalizeCanvasId(settings.canvasId), remote: "origin", branch: "main" }),
+                body: JSON.stringify({ canvasId: normalizeCanvasId(settingsRef.current.canvasId), repoPath: repo.repoPath, remote, branch }),
             });
-            pushMessage({ id: createId(), role: "tool", title: "Git push", text: data.stdout || data.stderr || `已推送到 ${data.remote || "origin"}/${data.branch || "main"}` });
+            pushMessage({ id: createId(), role: "tool", title: "Git push", text: data.stdout || data.stderr || `已推送 ${repoName(data.repo?.repoPath || repo.repoPath)} 到 ${data.remote || remote}/${data.branch || branch}` });
+            void refreshGitRepos(true);
         } catch (error) {
             pushMessage({ id: createId(), role: "error", title: "推送失败", text: error instanceof Error ? error.message : String(error) });
         } finally {
@@ -508,7 +577,7 @@ export default function MobileAgentPage() {
         try {
             const data = await agentFetch<{ workspace?: Workspace; thread?: { id?: string } }>("/agent/codex/threads/new", {
                 method: "POST",
-                body: JSON.stringify({ canvasId: normalizeCanvasId(settings.canvasId) }),
+                body: JSON.stringify({ canvasId: normalizeCanvasId(settingsRef.current.canvasId) }),
             });
             setWorkspace(data.workspace || workspace);
             setActiveThreadId(data.thread?.id || data.workspace?.activeThreadId || "");
@@ -524,7 +593,7 @@ export default function MobileAgentPage() {
         event?.preventDefault();
         const prompt = input.trim();
         if (!prompt || sending) return;
-        if (!settings.agentUrl.trim() || !settings.token.trim()) {
+        if (!settingsRef.current.agentUrl.trim() || !settingsRef.current.token.trim()) {
             setConnectionStatus("error");
             setConnectionMessage("请先填写 Agent URL 和 Token");
             setSettingsOpen(true);
@@ -541,7 +610,7 @@ export default function MobileAgentPage() {
         pushMessage({ id: createId(), role: "user", text: prompt });
         upsertStreamMessage({ id: "turn-status", role: "status", text: "Codex 正在处理..." });
         try {
-            const canvasId = normalizeCanvasId(settings.canvasId);
+            const canvasId = normalizeCanvasId(settingsRef.current.canvasId);
             const targetThreadId = activeThreadIdRef.current || normalizeThreadId(settingsRef.current.threadId);
             if (targetThreadId) writePendingRun({ threadId: targetThreadId, canvasId, prompt, startedAt: Date.now() });
             const data = await agentFetch<{ threadId?: string }>("/agent/codex/turn", {
@@ -623,7 +692,7 @@ export default function MobileAgentPage() {
                                             : message.role === "error"
                                               ? "border border-red-500/20 bg-red-500/10 text-red-900 dark:text-red-100"
                                               : message.role === "tool" || message.role === "status"
-                                                ? "border border-black/10 bg-white/50 text-stone-500 dark:border-white/10 dark:bg-white/[0.05] dark:text-stone-400"
+                                                ? "border border-black/10 bg-white/50 text-stone-600 dark:border-white/10 dark:bg-white/[0.05] dark:text-stone-300"
                                                 : "border border-black/10 bg-white/78 text-stone-900 backdrop-blur-xl dark:border-white/10 dark:bg-white/[0.07] dark:text-stone-100",
                                     ].join(" ")}
                                 >
@@ -644,7 +713,7 @@ export default function MobileAgentPage() {
                                 <FolderGit2 className="size-5" />
                             </div>
                             <h1 className="mt-5 text-2xl font-semibold">手机操作 Codex</h1>
-                            <p className="mt-2 max-w-sm text-sm leading-6 text-stone-500 dark:text-stone-400">{connected ? "回复会显示在本页，桌面窗口可能不会实时同步" : "连接电脑 Agent 后开始"}</p>
+                            <p className="mt-2 max-w-sm text-sm leading-6 text-stone-500 dark:text-stone-400">{connected ? "回复会显示在本页；电脑端窗口不一定实时同步。" : "连接电脑 Agent 后开始。"}</p>
                         </section>
                     )}
                 </div>
@@ -670,7 +739,7 @@ export default function MobileAgentPage() {
 
             {settingsOpen ? (
                 <div className="fixed inset-0 z-50 bg-black/35 backdrop-blur-sm" onClick={() => setSettingsOpen(false)}>
-                    <section className="absolute bottom-0 left-0 right-0 max-h-[88vh] overflow-y-auto rounded-t-[1.75rem] border border-black/10 bg-[#f7f5ef] p-5 shadow-2xl sm:left-auto sm:top-0 sm:h-full sm:w-[420px] sm:rounded-none dark:border-white/10 dark:bg-[#101010]" onClick={(event) => event.stopPropagation()}>
+                    <section className="absolute bottom-0 left-0 right-0 max-h-[88vh] overflow-y-auto rounded-t-[1.75rem] border border-black/10 bg-[#f7f5ef] p-5 shadow-2xl sm:left-auto sm:top-0 sm:h-full sm:w-[430px] sm:rounded-none dark:border-white/10 dark:bg-[#101010]" onClick={(event) => event.stopPropagation()}>
                         <div className="flex items-center justify-between">
                             <h2 className="text-lg font-semibold">连接配置</h2>
                             <button type="button" className="grid size-9 place-items-center text-stone-500 transition hover:text-stone-950 dark:hover:text-white" onClick={() => setSettingsOpen(false)} aria-label="关闭">
@@ -680,12 +749,12 @@ export default function MobileAgentPage() {
 
                         <div className="mt-5 space-y-4">
                             <p className="rounded-2xl border border-amber-500/20 bg-amber-500/10 px-3 py-2 text-xs leading-5 text-amber-800 dark:text-amber-100">
-                                Agent URL 是 canvas-agent 的 HTTPS 服务地址，不是画布网页地址、New API 地址或创作 Agent API。可用 Cloudflare Tunnel、Tailscale Funnel 或 VPS 反代地址；不要把 17371 端口无鉴权裸露到公网。
+                                Agent URL 是电脑上 canvas-agent 的 HTTPS 服务地址，不是画布网页地址、New API 地址或创作 Agent API。不要把 17371 端口无鉴权裸露到公网。
                             </p>
                             <label className="block">
                                 <span className="text-sm font-medium">Agent URL</span>
                                 <input value={settings.agentUrl} onChange={(event) => updateSettings({ agentUrl: event.target.value })} placeholder="https://your-canvas-agent.example.com" className="mt-2 h-11 w-full rounded-xl border border-black/10 bg-white px-3 outline-none focus:border-stone-500 dark:border-white/10 dark:bg-white/[0.06]" />
-                                <span className="mt-1 block text-xs leading-5 text-stone-500 dark:text-stone-400">填暴露 canvas-agent 的地址，不填 https://canvas.prompt-hubs.com。</span>
+                                <span className="mt-1 block text-xs leading-5 text-stone-500 dark:text-stone-400">填 cloudflared / Tailscale / VPS 反代出的 canvas-agent 地址。</span>
                             </label>
                             <label className="block">
                                 <span className="text-sm font-medium">Token</span>
@@ -694,19 +763,64 @@ export default function MobileAgentPage() {
                             </label>
                             <label className="block">
                                 <span className="text-sm font-medium">Workspace</span>
-                                <input value={settings.workspacePath} onChange={(event) => updateSettings({ workspacePath: event.target.value })} className="mt-2 h-11 w-full rounded-xl border border-black/10 bg-white px-3 outline-none focus:border-stone-500 dark:border-white/10 dark:bg-white/[0.06]" />
-                                <span className="mt-1 block text-xs leading-5 text-stone-500 dark:text-stone-400">可留空使用 agent 已保存的工作区；要覆盖时填运行 agent 那台机器上的项目路径。</span>
+                                <input value={settings.workspacePath} onChange={(event) => updateSettings({ workspacePath: event.target.value })} placeholder="可留空" className="mt-2 h-11 w-full rounded-xl border border-black/10 bg-white px-3 outline-none focus:border-stone-500 dark:border-white/10 dark:bg-white/[0.06]" />
+                                <span className="mt-1 block text-xs leading-5 text-stone-500 dark:text-stone-400">留空使用 agent 已保存的工作区。指定 Codex 会话时，Workspace 必须和该会话的 cwd 一致。</span>
                             </label>
                             <label className="block">
                                 <span className="text-sm font-medium">Canvas ID</span>
                                 <input value={settings.canvasId} onChange={(event) => updateSettings({ canvasId: event.target.value })} placeholder="/canvas/019f..." className="mt-2 h-11 w-full rounded-xl border border-black/10 bg-white px-3 outline-none focus:border-stone-500 dark:border-white/10 dark:bg-white/[0.06]" />
-                                <span className="mt-1 block text-xs leading-5 text-stone-500 dark:text-stone-400">只用于区分画布工作区。可填完整 /canvas/019...，不是 Codex 会话。</span>
+                                <span className="mt-1 block text-xs leading-5 text-stone-500 dark:text-stone-400">只用于区分画布工作区，可填完整 /canvas/019...，不是 Codex 会话。</span>
                             </label>
                             <label className="block">
                                 <span className="text-sm font-medium">Codex Thread ID</span>
                                 <input value={settings.threadId} onChange={(event) => updateSettings({ threadId: event.target.value })} placeholder="codex://threads/019f..." className="mt-2 h-11 w-full rounded-xl border border-black/10 bg-white px-3 outline-none focus:border-stone-500 dark:border-white/10 dark:bg-white/[0.06]" />
                                 <span className="mt-1 block text-xs leading-5 text-stone-500 dark:text-stone-400">要继续指定 Codex 会话就填这里；可填完整 codex://threads/... 或只填 ID。</span>
                             </label>
+
+                            <div className="rounded-2xl border border-black/10 bg-white/60 p-3 dark:border-white/10 dark:bg-white/[0.05]">
+                                <div className="flex items-center justify-between gap-3">
+                                    <div>
+                                        <div className="flex items-center gap-2 text-sm font-medium">
+                                            <GitBranch className="size-4" />
+                                            本机 Git 仓库
+                                        </div>
+                                        <div className="mt-1 text-xs text-stone-500 dark:text-stone-400">手机 push 只推已提交 HEAD，不会自动 add/commit。</div>
+                                    </div>
+                                    <button type="button" className="grid size-9 shrink-0 place-items-center rounded-xl border border-black/10 bg-white text-stone-600 transition hover:text-stone-950 disabled:opacity-45 dark:border-white/10 dark:bg-white/[0.06] dark:text-stone-300" onClick={() => void refreshGitRepos()} disabled={reposLoading || !settings.agentUrl.trim() || !settings.token.trim()} aria-label="刷新仓库">
+                                        <RefreshCcw className={`size-4 ${reposLoading ? "animate-spin" : ""}`} />
+                                    </button>
+                                </div>
+                                <select
+                                    value={settings.gitRepoPath}
+                                    onChange={(event) => updateSettings({ gitRepoPath: event.target.value })}
+                                    className="mt-3 h-11 w-full rounded-xl border border-black/10 bg-white px-3 text-sm outline-none focus:border-stone-500 dark:border-white/10 dark:bg-[#151515]"
+                                >
+                                    <option value="">选择要推送的仓库</option>
+                                    {repos.map((repo) => (
+                                        <option key={repo.repoPath} value={repo.repoPath}>
+                                            {repoName(repo.repoPath)} - {repo.branch}
+                                        </option>
+                                    ))}
+                                </select>
+                                {selectedRepo ? (
+                                    <div className="mt-3 space-y-2 text-xs leading-5 text-stone-600 dark:text-stone-300">
+                                        <div className="break-all rounded-xl bg-black/[0.04] px-3 py-2 dark:bg-white/[0.05]">{selectedRepo.repoPath}</div>
+                                        <div className="grid grid-cols-2 gap-2">
+                                            <div className="rounded-xl bg-black/[0.04] px-3 py-2 dark:bg-white/[0.05]">当前分支：{selectedRepo.branch}</div>
+                                            <div className="rounded-xl bg-black/[0.04] px-3 py-2 dark:bg-white/[0.05]">推送目标：{selectedRepo.defaultRemote || "origin"}/{selectedRepo.defaultBranch || "main"}</div>
+                                        </div>
+                                        {selectedRepo.remotes[0] ? <div className="break-all rounded-xl bg-black/[0.04] px-3 py-2 dark:bg-white/[0.05]">远程：{selectedRepo.remotes[0].url}</div> : null}
+                                        {selectedRepo.statusShort.length ? <div className="rounded-xl border border-amber-500/20 bg-amber-500/10 px-3 py-2 text-amber-800 dark:text-amber-100">未提交改动：{selectedRepo.statusShort.length} 条。手机 push 不会把这些改动带上。</div> : null}
+                                        {selectedRepo.warnings.map((warning) => (
+                                            <div key={warning} className="rounded-xl border border-red-500/20 bg-red-500/10 px-3 py-2 text-red-800 dark:text-red-100">
+                                                {warning}
+                                            </div>
+                                        ))}
+                                    </div>
+                                ) : (
+                                    <div className="mt-3 rounded-xl bg-black/[0.04] px-3 py-2 text-xs leading-5 text-stone-500 dark:bg-white/[0.05] dark:text-stone-400">{repoError || "连接后会自动扫描本机仓库，也可以点刷新。"}</div>
+                                )}
+                            </div>
                         </div>
 
                         <div className="mt-6 grid grid-cols-2 gap-2">
@@ -714,13 +828,13 @@ export default function MobileAgentPage() {
                                 <PlugZap className="size-4" />
                                 连接
                             </button>
-                            <button type="button" className="inline-flex h-11 items-center justify-center gap-2 rounded-xl border border-black/10 bg-white text-sm font-medium dark:border-white/10 dark:bg-white/[0.06]" onClick={() => void newThread()} disabled={!connected}>
+                            <button type="button" className="inline-flex h-11 items-center justify-center gap-2 rounded-xl border border-black/10 bg-white text-sm font-medium disabled:opacity-45 dark:border-white/10 dark:bg-white/[0.06]" onClick={() => void newThread()} disabled={!connected}>
                                 <RotateCcw className="size-4" />
                                 新对话
                             </button>
                             <button type="button" className="col-span-2 inline-flex h-11 items-center justify-center gap-2 rounded-xl border border-black/10 bg-white text-sm font-medium disabled:opacity-45 dark:border-white/10 dark:bg-white/[0.06]" onClick={() => void pushCurrentCommit()} disabled={pushing || !settings.agentUrl.trim() || !settings.token.trim()}>
                                 {pushing ? <LoaderCircle className="size-4 animate-spin" /> : <UploadCloud className="size-4" />}
-                                推送当前提交到 main
+                                推送所选仓库已提交 HEAD
                             </button>
                             <button type="button" className="col-span-2 inline-flex h-11 items-center justify-center gap-2 rounded-xl border border-black/10 bg-white text-sm font-medium dark:border-white/10 dark:bg-white/[0.06]" onClick={() => setMessages([])}>
                                 <Trash2 className="size-4" />

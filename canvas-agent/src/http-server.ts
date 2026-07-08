@@ -9,6 +9,19 @@ import { CanvasSession } from "./canvas-session.js";
 import { archiveCodexThread, listCodexThreads, readCodexThread, resumeCodexThread, runClaudeTurn, runCodexTurn, startCodexThread, summarizeCodexThread, verifyCodexThreadWorkspace, withAgentPrompt } from "./agents.js";
 import type { AgentAttachment } from "./types.js";
 
+type GitRemoteInfo = { name: string; url: string };
+type GitRepoInfo = {
+    repoPath: string;
+    branch: string;
+    defaultRemote: string;
+    defaultBranch: string;
+    remotes: GitRemoteInfo[];
+    dirty: boolean;
+    statusShort: string[];
+    warnings: string[];
+    pushBlocked: boolean;
+};
+
 export function startHttpServer() {
     const config = loadConfig(true);
     const port = Number(process.env.PORT) || Number(new URL(config.url).port) || DEFAULT_PORT;
@@ -98,12 +111,22 @@ export function startHttpServer() {
         void runCodexTurn(withAgentPrompt(String(req.body?.prompt || "")), emit, attachments, { threadId, cwd: workspace.workspacePath });
         res.json({ ok: true, threadId });
     }));
+    app.get("/agent/git/repos", route(async (req, res) => {
+        const workspace = ensureCanvasWorkspace(config, String(req.query.canvasId || ""));
+        res.json({ ok: true, workspace, repos: discoverGitRepos(workspace.workspacePath) });
+    }));
     app.post("/agent/git/push", route(async (req, res) => {
         const workspace = ensureCanvasWorkspace(config, String(req.body?.canvasId || ""));
-        const remote = safeGitRef(String(req.body?.remote || "origin"), "origin");
-        const branch = safeGitRef(String(req.body?.branch || "main"), "main");
-        const result = await runGitPush(workspace.workspacePath, remote, branch);
-        res.json({ ok: true, workspace, remote, branch, ...result });
+        const repos = discoverGitRepos(workspace.workspacePath);
+        const requestedRepoPath = String(req.body?.repoPath || "").trim();
+        const defaultRepoPath = resolveGitWorkspace(workspace.workspacePath);
+        const repo = requestedRepoPath ? findRepoByPath(repos, requestedRepoPath) : findRepoByPath(repos, defaultRepoPath) || repos[0];
+        if (!repo) throw new Error("No Git repository was found on this computer.");
+        if (repo.pushBlocked && !req.body?.allowBlocked) throw new Error(`Refusing to push ${repo.repoPath}: ${repo.warnings.join(" ")}`);
+        const remote = safeGitRef(String(req.body?.remote || repo.defaultRemote || "origin"), "origin");
+        const branch = safeGitRef(String(req.body?.branch || repo.defaultBranch || "main"), "main");
+        const result = await runGitPush(repo.repoPath, remote, branch);
+        res.json({ ok: true, workspace, repo, remote, branch, ...result });
     }));
     app.post("/agent/claude/turn", (req, res) => {
         runClaudeTurn(withAgentPrompt(String(req.body?.prompt || "")), emit);
@@ -163,12 +186,13 @@ function lanUrls(port: number) {
 
 function safeGitRef(value: string, fallback: string) {
     const ref = value.trim() || fallback;
-    if (!/^[a-zA-Z0-9._/-]+$/.test(ref) || ref.includes("..") || ref.startsWith("/") || ref.endsWith("/")) throw new Error("git push 参数不安全");
+    if (!/^[a-zA-Z0-9._/-]+$/.test(ref) || ref.includes("..") || ref.startsWith("/") || ref.endsWith("/")) throw new Error("Unsafe git push argument.");
     return ref;
 }
 
-function runGitPush(cwd: string, remote: string, branch: string) {
-    const repoPath = resolveGitWorkspace(cwd);
+function runGitPush(repoPath: string, remote: string, branch: string) {
+    const topLevel = gitTopLevel(repoPath);
+    if (!topLevel || !samePath(topLevel, repoPath)) throw new Error("Selected path is not a valid Git repository.");
     return new Promise<{ repoPath: string; stdout: string; stderr: string }>((resolve, reject) => {
         const child = spawn("git", ["push", remote, `HEAD:${branch}`], { cwd: repoPath, windowsHide: true });
         let stdout = "";
@@ -178,9 +202,123 @@ function runGitPush(cwd: string, remote: string, branch: string) {
         child.on("error", reject);
         child.on("close", (code) => {
             if (code === 0) return resolve({ repoPath, stdout: stdout.trim(), stderr: stderr.trim() });
-            reject(new Error(`git push 失败 (${code ?? "unknown"}): ${(stderr || stdout || "no output").trim()}`));
+            reject(new Error(`git push failed (${code ?? "unknown"}): ${(stderr || stdout || "no output").trim()}`));
         });
     });
+}
+
+function discoverGitRepos(workspacePath: string) {
+    const repos = new Map<string, GitRepoInfo>();
+    repoDiscoveryRoots(workspacePath).forEach((root) => collectGitRepos(root, repos, 0, 2));
+    return [...repos.values()].sort((a, b) => a.repoPath.localeCompare(b.repoPath));
+}
+
+function repoDiscoveryRoots(workspacePath: string) {
+    const roots = new Set<string>();
+    const add = (value: string | undefined) => {
+        if (!value) return;
+        const resolved = path.resolve(value);
+        if (fs.existsSync(resolved)) roots.add(resolved);
+    };
+    const workspace = path.resolve(workspacePath);
+    const workspaceParent = path.dirname(workspace);
+    add(workspace);
+    if (workspaceParent !== workspace && workspaceParent !== path.parse(workspace).root) add(workspaceParent);
+    add(process.cwd());
+    add(path.dirname(process.cwd()));
+    add(path.join(os.homedir(), "Documents"));
+    if (process.env.CANVAS_AGENT_REPO_ROOTS) process.env.CANVAS_AGENT_REPO_ROOTS.split(path.delimiter).forEach(add);
+    if (process.platform === "win32") {
+        add("D:\\canvas");
+        add("D:\\new-api");
+        add("D:\\prompt-stack-package");
+    }
+    return [...roots].sort((a, b) => a.length - b.length);
+}
+
+function collectGitRepos(root: string, repos: Map<string, GitRepoInfo>, depth: number, maxDepth: number) {
+    if (repos.size >= 80 || !fs.existsSync(root)) return;
+    const topLevel = gitTopLevel(root);
+    if (topLevel) {
+        const repoPath = path.resolve(topLevel);
+        const key = repoKey(repoPath);
+        if (!repos.has(key)) repos.set(key, inspectGitRepo(repoPath));
+        if (samePath(repoPath, root)) return;
+    }
+    if (depth >= maxDepth) return;
+    let children: fs.Dirent[];
+    try {
+        children = fs.readdirSync(root, { withFileTypes: true });
+    } catch {
+        return;
+    }
+    for (const item of children) {
+        if (!item.isDirectory() || ignoredGitSearchDir(item.name)) continue;
+        collectGitRepos(path.join(root, item.name), repos, depth + 1, maxDepth);
+        if (repos.size >= 80) return;
+    }
+}
+
+function inspectGitRepo(repoPath: string): GitRepoInfo {
+    const branch = gitOutput(repoPath, ["branch", "--show-current"]) || gitOutput(repoPath, ["rev-parse", "--short", "HEAD"]) || "detached";
+    const remotes = parseGitRemotes(gitOutput(repoPath, ["remote", "-v"]));
+    const defaultRemote = remotes.find((item) => item.name === "origin")?.name || remotes[0]?.name || "";
+    const defaultBranch = (defaultRemote && remoteDefaultBranch(repoPath, defaultRemote)) || (branch === "detached" ? "main" : branch) || "main";
+    const statusShort = gitOutput(repoPath, ["status", "--short"])
+        .split(/\r?\n/)
+        .map((line) => line.trimEnd())
+        .filter(Boolean)
+        .slice(0, 80);
+    const warnings: string[] = [];
+    const upstreamRemote = remotes.find((remote) => remoteLooksLikeUpstream(remote.url));
+    if (!remotes.length) warnings.push("No git remote is configured.");
+    if (statusShort.length) warnings.push("There are uncommitted changes; phone push sends committed HEAD only.");
+    if (upstreamRemote) warnings.push(`Remote ${upstreamRemote.name} looks like an upstream/source repository. Set a personal fork before pushing.`);
+    return {
+        repoPath,
+        branch,
+        defaultRemote,
+        defaultBranch,
+        remotes,
+        dirty: statusShort.length > 0,
+        statusShort,
+        warnings,
+        pushBlocked: !remotes.length || Boolean(upstreamRemote),
+    };
+}
+
+function parseGitRemotes(value: string): GitRemoteInfo[] {
+    const remotes = new Map<string, string>();
+    value.split(/\r?\n/).forEach((line) => {
+        const match = line.match(/^(\S+)\s+(.+?)\s+\((fetch|push)\)$/);
+        if (!match) return;
+        const [, name, url, kind] = match;
+        if (kind === "fetch" || !remotes.has(name)) remotes.set(name, url);
+    });
+    return [...remotes.entries()].map(([name, url]) => ({ name, url }));
+}
+
+function remoteDefaultBranch(repoPath: string, remote: string) {
+    const ref = gitOutput(repoPath, ["symbolic-ref", "--quiet", "--short", `refs/remotes/${remote}/HEAD`]);
+    return ref.replace(`${remote}/`, "");
+}
+
+function findRepoByPath(repos: GitRepoInfo[], repoPath: string) {
+    return repos.find((repo) => samePath(repo.repoPath, repoPath));
+}
+
+function ignoredGitSearchDir(name: string) {
+    return new Set([".git", ".next", ".turbo", ".vercel", "node_modules", "dist", "build", "coverage", ".cache"]).has(name);
+}
+
+function remoteLooksLikeUpstream(url: string) {
+    const normalized = url.toLowerCase().replace(/\\/g, "/").replace(/:/g, "/").replace(/\.git$/, "");
+    return normalized.includes("github.com/quantumnous/new-api") || normalized.includes("github.com/zhizinan1997/jimeng-free-api-all");
+}
+
+function gitOutput(cwd: string, args: string[]) {
+    const result = spawnSync("git", args, { cwd, encoding: "utf8", windowsHide: true });
+    return result.status === 0 ? result.stdout.trim() : "";
 }
 
 function resolveGitWorkspace(cwd: string) {
@@ -194,12 +332,23 @@ function resolveGitWorkspace(cwd: string) {
             if (repo) return repo;
         }
     } catch {
-        // Let git return the actionable error below.
+        // Let the caller return the actionable error.
     }
     return cwd;
 }
 
 function gitTopLevel(cwd: string) {
     const result = spawnSync("git", ["rev-parse", "--show-toplevel"], { cwd, encoding: "utf8", windowsHide: true });
-    return result.status === 0 ? result.stdout.trim() : "";
+    return result.status === 0 ? path.resolve(result.stdout.trim()) : "";
+}
+
+function samePath(a: string, b: string) {
+    const left = path.resolve(a);
+    const right = path.resolve(b);
+    return process.platform === "win32" ? left.toLowerCase() === right.toLowerCase() : left === right;
+}
+
+function repoKey(repoPath: string) {
+    const resolved = path.resolve(repoPath);
+    return process.platform === "win32" ? resolved.toLowerCase() : resolved;
 }

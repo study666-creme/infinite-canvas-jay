@@ -8,9 +8,12 @@ type MobileMessage = { id: string; role: MessageRole; title?: string; text: stri
 type Settings = { agentUrl: string; token: string; canvasId: string; threadId: string; workspacePath: string };
 type Workspace = { canvasId: string; workspacePath: string; activeThreadId?: string };
 type AgentEvent = { type?: string; item?: Record<string, unknown>; usage?: unknown; message?: string };
+type PendingRun = { threadId: string; canvasId: string; prompt: string; startedAt: number };
 
 const settingsKey = "kazang-mobile-codex:settings";
 const messagesKey = "kazang-mobile-codex:messages";
+const pendingRunKey = "kazang-mobile-codex:pending-run";
+const pendingRunMaxAge = 1000 * 60 * 60 * 12;
 const defaultSettings: Settings = {
     agentUrl: "",
     token: "",
@@ -122,6 +125,24 @@ function parseEventData<T>(event: Event) {
     }
 }
 
+function readPendingRun() {
+    if (typeof localStorage === "undefined") return null;
+    const value = readJson<PendingRun | null>(localStorage.getItem(pendingRunKey), null);
+    if (!value?.threadId || !value.prompt || Date.now() - Number(value.startedAt || 0) > pendingRunMaxAge) {
+        localStorage.removeItem(pendingRunKey);
+        return null;
+    }
+    return value;
+}
+
+function writePendingRun(run: PendingRun) {
+    localStorage.setItem(pendingRunKey, JSON.stringify(run));
+}
+
+function clearPendingRun() {
+    localStorage.removeItem(pendingRunKey);
+}
+
 export default function MobileAgentPage() {
     const [settings, setSettings] = useState<Settings>(defaultSettings);
     const [messages, setMessages] = useState<MobileMessage[]>([]);
@@ -133,21 +154,35 @@ export default function MobileAgentPage() {
     const [workspace, setWorkspace] = useState<Workspace | null>(null);
     const [activeThreadId, setActiveThreadId] = useState("");
     const [copiedId, setCopiedId] = useState("");
+    const [hydrated, setHydrated] = useState(false);
     const eventSourceRef = useRef<EventSource | null>(null);
     const pollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const pendingPromptRef = useRef("");
+    const settingsRef = useRef<Settings>(defaultSettings);
+    const activeThreadIdRef = useRef("");
     const scrollerRef = useRef<HTMLDivElement>(null);
 
     const canSend = useMemo(() => connected && Boolean(input.trim()) && !sending, [connected, input, sending]);
 
     useEffect(() => {
-        setSettings(sanitizeSettings(readJson<Partial<Settings>>(localStorage.getItem(settingsKey), {})));
+        const loadedSettings = sanitizeSettings(readJson<Partial<Settings>>(localStorage.getItem(settingsKey), {}));
+        settingsRef.current = loadedSettings;
+        setSettings(loadedSettings);
         setMessages(readJson<MobileMessage[]>(localStorage.getItem(messagesKey), []));
+        setHydrated(true);
         return () => {
             eventSourceRef.current?.close();
             stopThreadPoll();
         };
     }, []);
+
+    useEffect(() => {
+        settingsRef.current = settings;
+    }, [settings]);
+
+    useEffect(() => {
+        activeThreadIdRef.current = activeThreadId;
+    }, [activeThreadId]);
 
     useEffect(() => {
         localStorage.setItem(settingsKey, JSON.stringify(settings));
@@ -157,6 +192,24 @@ export default function MobileAgentPage() {
         localStorage.setItem(messagesKey, JSON.stringify(messages.slice(-120)));
         scrollerRef.current?.scrollTo({ top: scrollerRef.current.scrollHeight, behavior: "smooth" });
     }, [messages]);
+
+    useEffect(() => {
+        if (!hydrated) return;
+        const resume = () => {
+            if (document.visibilityState === "hidden") return;
+            void resumeThreadAfterInterruption();
+        };
+        const handleVisibility = () => resume();
+        window.addEventListener("focus", resume);
+        window.addEventListener("online", resume);
+        document.addEventListener("visibilitychange", handleVisibility);
+        resume();
+        return () => {
+            window.removeEventListener("focus", resume);
+            window.removeEventListener("online", resume);
+            document.removeEventListener("visibilitychange", handleVisibility);
+        };
+    }, [hydrated, activeThreadId, settings.agentUrl, settings.token, settings.canvasId, settings.threadId]);
 
     const pushMessage = (message: MobileMessage) => setMessages((items) => [...items, message].slice(-140));
 
@@ -204,9 +257,10 @@ export default function MobileAgentPage() {
     }
 
     const agentFetch = async <T,>(path: string, init?: RequestInit) => {
-        const response = await fetch(`${endpoint(settings.agentUrl)}${path}`, {
+        const currentSettings = settingsRef.current;
+        const response = await fetch(`${endpoint(currentSettings.agentUrl)}${path}`, {
             ...init,
-            headers: { "Content-Type": "application/json", "x-canvas-agent-token": settings.token.trim(), ...(init?.headers || {}) },
+            headers: { "Content-Type": "application/json", "x-canvas-agent-token": currentSettings.token.trim(), ...(init?.headers || {}) },
         });
         const payload = (await response.json().catch(() => ({}))) as T & { error?: string; msg?: string };
         if (!response.ok) throw new Error(payload.error || payload.msg || `Agent 请求失败：${response.status}`);
@@ -224,6 +278,7 @@ export default function MobileAgentPage() {
 
     const pollThreadUntilReply = (threadId: string, canvasId: string, prompt: string) => {
         stopThreadPoll();
+        writePendingRun({ threadId, canvasId, prompt, startedAt: Date.now() });
         let attempts = 0;
         const tick = async () => {
             attempts += 1;
@@ -232,6 +287,7 @@ export default function MobileAgentPage() {
                 if (hasReplyAfterPrompt(items, prompt)) {
                     pendingPromptRef.current = "";
                     setSending(false);
+                    clearPendingRun();
                     stopThreadPoll();
                     return;
                 }
@@ -241,6 +297,7 @@ export default function MobileAgentPage() {
             if (attempts >= 60) {
                 pendingPromptRef.current = "";
                 setSending(false);
+                clearPendingRun();
                 stopThreadPoll();
                 pushMessage({ id: createId(), role: "status", text: "Codex 还没返回结果。可以点右上角连接按钮刷新会话记录。" });
                 return;
@@ -248,6 +305,41 @@ export default function MobileAgentPage() {
             pollTimerRef.current = setTimeout(tick, attempts < 4 ? 1500 : 3000);
         };
         pollTimerRef.current = setTimeout(tick, 1200);
+    };
+
+    const resumeThreadAfterInterruption = async () => {
+        const currentSettings = settingsRef.current;
+        if (!currentSettings.agentUrl.trim() || !currentSettings.token.trim()) return;
+        const pendingRun = readPendingRun();
+        if (pendingRun) {
+            pendingPromptRef.current = pendingRun.prompt;
+            setSending(true);
+            setActiveThreadId(pendingRun.threadId);
+            if (currentSettings.threadId !== pendingRun.threadId || normalizeCanvasId(currentSettings.canvasId) !== pendingRun.canvasId) {
+                updateSettings({ threadId: pendingRun.threadId, canvasId: pendingRun.canvasId });
+            }
+            try {
+                const items = await refreshThreadMessages(pendingRun.threadId, pendingRun.canvasId, pendingRun.prompt);
+                if (hasReplyAfterPrompt(items, pendingRun.prompt)) {
+                    pendingPromptRef.current = "";
+                    setSending(false);
+                    clearPendingRun();
+                    stopThreadPoll();
+                    return;
+                }
+                pollThreadUntilReply(pendingRun.threadId, pendingRun.canvasId, pendingRun.prompt);
+            } catch {
+                pollThreadUntilReply(pendingRun.threadId, pendingRun.canvasId, pendingRun.prompt);
+            }
+            return;
+        }
+        const threadId = activeThreadIdRef.current || normalizeThreadId(currentSettings.threadId);
+        if (!threadId) return;
+        try {
+            await refreshThreadMessages(threadId, normalizeCanvasId(currentSettings.canvasId));
+        } catch {
+            // Foreground refresh is best effort; explicit connect still shows the real error.
+        }
     };
 
     const handleAgentEvent = (event: AgentEvent) => {
@@ -353,6 +445,7 @@ export default function MobileAgentPage() {
                     if (!pendingPrompt || hasReplyAfterPrompt(items, pendingPrompt)) {
                         pendingPromptRef.current = "";
                         setSending(false);
+                        clearPendingRun();
                         stopThreadPoll();
                     }
                 });
@@ -394,9 +487,11 @@ export default function MobileAgentPage() {
         upsertStreamMessage({ id: "turn-status", role: "status", text: "Codex 正在处理..." });
         try {
             const canvasId = normalizeCanvasId(settings.canvasId);
+            const targetThreadId = activeThreadId || normalizeThreadId(settings.threadId);
+            if (targetThreadId) writePendingRun({ threadId: targetThreadId, canvasId, prompt, startedAt: Date.now() });
             const data = await agentFetch<{ threadId?: string }>("/agent/codex/turn", {
                 method: "POST",
-                body: JSON.stringify({ prompt, canvasId, threadId: activeThreadId || normalizeThreadId(settings.threadId) || undefined }),
+                body: JSON.stringify({ prompt, canvasId, threadId: targetThreadId || undefined }),
             });
             if (data.threadId) {
                 setActiveThreadId(data.threadId);
@@ -436,6 +531,12 @@ export default function MobileAgentPage() {
                     </button>
                 </div>
             </header>
+
+            {sending ? (
+                <div className="shrink-0 border-b border-black/10 bg-amber-500/10 px-4 py-2 text-xs leading-5 text-amber-800 dark:border-white/10 dark:text-amber-100">
+                    Codex 后台执行中。手机锁屏或切后台后，回到页面会自动同步当前会话记录。
+                </div>
+            ) : null}
 
             <div ref={scrollerRef} className="min-h-0 flex-1 overflow-y-auto px-4 py-5">
                 <div className="mx-auto flex max-w-3xl flex-col gap-3">

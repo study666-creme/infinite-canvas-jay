@@ -39,16 +39,22 @@ cd web
 npm run build
 ```
 
-## 手机移动对话
+## 手机操作 Codex
 
-打开 `/mobile-agent` 可以在手机上直接发送文字消息并接收回复，不需要接入龙虾或 ChatGPT 账号登录。
+打开 `/mobile-agent` 可以把手机变成 Codex 控制台，连接电脑上的 `canvas-agent` 后继续让 Codex 读项目、改代码、跑命令和部署。
 
-两种使用方式：
+局域网使用示例：
 
-- 服务器方式：在部署环境配置 `OPENAI_API_KEY`、`OPENAI_BASE_URL`、`OPENAI_MODEL` 和 `MOBILE_AGENT_ACCESS_TOKEN`，手机页面只填写访问口令。
-- 本机方式：不配置服务器 `OPENAI_API_KEY`，在手机页面填写自己的 API Key、Base URL 和模型；配置会保存在手机浏览器本地。
+```powershell
+$env:CANVAS_AGENT_HOST="0.0.0.0"
+$env:CANVAS_AGENT_WORKSPACE="D:\canvas\infinite-canvas"
+cd D:\canvas\infinite-canvas\canvas-agent
+npm run dev
+```
 
-如果服务器配置了 `OPENAI_API_KEY`，建议一定配置 `MOBILE_AGENT_ACCESS_TOKEN`，避免公开接口被别人刷你的额度。
+启动后终端会输出 `Connect token` 和可访问地址。手机和电脑在同一网络时，打开 `http://电脑局域网IP:3000/mobile-agent`，填入 `http://电脑局域网IP:17371`、token 和工作目录即可。
+
+公网使用建议走 Tailscale、ZeroTier 或 Cloudflare Tunnel，不要直接裸露 `17371` 端口。
 
 ## 部署
 

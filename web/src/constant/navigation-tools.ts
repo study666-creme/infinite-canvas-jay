@@ -8,7 +8,7 @@ export const navigationTools = [
     },
     {
         slug: "mobile-agent",
-        label: "移动对话",
+        label: "移动 Codex",
         icon: MessageCircle,
     },
     {

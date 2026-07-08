@@ -1,4 +1,5 @@
 import express, { type NextFunction, type Request, type Response } from "express";
+import os, { type NetworkInterfaceInfo } from "node:os";
 
 import { DEFAULT_PORT, ensureCanvasWorkspace, loadConfig, saveConfig, updateCanvasWorkspace, type CanvasAgentConfig } from "./config.js";
 import { CanvasSession } from "./canvas-session.js";
@@ -8,7 +9,9 @@ import type { AgentAttachment } from "./types.js";
 export function startHttpServer() {
     const config = loadConfig(true);
     const port = Number(process.env.PORT) || Number(new URL(config.url).port) || DEFAULT_PORT;
-    config.url = `http://127.0.0.1:${port}`;
+    const listenHost = process.env.CANVAS_AGENT_HOST || process.env.HOST || "127.0.0.1";
+    const publicHost = process.env.CANVAS_AGENT_PUBLIC_HOST || (listenHost === "0.0.0.0" ? "127.0.0.1" : listenHost);
+    config.url = `http://${publicHost}:${port}`;
     saveConfig(config);
 
     const session = new CanvasSession();
@@ -23,7 +26,7 @@ export function startHttpServer() {
         next();
     });
     app.get("/health", (_req, res) => res.json(session.health()));
-    app.get("/config", (_req, res) => res.json({ ok: true, url: config.url, hasToken: true }));
+    app.get("/config", (_req, res) => res.json({ ok: true, url: config.url, listenHost, lanUrls: lanUrls(port), hasToken: true }));
     app.use((req, res, next) => {
         if (validToken(req, requestUrl(req, config), config.token)) return next();
         res.status(401).json({ ok: false, error: "invalid token" });
@@ -40,6 +43,10 @@ export function startHttpServer() {
     app.post("/api/tools", route(async (req, res) => res.json({ ok: true, result: await session.callTool(req.body?.name, req.body?.input || {}) })));
     app.get("/agent/codex/workspace", (req, res) => {
         const workspace = ensureCanvasWorkspace(config, String(req.query.canvasId || ""));
+        res.json({ ok: true, workspace });
+    });
+    app.post("/agent/codex/workspace", (req, res) => {
+        const workspace = updateCanvasWorkspace(config, String(req.body?.canvasId || ""), { workspacePath: String(req.body?.workspacePath || "") || undefined });
         res.json({ ok: true, workspace });
     });
     app.get("/agent/codex/threads", route(async (req, res) => {
@@ -95,9 +102,10 @@ export function startHttpServer() {
     app.use((_req, res) => res.status(404).json({ ok: false, error: "not found" }));
     app.use((error: Error, _req: Request, res: Response, _next: NextFunction) => res.status(500).json({ ok: false, error: error.message }));
 
-    app.listen(port, "127.0.0.1", () => {
+    app.listen(port, listenHost, () => {
         console.log("Infinite Canvas Agent");
         console.log(`Local URL: ${config.url}`);
+        if (listenHost === "0.0.0.0") lanUrls(port).forEach((url) => console.log(`LAN URL: ${url}`));
         console.log(`Connect token: ${config.token}`);
         console.log("Codex MCP: codex mcp add infinite-canvas -- npx -y @basketikun/canvas-agent mcp");
     });
@@ -134,4 +142,11 @@ function setCors(req: Request, res: Response, url: URL, config: CanvasAgentConfi
 function validToken(req: Request, url: URL, token: string) {
     const header = req.headers["x-canvas-agent-token"];
     return url.searchParams.get("token") === token || header === token || (Array.isArray(header) && header.includes(token));
+}
+
+function lanUrls(port: number) {
+    return Object.values(os.networkInterfaces())
+        .flat()
+        .filter((item): item is NetworkInterfaceInfo => Boolean(item && item.family === "IPv4" && !item.internal))
+        .map((item) => `http://${item.address}:${port}`);
 }

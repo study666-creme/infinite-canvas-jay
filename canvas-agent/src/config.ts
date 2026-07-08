@@ -35,7 +35,7 @@ export function ensureCanvasWorkspace(config: CanvasAgentConfig, canvasId: strin
         fs.mkdirSync(resolveWorkspacePath(current.workspacePath), { recursive: true });
         return { canvasId: id, ...current, workspacePath: resolveWorkspacePath(current.workspacePath) };
     }
-    const workspacePath = path.join(CONFIG_DIR, "codex-workspaces", id);
+    const workspacePath = id === "default" && process.env.CANVAS_AGENT_WORKSPACE ? resolveWorkspacePath(process.env.CANVAS_AGENT_WORKSPACE) : path.join(CONFIG_DIR, "codex-workspaces", id);
     config.canvases[id] = { workspacePath };
     fs.mkdirSync(workspacePath, { recursive: true });
     saveConfig(config);

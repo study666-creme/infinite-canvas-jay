@@ -9,7 +9,7 @@ import { promptHubUserIdentity } from "@/lib/prompt-hub-auth";
 import { prepareAssetStorageForSession, setAssetStorageUserFromSession } from "@/stores/use-asset-store";
 import { usePromptHubStore } from "@/stores/use-prompt-hub-store";
 import { useUserStore } from "@/stores/use-user-store";
-import type { PromptHubSession } from "@/services/prompt-hub";
+import { PROMPT_HUB_DEFAULTS, type PromptHubSession } from "@/services/prompt-hub";
 
 type AuthState = "checking" | "ready" | "authenticated";
 
@@ -169,6 +169,12 @@ export function PromptHubAuthGate({ children }: { children: ReactNode }) {
                             {submitting ? <LoaderCircle className="size-4 animate-spin" /> : <LogIn className="size-4" />}
                             登录
                         </button>
+                        <div className="text-center text-sm leading-6 text-stone-500 dark:text-stone-400">
+                            没有卡藏账号？
+                            <a className="font-medium text-stone-950 underline-offset-4 hover:underline dark:text-white" href={PROMPT_HUB_DEFAULTS.siteUrl} target="_blank" rel="noreferrer">
+                                去卡片库注册
+                            </a>
+                        </div>
                     </form>
                 )}
             </section>

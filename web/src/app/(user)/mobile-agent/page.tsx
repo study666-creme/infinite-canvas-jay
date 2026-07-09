@@ -35,15 +35,23 @@ type AgentAttachment = { name?: string; type?: string; dataUrl?: string };
 type QueuedTaskStatus = "queued" | "running" | "done" | "failed";
 type QueuedTask = { id: string; text: string; attachments: AgentAttachment[]; createdAt: number; status: QueuedTaskStatus; error?: string };
 type ThreadGroup = { key: string; label: string; path: string; threads: ThreadSummary[] };
+type ProjectPreset = { id: string; label: string; canvasId: string; workspacePath: string; threadId: string; gitRepoPath?: string };
 
 const settingsKey = "kazang-mobile-codex:settings";
 const messagesKey = "kazang-mobile-codex:messages";
 const pendingRunKey = "kazang-mobile-codex:pending-run";
 const queueKey = "kazang-mobile-codex:task-queue";
+const activeProjectKey = "kazang-mobile-codex:active-project";
 const pendingRunMaxAge = 1000 * 60 * 60 * 12;
 const legacyDefaultWorkspacePath = "D:\\canvas\\infinite-canvas";
 const queueGuides = ["继续修复并验证", "跑测试并汇报结果", "提交并推送当前项目", "整理当前进度和下一步", "检查线上部署状态"];
-const mobileAgentUiVersion = "队列版 6 2026-07-09";
+const mobileAgentUiVersion = "队列版 7 2026-07-09";
+const projectPresets: ProjectPreset[] = [
+    { id: "canvas", label: "画布", canvasId: "canvas", workspacePath: "D:\\canvas", threadId: "019f3789-5816-7230-a4af-f4fa992adb6e", gitRepoPath: "D:\\canvas\\infinite-canvas" },
+    { id: "agent", label: "agent", canvasId: "agent", workspacePath: "C:\\Users\\Jay\\Documents\\agent", threadId: "019f419a-e8fb-7ff3-a7ef-2fe6f58a0990", gitRepoPath: "C:\\Users\\Jay\\Documents\\agent" },
+    { id: "prompt-hub", label: "提示词仓库", canvasId: "prompt-hub", workspacePath: "D:\\prompt-hub", threadId: "019f3229-40ed-7683-b491-ef5d2d3dab34", gitRepoPath: "D:\\prompt-hub" },
+    { id: "new-api", label: "New API", canvasId: "new-api", workspacePath: "C:\\Users\\Jay\\Documents\\New API", threadId: "019f3caf-ca8c-7190-b826-0bf303dc025b", gitRepoPath: "C:\\Users\\Jay\\Documents\\New API" },
+];
 const defaultSettings: Settings = {
     agentUrl: "",
     token: "",
@@ -164,13 +172,14 @@ function parseEventData<T>(event: Event) {
     }
 }
 
-function readPendingRun() {
+function readPendingRun(canvasId?: string) {
     if (typeof localStorage === "undefined") return null;
     const value = readJson<PendingRun | null>(localStorage.getItem(pendingRunKey), null);
     if (!value?.threadId || !value.prompt || Date.now() - Number(value.startedAt || 0) > pendingRunMaxAge) {
         localStorage.removeItem(pendingRunKey);
         return null;
     }
+    if (canvasId && value.canvasId !== canvasId) return null;
     return value;
 }
 
@@ -184,6 +193,30 @@ function clearPendingRun() {
 
 function samePath(a: string, b: string) {
     return a.trim().replaceAll("/", "\\").toLowerCase() === b.trim().replaceAll("/", "\\").toLowerCase();
+}
+
+function findProjectPreset(value: Partial<Settings>, currentWorkspace?: Workspace | null) {
+    const canvasId = normalizeCanvasId(value.canvasId || "");
+    const threadId = normalizeThreadId(value.threadId || "");
+    const workspacePath = value.workspacePath || currentWorkspace?.workspacePath || "";
+    return (
+        projectPresets.find((project) => project.canvasId === canvasId) ||
+        projectPresets.find((project) => threadId === project.threadId) ||
+        projectPresets.find((project) => workspacePath && samePath(workspacePath, project.workspacePath)) ||
+        null
+    );
+}
+
+function messagesStorageKey(canvasId: string) {
+    return `${messagesKey}:${canvasId || "default"}`;
+}
+
+function readStoredMessages(canvasId: string) {
+    if (typeof localStorage === "undefined") return [];
+    const scopedKey = messagesStorageKey(canvasId);
+    const scoped = localStorage.getItem(scopedKey);
+    if (scoped !== null) return readJson<MobileMessage[]>(scoped, []);
+    return readJson<MobileMessage[]>(localStorage.getItem(messagesKey), []);
 }
 
 function repoName(repoPath: string) {
@@ -240,6 +273,7 @@ export default function MobileAgentPage() {
     const [pushing, setPushing] = useState(false);
     const [settingsOpen, setSettingsOpen] = useState(false);
     const [threadsOpen, setThreadsOpen] = useState(false);
+    const [activeProjectId, setActiveProjectId] = useState("");
     const [workspace, setWorkspace] = useState<Workspace | null>(null);
     const [activeThreadId, setActiveThreadId] = useState("");
     const [copiedId, setCopiedId] = useState("");
@@ -277,6 +311,8 @@ export default function MobileAgentPage() {
     const canSend = useMemo(() => Boolean(input.trim() || attachments.length), [attachments.length, input]);
     const activeQueueCount = useMemo(() => queueTaskCount(queuedTasks), [queuedTasks]);
     const selectedRepo = useMemo(() => repos.find((repo) => samePath(repo.repoPath, settings.gitRepoPath)) || null, [repos, settings.gitRepoPath]);
+    const detectedProject = useMemo(() => findProjectPreset(settings, workspace), [settings.canvasId, settings.threadId, settings.workspacePath, workspace]);
+    const activeProject = useMemo(() => detectedProject || projectPresets.find((project) => project.id === activeProjectId) || null, [activeProjectId, detectedProject]);
     const groupedThreads = useMemo<ThreadGroup[]>(() => {
         const groups = new Map<string, ThreadGroup>();
         for (const thread of threads) {
@@ -291,9 +327,23 @@ export default function MobileAgentPage() {
 
     useEffect(() => {
         const loadedSettings = sanitizeSettings(readJson<Partial<Settings>>(localStorage.getItem(settingsKey), {}));
-        settingsRef.current = loadedSettings;
-        setSettings(loadedSettings);
-        setMessages(readJson<MobileMessage[]>(localStorage.getItem(messagesKey), []));
+        const savedProjectId = localStorage.getItem(activeProjectKey) || "";
+        const matchedProject = findProjectPreset(loadedSettings);
+        const savedProject = projectPresets.find((project) => project.id === savedProjectId) || null;
+        const initialProject = matchedProject || savedProject;
+        const initialSettings = initialProject && !matchedProject
+            ? sanitizeSettings({
+                  ...loadedSettings,
+                  canvasId: initialProject.canvasId,
+                  workspacePath: initialProject.workspacePath,
+                  threadId: initialProject.threadId,
+                  gitRepoPath: initialProject.gitRepoPath || loadedSettings.gitRepoPath,
+              })
+            : loadedSettings;
+        settingsRef.current = initialSettings;
+        setSettings(initialSettings);
+        setActiveProjectId(initialProject?.id || "");
+        setMessages(readStoredMessages(normalizeCanvasId(initialSettings.canvasId)));
         setQueuedTasks(normalizeQueue(readJson<QueuedTask[]>(localStorage.getItem(queueKey), [])));
         setHydrated(true);
         return () => {
@@ -322,7 +372,27 @@ export default function MobileAgentPage() {
     }, [hydrated, settings]);
 
     useEffect(() => {
-        localStorage.setItem(messagesKey, JSON.stringify(messages.slice(-120)));
+        if (hydrated) localStorage.setItem(activeProjectKey, activeProjectId);
+    }, [activeProjectId, hydrated]);
+
+    useEffect(() => {
+        if (!hydrated) return;
+        const matchedProject = findProjectPreset(settings, workspace);
+        if (matchedProject && matchedProject.id !== activeProjectId) setActiveProjectId(matchedProject.id);
+    }, [activeProjectId, hydrated, settings, workspace]);
+
+    useEffect(() => {
+        if (!hydrated) return;
+        atBottomRef.current = true;
+        setUnreadCount(0);
+        setMessages(readStoredMessages(normalizeCanvasId(settings.canvasId)));
+    }, [hydrated, settings.canvasId]);
+
+    useEffect(() => {
+        if (!hydrated) return;
+        const storedMessages = JSON.stringify(messages.slice(-120));
+        localStorage.setItem(messagesStorageKey(normalizeCanvasId(settingsRef.current.canvasId)), storedMessages);
+        localStorage.setItem(messagesKey, storedMessages);
         const scroller = scrollerRef.current;
         if (!scroller) return;
         if (atBottomRef.current) {
@@ -331,7 +401,7 @@ export default function MobileAgentPage() {
         } else {
             setUnreadCount((value) => value + 1);
         }
-    }, [messages]);
+    }, [hydrated, messages]);
 
     useEffect(() => {
         if (!hydrated) return;
@@ -500,7 +570,8 @@ export default function MobileAgentPage() {
         if (!currentSettings.agentUrl.trim() || !currentSettings.token.trim()) return;
         if (typeof document !== "undefined" && document.visibilityState === "hidden") return;
         if (autoSyncInFlightRef.current) return;
-        const pendingRun = readPendingRun();
+        const canvasId = normalizeCanvasId(currentSettings.canvasId);
+        const pendingRun = readPendingRun(canvasId);
         const activeWork = Boolean(pendingRun || pendingPromptRef.current || sending || runStatus || connectionStatus === "offline");
         const minInterval = reason === "foreground" ? 1500 : activeWork ? 4500 : 14000;
         const now = Date.now();
@@ -617,7 +688,8 @@ export default function MobileAgentPage() {
     const resumeThreadAfterInterruption = async () => {
         const currentSettings = settingsRef.current;
         if (!currentSettings.agentUrl.trim() || !currentSettings.token.trim()) return;
-        const pendingRun = readPendingRun();
+        const currentCanvasId = normalizeCanvasId(currentSettings.canvasId);
+        const pendingRun = readPendingRun(currentCanvasId);
         if (pendingRun) {
             pendingPromptRef.current = pendingRun.prompt;
             setSending(true);
@@ -792,6 +864,47 @@ export default function MobileAgentPage() {
                 pushMessage({ id: createId(), role: "error", title: "连接失败", text: message });
             }
             return false;
+        }
+    };
+
+    const selectProject = async (project: ProjectPreset) => {
+        if (sending || pendingPromptRef.current || activeQueueTaskIdRef.current) {
+            pushMessage({ id: createId(), role: "status", text: "当前 Codex 任务还在执行，完成后再切换项目，避免把后续消息发到错误会话。" });
+            return;
+        }
+        const nextSettings = sanitizeSettings({
+            ...settingsRef.current,
+            canvasId: project.canvasId,
+            workspacePath: project.workspacePath,
+            threadId: project.threadId,
+            gitRepoPath: project.gitRepoPath || settingsRef.current.gitRepoPath,
+        });
+        settingsRef.current = nextSettings;
+        setSettings(nextSettings);
+        setActiveProjectId(project.id);
+        if (typeof localStorage !== "undefined") localStorage.setItem(activeProjectKey, project.id);
+        setWorkspace({ canvasId: project.canvasId, workspacePath: project.workspacePath, activeThreadId: project.threadId });
+        setActiveThreadId(project.threadId);
+        setThreadSearch("");
+        setThreadError("");
+        setThreads([]);
+        setMessages(readStoredMessages(project.canvasId));
+        setConnectionMessage(`已选择 ${project.label}，工作区：${project.workspacePath}`);
+
+        if (!nextSettings.agentUrl.trim() || !nextSettings.token.trim()) {
+            setConnectionStatus("idle");
+            return;
+        }
+
+        setTemporaryStatus(`正在切换到 ${project.label}...`);
+        const ok = await connect({ quiet: true });
+        if (ok) {
+            setThreadsOpen(false);
+            setTemporaryStatus(`已切换到 ${project.label}`, true);
+            void refreshThreads(true);
+            void refreshGitRepos(true);
+        } else {
+            setTemporaryStatus("");
         }
     };
 
@@ -984,7 +1097,7 @@ export default function MobileAgentPage() {
                         移动 Codex
                         <span className="rounded-full border border-black/10 bg-black/[0.04] px-2 py-0.5 text-[11px] font-medium leading-4 text-stone-500 dark:border-white/10 dark:bg-white/[0.06] dark:text-stone-400">{mobileAgentUiVersion}</span>
                     </div>
-                    <div className="truncate text-xs text-stone-500 dark:text-stone-400">{workspace?.workspacePath || "未连接工作目录"}</div>
+                    <div className="truncate text-xs text-stone-500 dark:text-stone-400">{activeProject ? `${activeProject.label} · ${workspace?.workspacePath || activeProject.workspacePath}` : workspace?.workspacePath || "未连接工作目录"}</div>
                 </div>
                 <div className="flex items-center gap-1">
                     <button type="button" className="relative grid size-9 place-items-center rounded-xl text-stone-500 transition hover:bg-black/[0.04] hover:text-stone-950 dark:text-stone-400 dark:hover:bg-sky-400/10 dark:hover:text-sky-100" onClick={() => setQueueOpen(true)} aria-label="任务队列" title="任务队列">
@@ -1207,67 +1320,118 @@ export default function MobileAgentPage() {
 
             {threadsOpen ? (
                 <div className="fixed inset-0 z-50 bg-black/35 backdrop-blur-sm" onClick={() => setThreadsOpen(false)}>
-                    <section className="absolute bottom-0 left-0 right-0 max-h-[88vh] overflow-y-auto rounded-t-[1.75rem] border border-black/10 bg-[#f7f5ef] p-5 shadow-2xl sm:bottom-auto sm:right-auto sm:top-0 sm:h-full sm:w-[430px] sm:rounded-none dark:border-white/10 dark:bg-[#101010]" onClick={(event) => event.stopPropagation()}>
-                        <div className="flex items-center justify-between gap-3">
-                            <div>
-                                <h2 className="text-lg font-semibold">选择会话</h2>
-                                <p className="mt-1 text-xs leading-5 text-stone-500 dark:text-stone-400">按工作目录分区显示；当前后端返回的是已连接 workspace 的会话。</p>
+                    <section className="absolute inset-y-0 left-0 flex w-[min(92vw,430px)] flex-col border-r border-black/10 bg-[#f7f5ef] shadow-2xl dark:border-white/10 dark:bg-[#101010]" onClick={(event) => event.stopPropagation()}>
+                        <div className="shrink-0 border-b border-black/10 p-4 dark:border-white/10">
+                            <div className="flex items-center justify-between gap-3">
+                                <div>
+                                    <h2 className="text-lg font-semibold">项目与会话</h2>
+                                    <p className="mt-1 text-xs leading-5 text-stone-500 dark:text-stone-400">每个项目使用独立隔离 ID、Workspace 和默认 Codex 会话。</p>
+                                </div>
+                                <button type="button" className="grid size-9 place-items-center rounded-xl text-stone-500 transition hover:bg-black/[0.04] hover:text-stone-950 dark:hover:bg-sky-400/10 dark:hover:text-sky-100" onClick={() => setThreadsOpen(false)} aria-label="关闭">
+                                    <X className="size-4" />
+                                </button>
                             </div>
-                            <button type="button" className="grid size-9 place-items-center rounded-xl text-stone-500 transition hover:bg-black/[0.04] hover:text-stone-950 dark:hover:bg-sky-400/10 dark:hover:text-sky-100" onClick={() => setThreadsOpen(false)} aria-label="关闭">
-                                <X className="size-4" />
-                            </button>
+                            <div className="mt-4 flex gap-2">
+                                <input value={threadSearch} onChange={(event) => setThreadSearch(event.target.value)} placeholder="搜索当前项目会话" className="h-11 min-w-0 flex-1 rounded-xl border border-black/10 bg-white px-3 text-stone-950 outline-none placeholder:text-stone-400 focus:border-stone-500 dark:border-white/10 dark:bg-[#181818] dark:text-stone-100" />
+                                <button type="button" className="grid size-11 place-items-center rounded-xl border border-black/10 bg-white text-stone-600 disabled:opacity-45 dark:border-white/10 dark:bg-[#181818] dark:text-stone-300" onClick={() => void refreshThreads()} disabled={threadsLoading || !settings.agentUrl.trim() || !settings.token.trim()} aria-label="刷新会话">
+                                    <RefreshCcw className={`size-4 ${threadsLoading ? "animate-spin" : ""}`} />
+                                </button>
+                            </div>
+                            <div className="mt-3 grid grid-cols-2 gap-2">
+                                <button type="button" className="inline-flex h-11 items-center justify-center gap-2 rounded-xl border border-black/10 bg-white text-sm font-medium disabled:opacity-45 dark:border-white/10 dark:bg-[#181818] dark:text-stone-100" onClick={() => void connect()}>
+                                    <PlugZap className="size-4" />
+                                    连接当前项目
+                                </button>
+                                <button type="button" className="inline-flex h-11 items-center justify-center gap-2 rounded-xl border border-black/10 bg-white text-sm font-medium disabled:opacity-45 dark:border-white/10 dark:bg-[#181818] dark:text-stone-100" onClick={() => void newThread()} disabled={!connected}>
+                                    <RotateCcw className="size-4" />
+                                    新对话
+                                </button>
+                            </div>
+                            {threadError ? <div className="mt-3 rounded-xl border border-red-500/20 bg-red-500/10 px-3 py-2 text-xs leading-5 text-red-800 dark:text-red-100">{threadError}</div> : null}
                         </div>
-                        <div className="mt-4 flex gap-2">
-                            <input value={threadSearch} onChange={(event) => setThreadSearch(event.target.value)} placeholder="搜索当前工作区会话" className="h-11 min-w-0 flex-1 rounded-xl border border-black/10 bg-white px-3 text-stone-950 outline-none placeholder:text-stone-400 focus:border-stone-500 dark:border-white/10 dark:bg-[#181818] dark:text-stone-100" />
-                            <button type="button" className="grid size-11 place-items-center rounded-xl border border-black/10 bg-white text-stone-600 disabled:opacity-45 dark:border-white/10 dark:bg-[#181818] dark:text-stone-300" onClick={() => void refreshThreads()} disabled={threadsLoading || !settings.agentUrl.trim() || !settings.token.trim()} aria-label="刷新会话">
-                                <RefreshCcw className={`size-4 ${threadsLoading ? "animate-spin" : ""}`} />
-                            </button>
-                        </div>
-                        <div className="mt-3 grid grid-cols-2 gap-2">
-                            <button type="button" className="inline-flex h-11 items-center justify-center gap-2 rounded-xl border border-black/10 bg-white text-sm font-medium disabled:opacity-45 dark:border-white/10 dark:bg-[#181818] dark:text-stone-100" onClick={() => void connect()}>
-                                <PlugZap className="size-4" />
-                                连接
-                            </button>
-                            <button type="button" className="inline-flex h-11 items-center justify-center gap-2 rounded-xl border border-black/10 bg-white text-sm font-medium disabled:opacity-45 dark:border-white/10 dark:bg-[#181818] dark:text-stone-100" onClick={() => void newThread()} disabled={!connected}>
-                                <RotateCcw className="size-4" />
-                                新对话
-                            </button>
-                        </div>
-                        {threadError ? <div className="mt-3 rounded-xl border border-red-500/20 bg-red-500/10 px-3 py-2 text-xs leading-5 text-red-800 dark:text-red-100">{threadError}</div> : null}
-                        <div className="mt-4 space-y-5">
-                            {groupedThreads.map((group) => (
-                                <div key={group.key}>
-                                    <div className="mb-2 flex items-center justify-between gap-3 px-1">
-                                        <div className="min-w-0">
-                                            <div className="truncate text-xs font-semibold uppercase tracking-[0.08em] text-stone-500 dark:text-stone-400">{group.label}</div>
-                                            <div className="truncate text-[11px] leading-4 text-stone-400 dark:text-stone-500">{group.path}</div>
-                                        </div>
-                                        <div className="shrink-0 text-[11px] text-stone-400 dark:text-stone-500">{group.threads.length}</div>
-                                    </div>
-                                    <div className="space-y-2">
-                                        {group.threads.map((thread) => (
+
+                        <div className="min-h-0 flex-1 overflow-y-auto p-4">
+                            <div className="mb-2 px-1 text-xs font-semibold uppercase tracking-[0.08em] text-stone-500 dark:text-stone-400">项目分区</div>
+                            <div className="space-y-3">
+                                {projectPresets.map((project) => {
+                                    const projectActive = activeProject?.id === project.id;
+                                    const switchDisabled = sending || Boolean(pendingPromptRef.current);
+                                    return (
+                                        <div key={project.id} className="space-y-2">
                                             <button
-                                                key={thread.id}
                                                 type="button"
                                                 className={[
-                                                    "block w-full rounded-2xl border px-3 py-3 text-left transition",
-                                                    thread.id === activeThreadId
-                                                        ? "border-sky-500/45 bg-sky-500/12 text-stone-950 shadow-[0_10px_28px_rgba(14,165,233,.16)] dark:border-sky-400/45 dark:bg-[#0d2631] dark:text-stone-50"
+                                                    "block w-full rounded-xl border px-3 py-3 text-left transition disabled:opacity-55",
+                                                    projectActive
+                                                        ? "border-sky-500/45 bg-sky-500/12 text-stone-950 shadow-[0_10px_28px_rgba(14,165,233,.14)] dark:border-sky-400/45 dark:bg-[#0d2631] dark:text-stone-50"
                                                         : "border-black/10 bg-white/70 text-stone-900 hover:border-sky-300/45 hover:bg-sky-50 dark:border-white/10 dark:bg-[#151515] dark:text-stone-100 dark:hover:border-sky-400/30 dark:hover:bg-sky-400/10",
                                                 ].join(" ")}
-                                                onClick={() => void selectThread(thread)}
+                                                onClick={() => void selectProject(project)}
+                                                disabled={switchDisabled}
                                             >
-                                                <div className="line-clamp-2 text-sm font-medium leading-5">{threadTitle(thread)}</div>
-                                                <div className="mt-1 flex items-center justify-between gap-2 text-xs opacity-60">
-                                                    <span className="truncate">{thread.id}</span>
-                                                    <span className="shrink-0">{formatThreadTime(thread.updatedAt || thread.createdAt)}</span>
+                                                <div className="flex items-center justify-between gap-2">
+                                                    <span className="text-sm font-semibold">{project.label}</span>
+                                                    {projectActive ? <span className="rounded-full bg-sky-500/15 px-2 py-0.5 text-[11px] font-medium text-sky-700 dark:text-sky-100">当前</span> : null}
                                                 </div>
+                                                <div className="mt-1 truncate text-xs opacity-65">{project.workspacePath}</div>
+                                                <div className="mt-1 truncate text-[11px] opacity-50">{project.threadId}</div>
                                             </button>
-                                        ))}
-                                    </div>
-                                </div>
-                            ))}
-                            {!threads.length ? <div className="rounded-2xl bg-black/[0.04] px-3 py-4 text-center text-xs leading-5 text-stone-500 dark:bg-white/[0.05] dark:text-stone-400">连接后点击刷新，会列出当前 Workspace 下的 Codex 会话。</div> : null}
+
+                                            {projectActive ? (
+                                                <div className="ml-3 space-y-2 border-l border-black/10 pl-3 dark:border-white/10">
+                                                    <button
+                                                        type="button"
+                                                        className={[
+                                                            "block w-full rounded-xl border px-3 py-2.5 text-left transition",
+                                                            project.threadId === activeThreadId
+                                                                ? "border-sky-500/35 bg-sky-500/10 text-stone-950 dark:border-sky-400/35 dark:bg-sky-400/10 dark:text-stone-50"
+                                                                : "border-black/10 bg-white/60 text-stone-800 hover:bg-white dark:border-white/10 dark:bg-white/[0.05] dark:text-stone-200 dark:hover:bg-sky-400/10",
+                                                        ].join(" ")}
+                                                        onClick={() => void selectProject(project)}
+                                                    >
+                                                        <div className="text-sm font-medium leading-5">固定会话</div>
+                                                        <div className="mt-1 truncate text-[11px] opacity-55">{project.threadId}</div>
+                                                    </button>
+
+                                                    {groupedThreads.map((group) => {
+                                                        const groupThreads = group.threads.filter((thread) => thread.id !== project.threadId);
+                                                        if (!groupThreads.length) return null;
+                                                        return (
+                                                            <div key={group.key} className="space-y-2">
+                                                                <div className="px-1 pt-1">
+                                                                    <div className="truncate text-[11px] font-semibold uppercase tracking-[0.08em] text-stone-500 dark:text-stone-400">{group.label}</div>
+                                                                    <div className="truncate text-[11px] leading-4 text-stone-400 dark:text-stone-500">{group.path}</div>
+                                                                </div>
+                                                                {groupThreads.map((thread) => (
+                                                                    <button
+                                                                        key={thread.id}
+                                                                        type="button"
+                                                                        className={[
+                                                                            "block w-full rounded-xl border px-3 py-2.5 text-left transition",
+                                                                            thread.id === activeThreadId
+                                                                                ? "border-sky-500/35 bg-sky-500/10 text-stone-950 dark:border-sky-400/35 dark:bg-sky-400/10 dark:text-stone-50"
+                                                                                : "border-black/10 bg-white/60 text-stone-800 hover:bg-white dark:border-white/10 dark:bg-white/[0.05] dark:text-stone-200 dark:hover:bg-sky-400/10",
+                                                                        ].join(" ")}
+                                                                        onClick={() => void selectThread(thread)}
+                                                                    >
+                                                                        <div className="line-clamp-2 text-sm font-medium leading-5">{threadTitle(thread)}</div>
+                                                                        <div className="mt-1 flex items-center justify-between gap-2 text-[11px] opacity-55">
+                                                                            <span className="truncate">{thread.id}</span>
+                                                                            <span className="shrink-0">{formatThreadTime(thread.updatedAt || thread.createdAt)}</span>
+                                                                        </div>
+                                                                    </button>
+                                                                ))}
+                                                            </div>
+                                                        );
+                                                    })}
+
+                                                    {!threads.length ? <div className="rounded-xl bg-black/[0.04] px-3 py-3 text-xs leading-5 text-stone-500 dark:bg-white/[0.05] dark:text-stone-400">连接或刷新后，会列出这个项目 workspace 下的其他 Codex 会话。</div> : null}
+                                                </div>
+                                            ) : null}
+                                        </div>
+                                    );
+                                })}
+                            </div>
                         </div>
                     </section>
                 </div>

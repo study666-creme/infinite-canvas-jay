@@ -9,7 +9,7 @@ import { usePromptHubStore } from "@/stores/use-prompt-hub-store";
 type MessageRole = "user" | "assistant" | "tool" | "error" | "status";
 type MobileMessage = { id: string; role: MessageRole; title?: string; text: string; streamId?: string };
 type Settings = { agentUrl: string; token: string; canvasId: string; threadId: string; workspacePath: string; gitRepoPath: string; model: string; effort: string };
-type Workspace = { canvasId: string; workspaceId?: string; workspacePath: string; activeThreadId?: string };
+type Workspace = { canvasId: string; workspaceId?: string; workspacePath: string; activeThreadId?: string; model?: string; effort?: string };
 type AgentEvent = { type?: string; item?: Record<string, unknown>; usage?: unknown; message?: string };
 type PendingRun = { threadId: string; canvasId: string; prompt: string; startedAt: number };
 type ConnectionStatus = "idle" | "connecting" | "connected" | "offline" | "error";
@@ -155,6 +155,13 @@ function normalizeCanvasId(value: string) {
 
 function workspaceRequestBody(workspaceId: string, extra: Record<string, unknown> = {}) {
     return { ...extra, workspaceId, canvasId: workspaceId };
+}
+
+function codexModelSettings(settings: Settings) {
+    return {
+        model: settings.model.trim(),
+        effort: settings.effort.trim(),
+    };
 }
 
 function workspaceSearchParams(workspaceId: string, extra: Record<string, string> = {}) {
@@ -661,7 +668,7 @@ export default function MobileAgentPage() {
         const next = [...pendingGuidesRef.current, draft].slice(-20);
         pendingGuidesRef.current = next;
         setPendingGuides(next);
-        setTemporaryStatus("已加入待引导，点“引导”会插入当前正在运行的 Codex 任务。", true);
+        setTemporaryStatus("已加入待引导队列，任务结束后会自动继续；也可点“引导”插入当前任务。", true);
         return draft;
     }
 
@@ -692,6 +699,10 @@ export default function MobileAgentPage() {
         setAttachments(draft.attachments || []);
         setTemporaryStatus("已放回输入框，可继续修改。", true);
         requestAnimationFrame(() => inputRef.current?.focus());
+    }
+
+    function firstPendingGuide() {
+        return pendingGuidesRef.current[0] || null;
     }
 
     function hasDailyTurnQuota(actionLabel = "发送") {
@@ -756,7 +767,14 @@ export default function MobileAgentPage() {
         }
         const busy = await currentTurnBusy();
         if (!busy) {
-            setTemporaryStatus("当前没有正在运行的任务，待引导已保留。", true);
+            clearPendingGuide(id);
+            setTemporaryStatus("当前没有运行任务，已立即发送。", true);
+            const ok = await submitPrompt(text, draft.attachments || []);
+            if (!ok) {
+                const next = [draft, ...pendingGuidesRef.current].slice(0, 20);
+                pendingGuidesRef.current = next;
+                setPendingGuides(next);
+            }
             return;
         }
         if (!hasDailyTurnQuota("引导")) return;
@@ -768,6 +786,7 @@ export default function MobileAgentPage() {
                     threadId,
                     prompt: text,
                     attachments: draft.attachments || [],
+                    ...codexModelSettings(settingsRef.current),
                 })),
             });
             spendDailyTurn();
@@ -928,7 +947,7 @@ export default function MobileAgentPage() {
         try {
             const data = await agentFetch<{ workspace?: Workspace; messages?: MobileMessage[] }>(`/agent/codex/threads/${encodeURIComponent(threadId)}/resume`, {
                 method: "POST",
-                body: JSON.stringify(workspaceRequestBody(canvasId)),
+                body: JSON.stringify(workspaceRequestBody(canvasId, codexModelSettings(settingsRef.current))),
             });
             if (syncSeq !== threadSyncSeqRef.current) return false;
             setWorkspace(data.workspace || workspace);
@@ -1171,11 +1190,12 @@ export default function MobileAgentPage() {
             }
             const canvasId = normalizeCanvasId(settingsRef.current.canvasId);
             const threadId = normalizeThreadId(settingsRef.current.threadId) || activeThreadIdRef.current;
+            const modelSettings = codexModelSettings(settingsRef.current);
             let currentWorkspace: Workspace | null = null;
-            if (settingsRef.current.workspacePath.trim()) {
+            if (settingsRef.current.workspacePath.trim() || modelSettings.model || modelSettings.effort) {
                 const data = await agentFetch<{ workspace?: Workspace }>("/agent/codex/workspace", {
                     method: "POST",
-                    body: JSON.stringify(workspaceRequestBody(canvasId, { workspacePath: settingsRef.current.workspacePath.trim() })),
+                    body: JSON.stringify(workspaceRequestBody(canvasId, { ...(settingsRef.current.workspacePath.trim() ? { workspacePath: settingsRef.current.workspacePath.trim() } : {}), ...modelSettings })),
                 });
                 currentWorkspace = data.workspace || null;
             } else {
@@ -1428,7 +1448,7 @@ export default function MobileAgentPage() {
         try {
             const data = await agentFetch<{ workspace?: Workspace; thread?: { id?: string }; messages?: MobileMessage[] }>("/agent/codex/threads/new", {
                 method: "POST",
-                body: JSON.stringify(workspaceRequestBody(normalizeCanvasId(settingsRef.current.canvasId))),
+                body: JSON.stringify(workspaceRequestBody(normalizeCanvasId(settingsRef.current.canvasId), codexModelSettings(settingsRef.current))),
             });
             setWorkspace(data.workspace || workspace);
             setActiveThreadId(data.thread?.id || data.workspace?.activeThreadId || "");
@@ -1474,7 +1494,7 @@ export default function MobileAgentPage() {
             if (targetThreadId) writePendingRun({ threadId: targetThreadId, canvasId, prompt, startedAt: Date.now() });
             const data = await agentFetch<{ threadId?: string }>("/agent/codex/turn", {
                 method: "POST",
-                body: JSON.stringify(workspaceRequestBody(canvasId, { prompt, threadId: targetThreadId || undefined, attachments: currentAttachments })),
+                body: JSON.stringify(workspaceRequestBody(canvasId, { prompt, threadId: targetThreadId || undefined, attachments: currentAttachments, ...codexModelSettings(settingsRef.current) })),
             });
             if (data.threadId) {
                 spendDailyTurn();
@@ -1501,6 +1521,18 @@ export default function MobileAgentPage() {
 
     async function runNextQueuedTask() {
         if (pendingPromptRef.current || activeQueueTaskIdRef.current) return;
+        const pendingGuide = firstPendingGuide();
+        if (pendingGuide) {
+            if (await currentTurnBusy()) {
+                setTemporaryStatus("当前 Codex 会话仍在运行，待引导队列会稍后继续。", true);
+                window.setTimeout(() => void runNextQueuedTask(), 2500);
+                return;
+            }
+            setTemporaryStatus(`正在执行待引导：${pendingGuide.text.slice(0, 36)}${pendingGuide.text.length > 36 ? "..." : ""}`);
+            const ok = await submitPrompt(pendingGuide.text, pendingGuide.attachments || []);
+            if (ok) clearPendingGuide(pendingGuide.id);
+            return;
+        }
         const nextTask = queuedTasksRef.current.find((item) => item.status === "queued");
         if (!nextTask) return;
         if (await currentTurnBusy()) {
@@ -2083,11 +2115,11 @@ export default function MobileAgentPage() {
                                     <Settings2 className="size-4" />
                                     模型与强度
                                 </div>
-                                <p className="mt-1 text-xs leading-5 text-stone-500 dark:text-stone-400">当前本机 agent 后端还不接收 model / effort 参数，所以这里先只保留配置位，实际仍沿用电脑 Codex 默认设置。</p>
+                                <p className="mt-1 text-xs leading-5 text-stone-500 dark:text-stone-400">留空则沿用电脑 Codex 默认设置；填写后会传给本机 Codex app-server。</p>
                                 <div className="mt-3 grid grid-cols-2 gap-2">
-                                    <input value={settings.model} onChange={(event) => updateSettings({ model: event.target.value })} placeholder="模型，待后端接入" disabled className="h-11 rounded-xl border border-black/10 bg-white/60 px-3 text-sm outline-none disabled:opacity-55 dark:border-white/10 dark:bg-white/[0.06]" />
-                                    <select value={settings.effort} onChange={(event) => updateSettings({ effort: event.target.value })} disabled className="h-11 rounded-xl border border-black/10 bg-white/60 px-3 text-sm outline-none disabled:opacity-55 dark:border-white/10 dark:bg-white/[0.06]">
-                                        <option value="">强度，待后端接入</option>
+                                    <input value={settings.model} onChange={(event) => updateSettings({ model: event.target.value })} placeholder="模型，如 gpt-5.5" className="h-11 rounded-xl border border-black/10 bg-white/60 px-3 text-sm outline-none focus:border-stone-500 dark:border-white/10 dark:bg-white/[0.06]" />
+                                    <select value={settings.effort} onChange={(event) => updateSettings({ effort: event.target.value })} className="h-11 rounded-xl border border-black/10 bg-white/60 px-3 text-sm outline-none focus:border-stone-500 dark:border-white/10 dark:bg-white/[0.06]">
+                                        <option value="">沿用默认强度</option>
                                         <option value="low">low</option>
                                         <option value="medium">medium</option>
                                         <option value="high">high</option>

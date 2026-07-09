@@ -55,10 +55,14 @@ export function AppCursor() {
         document.documentElement.classList.add("has-app-cursor");
         let targetX = window.innerWidth / 2;
         let targetY = window.innerHeight / 2;
+        let lastTarget: EventTarget | null = null;
+        let currentMode: CursorMode = "default";
 
         const show = () => root.classList.add("is-visible");
         const hide = () => root.classList.remove("is-visible");
         const setMode = (mode: CursorMode) => {
+            if (mode === currentMode) return;
+            currentMode = mode;
             applyMode(root, mode);
         };
 
@@ -67,7 +71,10 @@ export function AppCursor() {
             targetX = event.clientX;
             targetY = event.clientY;
             pointer.style.transform = `translate3d(${targetX - 4}px, ${targetY - 3}px, 0)`;
-            setMode(cursorModeFromTarget(event.target));
+            if (event.target !== lastTarget) {
+                lastTarget = event.target;
+                setMode(cursorModeFromTarget(event.target));
+            }
             show();
         };
 

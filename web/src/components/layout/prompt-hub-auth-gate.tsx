@@ -13,6 +13,8 @@ import { useUserStore } from "@/stores/use-user-store";
 import { PROMPT_HUB_DEFAULTS, type PromptHubSession } from "@/services/prompt-hub";
 
 type AuthState = "checking" | "ready" | "authenticated";
+const authVerifiedAtKey = "infinite-canvas:prompt_hub_auth_verified_at";
+const authVerifyTtlMs = 30 * 60 * 1000;
 
 export function PromptHubAuthGate({ children }: { children: ReactNode }) {
     const pathname = usePathname();
@@ -26,7 +28,7 @@ export function PromptHubAuthGate({ children }: { children: ReactNode }) {
     const setLocalUser = useUserStore((state) => state.setUser);
     const [email, setEmail] = useState(savedEmail);
     const [password, setPassword] = useState("");
-    const [state, setState] = useState<AuthState>("checking");
+    const [state, setState] = useState<AuthState>(() => (usePromptHubStore.getState().session?.access_token ? "authenticated" : "checking"));
     const [submitting, setSubmitting] = useState(false);
     const [error, setError] = useState("");
     const codexRemoteAuth = pathname === "/codex-remote" || pathname.startsWith("/codex-remote/") || pathname === "/mobile-agent" || pathname.startsWith("/mobile-agent/");
@@ -45,7 +47,10 @@ export function PromptHubAuthGate({ children }: { children: ReactNode }) {
                 setState("ready");
                 return;
             }
-            setState("checking");
+            setState("authenticated");
+            await activateSession(session);
+            const verifiedAt = Number(localStorage.getItem(authVerifiedAtKey) || 0);
+            if (verifiedAt && Date.now() - verifiedAt < authVerifyTtlMs) return;
             const ok = await verifySession().catch(() => false);
             if (cancelled) return;
             const activeSession = usePromptHubStore.getState().session;
@@ -54,10 +59,12 @@ export function PromptHubAuthGate({ children }: { children: ReactNode }) {
                 setCanvasStorageUserFromSession(null);
                 setAssetStorageUserFromSession(null);
                 setLocalUser(null);
+                localStorage.removeItem(authVerifiedAtKey);
                 setState("ready");
                 return;
             }
             await activateSession(activeSession);
+            localStorage.setItem(authVerifiedAtKey, String(Date.now()));
             if (!cancelled) setState("authenticated");
         };
         void bootstrap();
@@ -90,6 +97,7 @@ export function PromptHubAuthGate({ children }: { children: ReactNode }) {
         try {
             const nextSession = await login(email, password);
             await activateSession(nextSession);
+            localStorage.setItem(authVerifiedAtKey, String(Date.now()));
             setPassword("");
             setState("authenticated");
         } catch (loginError) {

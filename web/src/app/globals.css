@@ -188,7 +188,7 @@
         width: 28px;
         height: 32px;
         transform-origin: 6px 6px;
-        transition: transform 45ms linear;
+        transition: none;
     }
 
     .app-cursor-pointer::after {

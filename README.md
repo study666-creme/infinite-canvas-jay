@@ -46,7 +46,7 @@ npm run build
 - 画布项目、资产库、AI 渠道配置仍主要保存在当前浏览器本地；画布与资产会按卡藏用户 ID 分桶，避免同一设备换账号后混用。
 - 卡藏生图、卡片库读取、Prompt Hub 媒体代理会使用当前登录 token；未登录用户不能无成本调用这些线上代理接口。
 - 远程 Codex 不会运行在 Vercel 上。要让手机远程操作项目，需要把你自己的本机 Agent 放在受保护的 HTTPS 地址后面，并使用 Connect token 连接。
-- 当前 Codex Remote 按卡藏登录账号做网页侧 15 次/天软限制；公开运营时仍应在服务端/网关侧做硬限额，防止绕过前端。
+- 开源/自托管 Codex Remote 默认不限额；线上体验站可按卡藏登录账号做 10 次体验额度，并通过激活码解锁无限使用。公开运营时仍应在服务端/网关侧做硬限额，防止绕过前端。
 
 ## Codex Remote
 
@@ -54,7 +54,23 @@ npm run build
 
 当前阶段不要把画布 Agent 当成已开源产品发布。`/codex-remote` 是先挂在同一个 Web 应用里的独立入口，用来验证移动 Codex 体验；真正开源前应再拆成独立仓库/独立包名，并把画布 MCP 能力做成可选 adapter。
 
-线上体验入口：`https://infinite-canvas-jay.vercel.app/codex-remote`。这个页面需要先登录卡藏账号；要实际控制 Codex，还需要在自己的电脑上启动本机 Agent 并填写 Agent URL + token。
+线上体验入口：`https://infinite-canvas-jay.vercel.app/codex-remote`。体验站可以要求先登录卡藏账号；要实际控制 Codex，还需要在自己的电脑上启动本机 Agent 并填写 Agent URL + token。
+
+相关入口：
+
+- 提示词仓库：https://prompt-hubs.com
+- API 中转：https://newapi.prompt-hubs.com
+- 开源无限画布在线网站（自定义 API）：https://infinite-canvas-jay.vercel.app/canvas
+
+体验站限额相关环境变量：
+
+```bash
+NEXT_PUBLIC_CODEX_REMOTE_DEMO_MODE=1
+NEXT_PUBLIC_CODEX_REMOTE_DAILY_LIMIT=10
+CODEX_REMOTE_UNLOCK_CODES=your-private-code
+```
+
+`CODEX_REMOTE_UNLOCK_CODES` 只在服务端读取，不要放进 `NEXT_PUBLIC_*`。
 
 局域网使用示例：
 

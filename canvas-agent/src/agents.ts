@@ -11,7 +11,7 @@ import type { AgentAttachment, AgentEmit } from "./types.js";
 type Json = Record<string, unknown>;
 type AgentEvent = Json & { type: string; usage?: unknown };
 type PendingRequest = { resolve: (value: unknown) => void; reject: (error: Error) => void };
-type CodexModelOptions = { model?: string; effort?: string };
+type CodexModelOptions = { model?: string; effort?: string; canvasAgent?: boolean };
 type CodexRunOptions = { threadId?: string; cwd?: string } & CodexModelOptions;
 type AgentHistoryMessage = { id: string; role: "user" | "assistant" | "tool" | "error"; title?: string; text: string; detail?: unknown; streamId?: string };
 
@@ -336,7 +336,7 @@ function canvasAgentMcpCommand() {
 }
 
 function codexConfig(options: CodexModelOptions = {}) {
-    const config: Json = { mcp_servers: { "infinite-canvas": { command: canvasAgentMcp.command, args: canvasAgentMcp.args, default_tools_approval_mode: "approve", startup_timeout_sec: 20, tool_timeout_sec: 90 } } };
+    const config: Json = options.canvasAgent ? { mcp_servers: { "infinite-canvas": { command: canvasAgentMcp.command, args: canvasAgentMcp.args, default_tools_approval_mode: "approve", startup_timeout_sec: 20, tool_timeout_sec: 90 } } } : {};
     const modelOptions = normalizeCodexModelOptions(options);
     if (modelOptions.model) config.model = modelOptions.model;
     if (modelOptions.effort) config.model_reasoning_effort = modelOptions.effort;

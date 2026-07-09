@@ -37,7 +37,17 @@ Canvas Agent 默认只监听 `127.0.0.1`。网页第一次带正确 token 连接
 
 远程使用时，请把本机 Agent 放在受保护的 HTTPS 地址后面（Tailscale/ZeroTier、Cloudflare Tunnel、VPS 反代均可），再在 `/codex-remote` 填入 HTTPS Agent URL 和 Connect token。不要把 `17371` 无鉴权裸露到公网；网页登录只保护网页入口，Agent URL + token 仍是执行本机 Codex 的关键凭证。
 
-重启后想保持手机端配置不变，可以固定 token 和公开地址：
+重启后想保持手机端配置不变，可以固定 token 和公开地址。新命名优先使用 `CODEX_REMOTE_*`：
+
+```bash
+CODEX_REMOTE_HOST=0.0.0.0 \
+CODEX_REMOTE_WORKSPACE=/path/to/project \
+CODEX_REMOTE_TOKEN=replace-with-a-long-random-secret \
+CODEX_REMOTE_PUBLIC_URL=https://agent.example.com \
+npx -y codex-remote-bridge
+```
+
+历史 `CANVAS_AGENT_*` 变量继续兼容：
 
 ```bash
 CANVAS_AGENT_HOST=0.0.0.0 \

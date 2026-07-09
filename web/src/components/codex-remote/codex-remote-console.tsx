@@ -50,7 +50,10 @@ const pendingGuideKey = "kazang-mobile-codex:pending-guide";
 const activeProjectKey = "kazang-mobile-codex:active-project";
 const projectsKey = "kazang-mobile-codex:projects";
 const dailyUsageKey = "kazang-codex-remote:daily-usage";
-const dailyTurnLimit = 15;
+const quotaUnlockKey = "kazang-codex-remote:quota-unlocked";
+const demoNoticeKey = "kazang-codex-remote:demo-notice-dismissed";
+const codexRemoteDemoMode = process.env.NEXT_PUBLIC_CODEX_REMOTE_DEMO_MODE === "1";
+const codexRemoteDailyTurnLimit = Math.max(1, Number(process.env.NEXT_PUBLIC_CODEX_REMOTE_DAILY_LIMIT || 10) || 10);
 const pendingRunMaxAge = 1000 * 60 * 60 * 12;
 const legacyDefaultWorkspacePath = "D:\\canvas\\infinite-canvas";
 const projectPresets: ProjectPreset[] = [];
@@ -110,6 +113,10 @@ function endpoint(value: string) {
     }
 }
 
+function normalizeLocalPathForCompare(value: string) {
+    return value.trim().replaceAll("/", "\\").replace(/\\+$/, "").toLowerCase();
+}
+
 function isCanvasWebUrl(value: string) {
     const raw = value.trim();
     if (!raw) return false;
@@ -126,15 +133,22 @@ function isCanvasWebUrl(value: string) {
 
 function sanitizeSettings(value: Partial<Settings>) {
     const next = { ...defaultSettings, ...value };
-    if (next.workspacePath.trim().toLowerCase() === legacyDefaultWorkspacePath.toLowerCase()) next.workspacePath = "";
+    if (normalizeLocalPathForCompare(next.workspacePath) === normalizeLocalPathForCompare(legacyDefaultWorkspacePath)) next.workspacePath = "";
     if (isCanvasWebUrl(next.agentUrl)) next.agentUrl = "";
     return next;
 }
 
+function agentUrlMistakeMessage(value: string) {
+    const raw = value.trim();
+    if (!raw) return "请先填写 Codex Remote Bridge 的 HTTPS 服务地址。";
+    if (isCanvasWebUrl(raw)) return "Agent URL 填成了网页地址。这里要填电脑上 Codex Remote Bridge 暴露出来的地址，例如 Cloudflare Tunnel / Tailscale / VPS 反代地址，不是 /codex-remote 或 /mobile-agent 页面。";
+    return "";
+}
+
 function validateAgentUrl(value: string) {
     const raw = value.trim();
-    if (!raw) throw new Error("请先填写 Codex Remote Bridge 的 HTTPS 服务地址。");
-    if (isCanvasWebUrl(raw)) throw new Error("Agent URL 填成了网页地址。这里要填 cloudflared / Tailscale / VPS 反代出来的 Codex Remote Bridge 地址。");
+    const mistake = agentUrlMistakeMessage(raw);
+    if (mistake) throw new Error(mistake);
     let url: URL;
     try {
         url = new URL(raw);
@@ -142,7 +156,7 @@ function validateAgentUrl(value: string) {
         throw new Error("Agent URL 不是有效网址。");
     }
     const local = ["localhost", "127.0.0.1"].includes(url.hostname);
-    if (url.protocol !== "https:" && !local) throw new Error("手机远程连接需要 HTTPS Agent URL。");
+    if (url.protocol !== "https:" && !local) throw new Error("手机远程连接需要 HTTPS Agent URL。局域网调试才可以用 localhost / 127.0.0.1。");
     return endpoint(raw);
 }
 
@@ -404,6 +418,10 @@ export function CodexRemoteConsole() {
     const [steeringGuideIds, setSteeringGuideIds] = useState<string[]>([]);
     const [remoteBusy, setRemoteBusy] = useState(false);
     const [dailyUsage, setDailyUsage] = useState(0);
+    const [quotaUnlocked, setQuotaUnlocked] = useState(false);
+    const [unlockCode, setUnlockCode] = useState("");
+    const [unlockError, setUnlockError] = useState("");
+    const [demoNoticeOpen, setDemoNoticeOpen] = useState(false);
     const [runStatus, setRunStatus] = useState("");
     const [unreadCount, setUnreadCount] = useState(0);
     const eventSourceRef = useRef<EventSource | null>(null);
@@ -428,6 +446,8 @@ export function CodexRemoteConsole() {
 
     const canSend = useMemo(() => Boolean(input.trim() || attachments.length), [attachments.length, input]);
     const codexBusy = sending || remoteBusy;
+    const quotaEnabled = codexRemoteDemoMode && Boolean(quotaUserId) && !quotaUnlocked;
+    const quotaLabel = quotaUnlocked ? "已解锁无限" : `今日 ${Math.min(dailyUsage, codexRemoteDailyTurnLimit)}/${codexRemoteDailyTurnLimit}`;
     const activeQueueCount = useMemo(() => queueTaskCount(queuedTasks), [queuedTasks]);
     const visibleQueueTasks = useMemo(() => queuedTasks.filter((task) => task.status !== "done"), [queuedTasks]);
     const requirementMessages = useMemo(() => messages.filter((message) => message.role === "user" && message.text.trim()), [messages]);
@@ -470,6 +490,7 @@ export function CodexRemoteConsole() {
         setMessages(readStoredMessages(normalizeCanvasId(initialSettings.canvasId)));
         setQueuedTasks(normalizeQueue(readJson<QueuedTask[]>(localStorage.getItem(queueKey), [])));
         setPendingGuides(normalizePendingGuides(readJson<PendingGuide | PendingGuide[] | null>(localStorage.getItem(pendingGuideKey), null)));
+        setQuotaUnlocked(codexRemoteDemoMode && localStorage.getItem(quotaUnlockKey) === "1");
         setHydrated(true);
         return () => {
             eventSourceRef.current?.close();
@@ -486,7 +507,13 @@ export function CodexRemoteConsole() {
 
     useEffect(() => {
         if (!hydrated) return;
+        if (!codexRemoteDemoMode || !quotaUserId) {
+            setDailyUsage(0);
+            return;
+        }
         setDailyUsage(readDailyUsage(quotaUserId));
+        setQuotaUnlocked(localStorage.getItem(quotaUnlockKey) === "1");
+        if (localStorage.getItem(demoNoticeKey) !== "1") setDemoNoticeOpen(true);
     }, [hydrated, quotaUserId]);
 
     useEffect(() => {
@@ -706,21 +733,49 @@ export function CodexRemoteConsole() {
     }
 
     function hasDailyTurnQuota(actionLabel = "发送") {
-        if (!quotaUserId) return true;
+        if (!quotaEnabled) return true;
         const current = readDailyUsage(quotaUserId);
-        if (current >= dailyTurnLimit) {
+        if (current >= codexRemoteDailyTurnLimit) {
             setDailyUsage(current);
-            pushMessage({ id: createId(), role: "error", title: "今日额度已用完", text: `当前账号今天已使用 ${dailyTurnLimit}/${dailyTurnLimit} 次 Codex Remote。请明天再用，或改成自己的私有部署。` });
+            pushMessage({ id: createId(), role: "error", title: "今日额度已用完", text: `当前账号今天已使用 ${codexRemoteDailyTurnLimit}/${codexRemoteDailyTurnLimit} 次 Codex Remote。请明天再用，输入激活码解锁无限使用，或改成自己的私有部署。` });
             return false;
         }
         return true;
     }
 
     function spendDailyTurn() {
-        if (!quotaUserId) return;
+        if (!quotaEnabled) return;
         const next = readDailyUsage(quotaUserId) + 1;
         writeDailyUsage(quotaUserId, next);
         setDailyUsage(next);
+    }
+
+    async function unlockQuota() {
+        const normalized = unlockCode.trim();
+        setUnlockError("");
+        if (!normalized) {
+            setUnlockError("请输入激活码。");
+            return;
+        }
+        const response = await fetch("/api/codex-remote-unlock", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ code: normalized }),
+        }).catch(() => null);
+        const payload = (await response?.json().catch(() => ({}))) as { error?: string };
+        if (!response?.ok) {
+            setUnlockError(payload.error || "激活码不正确。");
+            return;
+        }
+        localStorage.setItem(quotaUnlockKey, "1");
+        setQuotaUnlocked(true);
+        setUnlockCode("");
+        setTemporaryStatus("已解锁 Codex Remote 无限使用。", true);
+    }
+
+    function dismissDemoNotice() {
+        localStorage.setItem(demoNoticeKey, "1");
+        setDemoNoticeOpen(false);
     }
 
     async function refreshRemoteBusy(options: { quiet?: boolean } = {}) {
@@ -920,12 +975,17 @@ export function CodexRemoteConsole() {
 
     const agentFetch = async <T,>(targetPath: string, init?: RequestInit) => {
         const currentSettings = settingsRef.current;
+        const mistake = agentUrlMistakeMessage(currentSettings.agentUrl);
+        if (mistake) throw new Error(mistake);
         const response = await fetch(`${endpoint(currentSettings.agentUrl)}${targetPath}`, {
             ...init,
             headers: { "Content-Type": "application/json", "x-canvas-agent-token": currentSettings.token.trim(), ...(init?.headers || {}) },
         });
         const payload = (await response.json().catch(() => ({}))) as T & { error?: string; msg?: string };
-        if (!response.ok) throw new Error(payload.error || payload.msg || `Agent 请求失败：${response.status}`);
+        if (!response.ok) {
+            if (response.status === 404) throw new Error(`${agentUrlMistakeMessage(currentSettings.agentUrl) || "Agent 请求 404。请确认 Agent URL 指向的是正在运行的 Codex Remote Bridge，而不是网页地址；如果地址正确，请重启电脑端 bridge 以更新接口。"} 请求路径：${targetPath}`);
+            throw new Error(payload.error || payload.msg || `Agent 请求失败：${response.status}`);
+        }
         return payload;
     };
 
@@ -1491,7 +1551,7 @@ export function CodexRemoteConsole() {
             if (targetThreadId) writePendingRun({ threadId: targetThreadId, canvasId, prompt, startedAt: Date.now() });
             const data = await agentFetch<{ threadId?: string }>("/agent/codex/turn", {
                 method: "POST",
-                body: JSON.stringify(workspaceRequestBody(canvasId, { prompt, threadId: targetThreadId || undefined, attachments: currentAttachments, ...codexModelSettings(settingsRef.current) })),
+                body: JSON.stringify(workspaceRequestBody(canvasId, { prompt, canvasAgent: true, mode: "canvas", threadId: targetThreadId || undefined, attachments: currentAttachments, ...codexModelSettings(settingsRef.current) })),
             });
             if (data.threadId) {
                 spendDailyTurn();
@@ -1592,7 +1652,7 @@ export function CodexRemoteConsole() {
                     </div>
                     <div className="flex min-w-0 items-center gap-2 text-xs text-stone-500 dark:text-stone-400">
                         <span className="truncate">{activeProject ? `${activeProject.label} · ${workspace?.workspacePath || activeProject.workspacePath}` : workspace?.workspacePath || "未连接工作目录"}</span>
-                        {quotaUserId ? <span className="shrink-0 rounded-full border border-black/10 bg-white/55 px-2 py-0.5 text-[11px] text-stone-500 dark:border-white/10 dark:bg-white/[0.06] dark:text-stone-300">今日 {Math.min(dailyUsage, dailyTurnLimit)}/{dailyTurnLimit}</span> : null}
+                        {codexRemoteDemoMode && quotaUserId ? <span className="shrink-0 rounded-full border border-black/10 bg-white/55 px-2 py-0.5 text-[11px] text-stone-500 dark:border-white/10 dark:bg-white/[0.06] dark:text-stone-300">{quotaLabel}</span> : null}
                     </div>
                 </div>
                 <div className="flex shrink-0 items-center gap-1">
@@ -1607,6 +1667,49 @@ export function CodexRemoteConsole() {
                     </button>
                 </div>
             </header>
+
+            {codexRemoteDemoMode && demoNoticeOpen ? (
+                <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/40 px-4 backdrop-blur-sm">
+                    <section className="w-full max-w-[430px] rounded-[28px] border border-black/10 bg-[#f8f6f0] p-5 shadow-2xl dark:border-white/10 dark:bg-[#101010]">
+                        <div className="flex items-start justify-between gap-4">
+                            <div>
+                                <p className="text-xs font-medium uppercase tracking-[0.18em] text-stone-500 dark:text-stone-400">Codex Remote 体验说明</p>
+                                <h2 className="mt-2 text-xl font-semibold">手机使用 Codex 功能</h2>
+                            </div>
+                            <button type="button" className="grid size-9 shrink-0 place-items-center rounded-xl text-stone-500 transition hover:bg-black/[0.05] hover:text-stone-950 dark:hover:bg-white/[0.08] dark:hover:text-white" onClick={dismissDemoNotice} aria-label="关闭通知">
+                                <X className="size-4" />
+                            </button>
+                        </div>
+                        <div className="mt-5 space-y-3 text-sm leading-6 text-stone-600 dark:text-stone-300">
+                            <p>联系vx：bz4jx3jp2li1</p>
+                            <p>
+                                提示词仓库：
+                                <a className="font-medium text-stone-950 underline-offset-4 hover:underline dark:text-white" href="https://prompt-hubs.com" target="_blank" rel="noreferrer">
+                                    https://prompt-hubs.com
+                                </a>
+                            </p>
+                            <p>
+                                API 中转：
+                                <a className="font-medium text-stone-950 underline-offset-4 hover:underline dark:text-white" href="https://newapi.prompt-hubs.com" target="_blank" rel="noreferrer">
+                                    https://newapi.prompt-hubs.com
+                                </a>
+                            </p>
+                            <p>
+                                开源无限画布在线网站（自定义api）：
+                                <a className="font-medium text-stone-950 underline-offset-4 hover:underline dark:text-white" href="https://infinite-canvas-jay.vercel.app/canvas" target="_blank" rel="noreferrer">
+                                    https://infinite-canvas-jay.vercel.app/canvas
+                                </a>
+                            </p>
+                            <p className="rounded-2xl border border-amber-500/20 bg-amber-500/10 px-3 py-2 text-amber-800 dark:text-amber-100">
+                                本网站只为快速体验手机使用 codex 功能，用量有限，所以限制每个账号只能使用 {codexRemoteDailyTurnLimit} 次。
+                            </p>
+                        </div>
+                        <button type="button" className="mt-5 inline-flex h-11 w-full items-center justify-center rounded-2xl bg-stone-950 px-5 text-sm font-semibold text-white transition hover:scale-[1.01] dark:bg-white dark:text-black" onClick={dismissDemoNotice}>
+                            我知道了
+                        </button>
+                    </section>
+                </div>
+            ) : null}
 
             {connectionMessage ? (
                 <div
@@ -2066,7 +2169,7 @@ export function CodexRemoteConsole() {
                         </div>
 
                         <div className="mt-5 space-y-4">
-                            {quotaUserId ? (
+                            {codexRemoteDemoMode && quotaUserId ? (
                                 <div className="rounded-2xl border border-black/10 bg-white/60 p-3 text-sm leading-6 dark:border-white/10 dark:bg-white/[0.05]">
                                     <div className="flex items-center justify-between gap-3">
                                         <div className="min-w-0">
@@ -2074,10 +2177,23 @@ export function CodexRemoteConsole() {
                                             <div className="truncate text-xs text-stone-500 dark:text-stone-400">{promptHubIdentity?.email || promptHubIdentity?.id || "已登录"}</div>
                                         </div>
                                         <div className="shrink-0 rounded-full bg-stone-950 px-3 py-1 text-xs font-semibold text-white dark:bg-[#0A84FF]">
-                                            今日 {Math.min(dailyUsage, dailyTurnLimit)}/{dailyTurnLimit}
+                                            {quotaLabel}
                                         </div>
                                     </div>
-                                    <p className="mt-2 text-xs leading-5 text-stone-500 dark:text-stone-400">当前版本先做网页侧软限制；公开运营时还需要在服务端按卡藏账号做硬限额，防止绕过前端。</p>
+                                    {quotaUnlocked ? (
+                                        <p className="mt-2 text-xs leading-5 text-emerald-700 dark:text-emerald-200">当前账号已在这台设备解锁无限使用。</p>
+                                    ) : (
+                                        <div className="mt-3 grid gap-2">
+                                            <div className="flex gap-2">
+                                                <input value={unlockCode} onChange={(event) => setUnlockCode(event.target.value)} placeholder="输入激活码解锁无限使用" className="h-10 min-w-0 flex-1 rounded-xl border border-black/10 bg-white px-3 text-[15px] outline-none focus:border-stone-500 dark:border-white/10 dark:bg-white/[0.06]" />
+                                                <button type="button" className="shrink-0 rounded-xl bg-stone-950 px-3 text-xs font-semibold text-white transition hover:scale-[1.01] dark:bg-[#0A84FF]" onClick={() => void unlockQuota()}>
+                                                    解锁
+                                                </button>
+                                            </div>
+                                            {unlockError ? <p className="text-xs leading-5 text-red-600 dark:text-red-200">{unlockError}</p> : null}
+                                            <p className="text-xs leading-5 text-stone-500 dark:text-stone-400">线上体验站默认限制每个账号 {codexRemoteDailyTurnLimit} 次；开源自托管默认不限额。</p>
+                                        </div>
+                                    )}
                                 </div>
                             ) : (
                                 <div className="rounded-2xl border border-black/10 bg-white/60 p-3 text-sm leading-6 dark:border-white/10 dark:bg-white/[0.05]">

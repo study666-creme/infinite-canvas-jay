@@ -6,9 +6,16 @@
 
 当前阶段先不要把画布 Agent 或画布 MCP 能力当成已开源产品发布。对外可以先展示 `/codex-remote` 的网页体验和自托管 bridge 思路；真正开源前，应把项目命名、目录结构、包名和文档统一到 `Codex Remote`，并把画布能力降级为可选 adapter。
 
-当前线上入口约定为 `/codex-remote`。线上演示版要求先登录卡藏账号，注册仍走卡片库；实际控制 Codex 时仍需要在自己的电脑上运行 bridge 并填写 Agent URL + token。
+当前线上入口约定为 `/codex-remote`。线上演示版可以要求先登录卡藏账号，注册仍走卡片库；实际控制 Codex 时仍需要在自己的电脑上运行 bridge 并填写 Agent URL + token。
 
-现阶段网页按卡藏账号做 15 次/天的前端软限制，用来降低误用和公开入口的免费消耗。它不是安全边界：真正公开运营时，应把每日次数、并发、IP/账号风控放到服务端或 Agent 代理网关，否则懂接口的人可以绕过前端直接请求 bridge。
+开源/自托管版本默认不启用额度限制。线上体验站可以按卡藏账号做 10 次体验额度，并通过激活码或管理员白名单解锁无限使用；这仍不是安全边界，真正公开运营时，应把每日次数、并发、IP/账号风控放到服务端或 Agent 代理网关，否则懂接口的人可以绕过前端直接请求 bridge。
+
+相关线上入口：
+
+- Codex Remote 体验页：https://infinite-canvas-jay.vercel.app/codex-remote
+- 提示词仓库：https://prompt-hubs.com
+- API 中转：https://newapi.prompt-hubs.com
+- 开源无限画布在线网站（自定义 API）：https://infinite-canvas-jay.vercel.app/canvas
 
 ## 开源成熟度
 

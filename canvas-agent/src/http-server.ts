@@ -36,9 +36,9 @@ type CodexWorkspaceProject = {
 export function startHttpServer() {
     const config = loadConfig(true);
     const port = Number(process.env.PORT) || Number(new URL(config.url).port) || DEFAULT_PORT;
-    const listenHost = process.env.CANVAS_AGENT_HOST || process.env.HOST || "127.0.0.1";
-    const publicUrl = String(process.env.CANVAS_AGENT_PUBLIC_URL || process.env.CANVAS_AGENT_URL || "").trim();
-    const publicHost = process.env.CANVAS_AGENT_PUBLIC_HOST || (listenHost === "0.0.0.0" ? "127.0.0.1" : listenHost);
+    const listenHost = process.env.CODEX_REMOTE_HOST || process.env.CANVAS_AGENT_HOST || process.env.HOST || "127.0.0.1";
+    const publicUrl = String(process.env.CODEX_REMOTE_PUBLIC_URL || process.env.CODEX_REMOTE_URL || process.env.CANVAS_AGENT_PUBLIC_URL || process.env.CANVAS_AGENT_URL || "").trim();
+    const publicHost = process.env.CODEX_REMOTE_PUBLIC_HOST || process.env.CANVAS_AGENT_PUBLIC_HOST || (listenHost === "0.0.0.0" ? "127.0.0.1" : listenHost);
     config.url = publicUrl ? publicUrl.replace(/\/+$/, "") : `http://${publicHost}:${port}`;
     saveConfig(config);
 
@@ -128,18 +128,19 @@ export function startHttpServer() {
         const workspace = ensureCanvasWorkspace(config, requestWorkspaceId(req));
         const modelOptions = requestCodexModelOptions(req, workspace);
         const savedWorkspace = rememberCodexModelOptions(config, workspace, modelOptions);
+        const prompt = String(req.body?.prompt || "");
+        const useCanvasAgentPrompt = req.body?.canvasAgent === true || req.body?.mode === "canvas";
+        const turnOptions = { ...modelOptions, canvasAgent: useCanvasAgentPrompt };
         let threadId = String(req.body?.threadId || savedWorkspace.activeThreadId || "");
         if (!threadId) {
-            const thread = await startCodexThread(emit, savedWorkspace.workspacePath, modelOptions);
+            const thread = await startCodexThread(emit, savedWorkspace.workspacePath, turnOptions);
             threadId = String((thread as Record<string, unknown>).id || "");
             updateCanvasWorkspace(config, savedWorkspace.canvasId, { activeThreadId: threadId });
         } else if (threadId !== savedWorkspace.activeThreadId) {
             await verifyCodexThreadWorkspace(emit, threadId, savedWorkspace.workspacePath);
             updateCanvasWorkspace(config, savedWorkspace.canvasId, { activeThreadId: threadId });
         }
-        const prompt = String(req.body?.prompt || "");
-        const useCanvasAgentPrompt = req.body?.canvasAgent === true || req.body?.mode === "canvas";
-        void runCodexTurn(useCanvasAgentPrompt ? withAgentPrompt(prompt) : prompt, emit, attachments, { threadId, cwd: savedWorkspace.workspacePath, ...modelOptions });
+        void runCodexTurn(useCanvasAgentPrompt ? withAgentPrompt(prompt) : prompt, emit, attachments, { threadId, cwd: savedWorkspace.workspacePath, ...turnOptions });
         res.json({ ok: true, threadId });
     }));
     app.post("/agent/codex/turn/steer", route(async (req, res) => {

@@ -37,7 +37,8 @@ export function ensureCanvasWorkspace(config: CanvasAgentConfig, canvasId: strin
         fs.mkdirSync(resolveWorkspacePath(current.workspacePath), { recursive: true });
         return { canvasId: id, ...current, workspacePath: resolveWorkspacePath(current.workspacePath) };
     }
-    const workspacePath = id === "default" && process.env.CANVAS_AGENT_WORKSPACE ? resolveWorkspacePath(process.env.CANVAS_AGENT_WORKSPACE) : path.join(CONFIG_DIR, "codex-workspaces", id);
+    const defaultWorkspace = process.env.CODEX_REMOTE_WORKSPACE || process.env.CANVAS_AGENT_WORKSPACE || "";
+    const workspacePath = id === "default" && defaultWorkspace ? resolveWorkspacePath(defaultWorkspace) : path.join(CONFIG_DIR, "codex-workspaces", id);
     config.canvases[id] = { workspacePath };
     fs.mkdirSync(workspacePath, { recursive: true });
     saveConfig(config);
@@ -62,8 +63,8 @@ function resolveWorkspacePath(value: string) {
 }
 
 function normalizeConfig(config: CanvasAgentConfig) {
-    const token = String(process.env.CANVAS_AGENT_TOKEN || "").trim();
-    const publicUrl = String(process.env.CANVAS_AGENT_PUBLIC_URL || process.env.CANVAS_AGENT_URL || "").trim();
+    const token = String(process.env.CODEX_REMOTE_TOKEN || process.env.CANVAS_AGENT_TOKEN || "").trim();
+    const publicUrl = String(process.env.CODEX_REMOTE_PUBLIC_URL || process.env.CODEX_REMOTE_URL || process.env.CANVAS_AGENT_PUBLIC_URL || process.env.CANVAS_AGENT_URL || "").trim();
     if (!config.token) config.token = crypto.randomBytes(18).toString("hex");
     if (token) config.token = token;
     if (!config.url) config.url = `http://127.0.0.1:${Number(process.env.PORT) || DEFAULT_PORT}`;

@@ -6,7 +6,7 @@ import path from "node:path";
 
 import { DEFAULT_PORT, ensureCanvasWorkspace, loadConfig, saveConfig, updateCanvasWorkspace, type CanvasAgentConfig } from "./config.js";
 import { CanvasSession } from "./canvas-session.js";
-import { archiveCodexThread, listCodexThreads, readCodexThread, resumeCodexThread, runClaudeTurn, runCodexTurn, startCodexThread, steerCodexTurn, summarizeCodexThread, verifyCodexThreadWorkspace, withAgentPrompt } from "./agents.js";
+import { archiveCodexThread, getCodexThreadStatus, listCodexThreads, readCodexThread, resumeCodexThread, runClaudeTurn, runCodexTurn, startCodexThread, steerCodexTurn, summarizeCodexThread, verifyCodexThreadWorkspace, withAgentPrompt } from "./agents.js";
 import type { AgentAttachment } from "./types.js";
 
 type GitRemoteInfo = { name: string; url: string };
@@ -86,6 +86,12 @@ export function startHttpServer() {
         const result = await listCodexThreads(emit, { searchTerm: String(req.query.searchTerm || ""), limit: Number(req.query.limit || 160) || 160 });
         const projects = codexWorkspaceProjects(config, result.data);
         res.json({ ok: true, projects, data: result.data, nextCursor: result.nextCursor, backwardsCursor: result.backwardsCursor });
+    }));
+    app.get("/agent/codex/status", route(async (req, res) => {
+        const workspace = ensureCanvasWorkspace(config, requestWorkspaceId(req));
+        const threadId = String(req.query.threadId || workspace.activeThreadId || "");
+        const status = threadId ? await getCodexThreadStatus(emit, threadId, workspace.workspacePath) : { thread: null, busy: false, activeTurnId: "" };
+        res.json({ ok: true, workspace: workspacePayload(workspace), threadId, ...status });
     }));
     app.post("/agent/codex/threads/new", route(async (req, res) => {
         const workspace = ensureCanvasWorkspace(config, requestWorkspaceId(req));

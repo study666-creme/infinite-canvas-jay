@@ -41,17 +41,18 @@ npm run build
 
 ## 登录与数据
 
-线上画布沿用卡片库的卡藏账号登录。未登录用户不能进入画布、资产和生成工作台。Codex Remote 的公开网页入口可以直接打开，但真正控制电脑仍需要用户自己的 Agent URL 和 Connect token。
+线上画布沿用卡片库的卡藏账号登录。未登录用户不能进入画布、资产、生成工作台和 Codex Remote。Codex Remote 真正控制电脑时仍需要用户自己的 Agent URL 和 Connect token。
 
 - 画布项目、资产库、AI 渠道配置仍主要保存在当前浏览器本地；画布与资产会按卡藏用户 ID 分桶，避免同一设备换账号后混用。
 - 卡藏生图、卡片库读取、Prompt Hub 媒体代理会使用当前登录 token；未登录用户不能无成本调用这些线上代理接口。
 - 远程 Codex 不会运行在 Vercel 上。要让手机远程操作项目，需要把你自己的本机 Agent 放在受保护的 HTTPS 地址后面，并使用 Connect token 连接。
+- 当前 Codex Remote 按卡藏登录账号做网页侧 15 次/天软限制；公开运营时仍应在服务端/网关侧做硬限额，防止绕过前端。
 
 ## Codex Remote
 
 打开 `/codex-remote` 可以把手机变成 Codex Remote Console，连接电脑上的本机 Agent 后继续让 Codex 读项目、改代码、跑命令和部署。它是可独立拆出的自托管 Codex 控制台；画布需要 Codex 当 Agent 大脑时，应作为可选 adapter/MCP 能力接入。旧入口 `/mobile-agent` 保留兼容。
 
-线上体验入口：`https://infinite-canvas-jay.vercel.app/codex-remote`。这个页面本身可以直接访问；要实际控制 Codex，需要在自己的电脑上启动本机 Agent 并填写 Agent URL + token。
+线上体验入口：`https://infinite-canvas-jay.vercel.app/codex-remote`。这个页面需要先登录卡藏账号；要实际控制 Codex，还需要在自己的电脑上启动本机 Agent 并填写 Agent URL + token。
 
 局域网使用示例：
 

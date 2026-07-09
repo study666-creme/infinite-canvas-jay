@@ -3,6 +3,9 @@
 import { ChangeEvent, FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { CheckCircle2, ChevronDown, Clock3, Copy, FolderGit2, GitBranch, ImagePlus, ListTodo, LoaderCircle, Menu, Pencil, PlugZap, Plus, RefreshCcw, RotateCcw, SendHorizontal, Settings2, TerminalSquare, Trash2, UploadCloud, X } from "lucide-react";
 
+import { promptHubUserIdentity } from "@/lib/prompt-hub-auth";
+import { usePromptHubStore } from "@/stores/use-prompt-hub-store";
+
 type MessageRole = "user" | "assistant" | "tool" | "error" | "status";
 type MobileMessage = { id: string; role: MessageRole; title?: string; text: string; streamId?: string };
 type Settings = { agentUrl: string; token: string; canvasId: string; threadId: string; workspacePath: string; gitRepoPath: string; model: string; effort: string };
@@ -46,6 +49,8 @@ const queueKey = "kazang-mobile-codex:task-queue";
 const pendingGuideKey = "kazang-mobile-codex:pending-guide";
 const activeProjectKey = "kazang-mobile-codex:active-project";
 const projectsKey = "kazang-mobile-codex:projects";
+const dailyUsageKey = "kazang-codex-remote:daily-usage";
+const dailyTurnLimit = 15;
 const pendingRunMaxAge = 1000 * 60 * 60 * 12;
 const legacyDefaultWorkspacePath = "D:\\canvas\\infinite-canvas";
 const projectPresets: ProjectPreset[] = [];
@@ -72,6 +77,28 @@ function readJson<T>(value: string | null, fallback: T): T {
     } catch {
         return fallback;
     }
+}
+
+function localDayKey() {
+    const date = new Date();
+    const month = String(date.getMonth() + 1).padStart(2, "0");
+    const day = String(date.getDate()).padStart(2, "0");
+    return `${date.getFullYear()}-${month}-${day}`;
+}
+
+function dailyUsageStorageKey(userId: string) {
+    return `${dailyUsageKey}:${userId || "anonymous"}`;
+}
+
+function readDailyUsage(userId: string) {
+    if (typeof localStorage === "undefined" || !userId) return 0;
+    const value = readJson<{ day?: string; count?: number }>(localStorage.getItem(dailyUsageStorageKey(userId)), {});
+    return value.day === localDayKey() ? Math.max(0, Number(value.count || 0)) : 0;
+}
+
+function writeDailyUsage(userId: string, count: number) {
+    if (typeof localStorage === "undefined" || !userId) return;
+    localStorage.setItem(dailyUsageStorageKey(userId), JSON.stringify({ day: localDayKey(), count: Math.max(0, count) }));
 }
 
 function endpoint(value: string) {
@@ -332,6 +359,9 @@ function readFileAsDataUrl(file: File) {
 }
 
 export default function MobileAgentPage() {
+    const promptHubSession = usePromptHubStore((state) => state.session);
+    const promptHubIdentity = useMemo(() => promptHubUserIdentity(promptHubSession), [promptHubSession]);
+    const quotaUserId = promptHubIdentity?.id || promptHubIdentity?.email || promptHubSession?.user?.id || promptHubSession?.user?.email || "";
     const [settings, setSettings] = useState<Settings>(defaultSettings);
     const [messages, setMessages] = useState<MobileMessage[]>([]);
     const [input, setInput] = useState("");
@@ -365,6 +395,8 @@ export default function MobileAgentPage() {
     const [queuedTasks, setQueuedTasks] = useState<QueuedTask[]>([]);
     const [pendingGuides, setPendingGuides] = useState<PendingGuide[]>([]);
     const [steeringGuideIds, setSteeringGuideIds] = useState<string[]>([]);
+    const [remoteBusy, setRemoteBusy] = useState(false);
+    const [dailyUsage, setDailyUsage] = useState(0);
     const [runStatus, setRunStatus] = useState("");
     const [unreadCount, setUnreadCount] = useState(0);
     const eventSourceRef = useRef<EventSource | null>(null);
@@ -387,6 +419,7 @@ export default function MobileAgentPage() {
     const atBottomRef = useRef(true);
 
     const canSend = useMemo(() => Boolean(input.trim() || attachments.length), [attachments.length, input]);
+    const codexBusy = sending || remoteBusy;
     const activeQueueCount = useMemo(() => queueTaskCount(queuedTasks), [queuedTasks]);
     const visibleQueueTasks = useMemo(() => queuedTasks.filter((task) => task.status !== "done"), [queuedTasks]);
     const requirementMessages = useMemo(() => messages.filter((message) => message.role === "user" && message.text.trim()), [messages]);
@@ -442,6 +475,11 @@ export default function MobileAgentPage() {
     useEffect(() => {
         settingsRef.current = settings;
     }, [settings]);
+
+    useEffect(() => {
+        if (!hydrated) return;
+        setDailyUsage(readDailyUsage(quotaUserId));
+    }, [hydrated, quotaUserId]);
 
     useEffect(() => {
         activeThreadIdRef.current = activeThreadId;
@@ -511,7 +549,7 @@ export default function MobileAgentPage() {
         window.addEventListener("online", handleFocus);
         document.addEventListener("visibilitychange", handleVisibility);
         resume(true);
-        autoSyncTimerRef.current = setInterval(() => resume(false), sending || runStatus ? 5000 : 15000);
+        autoSyncTimerRef.current = setInterval(() => resume(false), codexBusy || runStatus ? 5000 : 15000);
         return () => {
             window.removeEventListener("focus", handleFocus);
             window.removeEventListener("online", handleFocus);
@@ -519,7 +557,7 @@ export default function MobileAgentPage() {
             if (autoSyncTimerRef.current) clearInterval(autoSyncTimerRef.current);
             autoSyncTimerRef.current = null;
         };
-    }, [hydrated, activeThreadId, settings.agentUrl, settings.token, settings.canvasId, settings.threadId, sending, runStatus]);
+    }, [hydrated, activeThreadId, settings.agentUrl, settings.token, settings.canvasId, settings.threadId, codexBusy, runStatus]);
 
     const setTemporaryStatus = (text: string, autoClear = false) => {
         setRunStatus(text);
@@ -573,11 +611,11 @@ export default function MobileAgentPage() {
     function finishCurrentTurn(statusText = "本轮完成", autoClear = true) {
         pendingPromptRef.current = "";
         setSending(false);
+        setRemoteBusy(false);
         clearPendingRun();
         stopThreadPoll();
         stopCompletionFallback();
         markActiveQueueTask("done");
-        drainPendingGuidesToQueue();
         setTemporaryStatus(statusText, autoClear);
         window.setTimeout(() => void runNextQueuedTask(), 350);
     }
@@ -585,11 +623,11 @@ export default function MobileAgentPage() {
     function failCurrentTurn(errorText: string) {
         pendingPromptRef.current = "";
         setSending(false);
+        setRemoteBusy(false);
         stopThreadPoll();
         stopCompletionFallback();
         setTemporaryStatus("");
         markActiveQueueTask("failed", errorText);
-        drainPendingGuidesToQueue();
         window.setTimeout(() => void runNextQueuedTask(), 350);
     }
 
@@ -610,39 +648,6 @@ export default function MobileAgentPage() {
         return task;
     }
 
-    function appendQueuedTasks(tasks: QueuedTask[], placement: "append" | "next" = "append") {
-        if (!tasks.length) return;
-        setQueuedTasks((items) => {
-            const insertIndex = placement === "next" ? items.findIndex((item) => item.status === "queued") : -1;
-            const merged = insertIndex >= 0 ? [...items.slice(0, insertIndex), ...tasks, ...items.slice(insertIndex)] : [...items, ...tasks];
-            const next = normalizeQueue(merged);
-            queuedTasksRef.current = next;
-            return next;
-        });
-    }
-
-    function pendingGuideToTask(draft: PendingGuide, extraGuide = "") {
-        const text = [draft.text.trim(), extraGuide.trim()].filter(Boolean).join("\n");
-        if (!text) return null;
-        return {
-            id: createId(),
-            text,
-            attachments: draft.attachments || [],
-            createdAt: Date.now(),
-            status: "queued" as QueuedTaskStatus,
-        };
-    }
-
-    function drainPendingGuidesToQueue() {
-        const drafts = pendingGuidesRef.current;
-        if (!drafts.length) return false;
-        const tasks = drafts.map((draft) => pendingGuideToTask(draft)).filter((task): task is QueuedTask => Boolean(task));
-        pendingGuidesRef.current = [];
-        setPendingGuides([]);
-        appendQueuedTasks(tasks, "next");
-        return tasks.length > 0;
-    }
-
     function setPendingGuideDraft(text: string, taskAttachments: AgentAttachment[] = []) {
         const trimmed = text.trim();
         if (!trimmed && !taskAttachments.length) return null;
@@ -655,7 +660,7 @@ export default function MobileAgentPage() {
         const next = [...pendingGuidesRef.current, draft].slice(-20);
         pendingGuidesRef.current = next;
         setPendingGuides(next);
-        setTemporaryStatus("已加入待发送引导，当前任务结束后会自动继续。", true);
+        setTemporaryStatus("已加入待引导，点“引导”会插入当前正在运行的 Codex 任务。", true);
         return draft;
     }
 
@@ -663,6 +668,53 @@ export default function MobileAgentPage() {
         const next = pendingGuidesRef.current.filter((draft) => draft.id !== id);
         pendingGuidesRef.current = next;
         setPendingGuides(next);
+    }
+
+    function hasDailyTurnQuota(actionLabel = "发送") {
+        if (!quotaUserId) {
+            pushMessage({ id: createId(), role: "error", title: `${actionLabel}受限`, text: "请先登录卡藏账号后再使用 Codex Remote。" });
+            return false;
+        }
+        const current = readDailyUsage(quotaUserId);
+        if (current >= dailyTurnLimit) {
+            setDailyUsage(current);
+            pushMessage({ id: createId(), role: "error", title: "今日额度已用完", text: `当前账号今天已使用 ${dailyTurnLimit}/${dailyTurnLimit} 次 Codex Remote。请明天再用，或改成自己的私有部署。` });
+            return false;
+        }
+        return true;
+    }
+
+    function spendDailyTurn() {
+        if (!quotaUserId) return;
+        const next = readDailyUsage(quotaUserId) + 1;
+        writeDailyUsage(quotaUserId, next);
+        setDailyUsage(next);
+    }
+
+    async function refreshRemoteBusy(options: { quiet?: boolean } = {}) {
+        const currentSettings = settingsRef.current;
+        const threadId = activeThreadIdRef.current || normalizeThreadId(currentSettings.threadId);
+        if (!currentSettings.agentUrl.trim() || !currentSettings.token.trim() || !threadId) {
+            setRemoteBusy(false);
+            return false;
+        }
+        try {
+            const workspaceId = normalizeCanvasId(currentSettings.canvasId);
+            const query = workspaceSearchParams(workspaceId, { threadId });
+            const data = await agentFetch<{ busy?: boolean; activeTurnId?: string; canSteer?: boolean; thread?: ThreadSummary }>(`/agent/codex/status?${query.toString()}`);
+            const busy = Boolean(data.busy);
+            setRemoteBusy(busy);
+            if (busy && !options.quiet) setTemporaryStatus(data.activeTurnId || data.canSteer ? "Codex 正在运行，可点“引导”影响当前任务。" : "当前会话正在运行，新输入会先悬浮为待引导。");
+            if (!busy && data.thread?.status) setRunStatus("");
+            return busy;
+        } catch {
+            return false;
+        }
+    }
+
+    async function currentTurnBusy() {
+        if (sending || pendingPromptRef.current || activeQueueTaskIdRef.current || remoteBusy) return true;
+        return await refreshRemoteBusy({ quiet: true });
     }
 
     async function confirmPendingGuide(id: string, extraGuide = "") {
@@ -678,10 +730,12 @@ export default function MobileAgentPage() {
             setTemporaryStatus("当前没有可引导的 Codex 会话。", true);
             return;
         }
-        if (!sending && !pendingPromptRef.current && !activeQueueTaskIdRef.current) {
-            setTemporaryStatus("当前没有正在运行的任务，已保留为待发送引导。", true);
+        const busy = await currentTurnBusy();
+        if (!busy) {
+            setTemporaryStatus("当前没有正在运行的任务，待引导已保留。", true);
             return;
         }
+        if (!hasDailyTurnQuota("引导")) return;
         setSteeringGuideIds((items) => [...items, id]);
         try {
             await agentFetch<{ threadId?: string }>("/agent/codex/turn/steer", {
@@ -692,6 +746,7 @@ export default function MobileAgentPage() {
                     attachments: draft.attachments || [],
                 })),
             });
+            spendDailyTurn();
             clearPendingGuide(id);
             setTemporaryStatus("已引导对话", true);
             pushMessage({ id: createId(), role: "status", text: "已引导对话" });
@@ -808,7 +863,7 @@ export default function MobileAgentPage() {
         if (autoSyncInFlightRef.current) return;
         const canvasId = normalizeCanvasId(currentSettings.canvasId);
         const pendingRun = readPendingRun(canvasId);
-        const activeWork = Boolean(pendingRun || pendingPromptRef.current || sending || runStatus || connectionStatus === "offline");
+        const activeWork = Boolean(pendingRun || pendingPromptRef.current || codexBusy || runStatus || connectionStatus === "offline");
         const minInterval = reason === "foreground" ? 1500 : activeWork ? 4500 : 14000;
         const now = Date.now();
         if (now - lastAutoSyncAtRef.current < minInterval) return;
@@ -1030,11 +1085,13 @@ export default function MobileAgentPage() {
         const itemType = normalizeText(itemField(item, "type"));
         if (event.type === "turn.started") {
             setSending(true);
+            setRemoteBusy(true);
             setTemporaryStatus("Codex 正在思考...");
             upsertStreamMessage({ id: "turn-status", role: "status", text: "Codex 正在处理..." });
             return;
         }
         if (event.type === "turn.completed") {
+            setRemoteBusy(false);
             if (!pendingPromptRef.current) {
                 setSending(false);
                 stopThreadPoll();
@@ -1175,7 +1232,7 @@ export default function MobileAgentPage() {
     };
 
     const selectProject = async (project: ProjectPreset) => {
-        if (sending || pendingPromptRef.current || activeQueueTaskIdRef.current) {
+        if (codexBusy || pendingPromptRef.current || activeQueueTaskIdRef.current) {
             pushMessage({ id: createId(), role: "status", text: "当前 Codex 任务还在执行，完成后再切换项目，避免把后续消息发到错误会话。" });
             return;
         }
@@ -1268,7 +1325,7 @@ export default function MobileAgentPage() {
     }
 
     function deleteProject(project: ProjectPreset) {
-        if (sending || pendingPromptRef.current || activeQueueTaskIdRef.current) {
+        if (codexBusy || pendingPromptRef.current || activeQueueTaskIdRef.current) {
             pushMessage({ id: createId(), role: "status", text: "当前 Codex 任务还在执行，完成后再删除项目。" });
             return;
         }
@@ -1283,7 +1340,7 @@ export default function MobileAgentPage() {
 
     const selectThread = async (thread: ThreadSummary) => {
         if (!thread.id) return;
-        if (sending || pendingPromptRef.current || activeQueueTaskIdRef.current) {
+        if (codexBusy || pendingPromptRef.current || activeQueueTaskIdRef.current) {
             pushMessage({ id: createId(), role: "status", text: "当前 Codex 任务还在执行，完成后再切换会话，避免把后续消息发到错误会话。" });
             return;
         }
@@ -1362,19 +1419,24 @@ export default function MobileAgentPage() {
     };
 
     async function submitPrompt(prompt: string, currentAttachments: AgentAttachment[], options: { queuedTaskId?: string } = {}) {
+        if (!hasDailyTurnQuota("发送")) {
+            if (options.queuedTaskId) markActiveQueueTask("failed", "今日 Codex Remote 额度已用完");
+            else setAttachments(currentAttachments);
+            return false;
+        }
         if (!settingsRef.current.agentUrl.trim() || !settingsRef.current.token.trim()) {
             setConnectionStatus("error");
             setConnectionMessage("请先填写 Agent URL 和 Token");
             setSettingsOpen(true);
             if (options.queuedTaskId) markActiveQueueTask("queued");
             pushMessage({ id: createId(), role: "error", title: "发送失败", text: "请先填写 Agent URL 和 Token。" });
-            return;
+            return false;
         }
         if (!connected) {
             const ok = await connect({ quiet: true });
             if (!ok) {
                 if (options.queuedTaskId) markActiveQueueTask("queued");
-                return;
+                return false;
             }
         }
         setSending(true);
@@ -1391,10 +1453,12 @@ export default function MobileAgentPage() {
                 body: JSON.stringify(workspaceRequestBody(canvasId, { prompt, threadId: targetThreadId || undefined, attachments: currentAttachments })),
             });
             if (data.threadId) {
+                spendDailyTurn();
                 setActiveThreadId(data.threadId);
                 updateSettings({ threadId: data.threadId });
                 pollThreadUntilReply(data.threadId, canvasId, prompt);
             }
+            return true;
         } catch (error) {
             const message = error instanceof Error ? error.message : String(error);
             if (options.queuedTaskId) {
@@ -1407,6 +1471,7 @@ export default function MobileAgentPage() {
                 setAttachments(currentAttachments);
             }
             pushMessage({ id: createId(), role: "error", title: "发送失败", text: message });
+            return false;
         }
     }
 
@@ -1414,6 +1479,11 @@ export default function MobileAgentPage() {
         if (pendingPromptRef.current || activeQueueTaskIdRef.current) return;
         const nextTask = queuedTasksRef.current.find((item) => item.status === "queued");
         if (!nextTask) return;
+        if (await currentTurnBusy()) {
+            setTemporaryStatus("当前 Codex 会话仍在运行，队列会稍后继续。", true);
+            window.setTimeout(() => void runNextQueuedTask(), 2500);
+            return;
+        }
         activeQueueTaskIdRef.current = nextTask.id;
         setQueuedTasks((items) => {
             const next = items.map((item) => (item.id === nextTask.id ? { ...item, status: "running" as QueuedTaskStatus, error: "" } : item));
@@ -1431,7 +1501,7 @@ export default function MobileAgentPage() {
         if (!prompt) return;
         setInput("");
         setAttachments([]);
-        if (sending || pendingPromptRef.current || activeQueueTaskIdRef.current) {
+        if (await currentTurnBusy()) {
             setPendingGuideDraft(prompt, currentAttachments);
             return;
         }
@@ -1467,7 +1537,10 @@ export default function MobileAgentPage() {
                         <TerminalSquare className="size-4 shrink-0" />
                         <span className="truncate">Codex Remote</span>
                     </div>
-                    <div className="truncate text-xs text-stone-500 dark:text-stone-400">{activeProject ? `${activeProject.label} · ${workspace?.workspacePath || activeProject.workspacePath}` : workspace?.workspacePath || "未连接工作目录"}</div>
+                    <div className="flex min-w-0 items-center gap-2 text-xs text-stone-500 dark:text-stone-400">
+                        <span className="truncate">{activeProject ? `${activeProject.label} · ${workspace?.workspacePath || activeProject.workspacePath}` : workspace?.workspacePath || "未连接工作目录"}</span>
+                        {quotaUserId ? <span className="shrink-0 rounded-full border border-black/10 bg-white/55 px-2 py-0.5 text-[11px] text-stone-500 dark:border-white/10 dark:bg-white/[0.06] dark:text-stone-300">今日 {Math.min(dailyUsage, dailyTurnLimit)}/{dailyTurnLimit}</span> : null}
+                    </div>
                 </div>
                 <div className="flex shrink-0 items-center gap-1">
                     <button type="button" className="grid size-9 place-items-center rounded-xl text-stone-500 transition hover:bg-black/[0.04] hover:text-stone-950 dark:text-stone-400 dark:hover:bg-sky-400/10 dark:hover:text-sky-100" onClick={() => setRequirementsOpen(true)} aria-label="需求索引" title="需求索引">
@@ -1499,10 +1572,10 @@ export default function MobileAgentPage() {
                 </div>
             ) : null}
 
-            {sending || runStatus ? (
+            {codexBusy || runStatus ? (
                 <div className="canvas-black-glass-sweep relative isolate shrink-0 overflow-hidden border-b border-sky-300/15 bg-[#111316] px-4 py-2 text-xs leading-5 shadow-[inset_0_1px_0_rgba(255,255,255,.05)] dark:border-white/10">
                     <span className="mobile-agent-thinking-sweep-text relative z-10 font-medium">
-                        {runStatus || "Codex 后台执行中。手机锁屏或切后台后，回到页面会自动同步当前会话记录。"}
+                        {runStatus || (remoteBusy && !sending ? "当前 Codex 会话正在运行。新输入会先悬浮为待引导。" : "Codex 后台执行中。手机锁屏或切后台后，回到页面会自动同步当前会话记录。")}
                     </span>
                 </div>
             ) : null}
@@ -1562,12 +1635,12 @@ export default function MobileAgentPage() {
             ) : null}
 
             <form onSubmit={(event) => void submit(event)} className="shrink-0 border-t border-black/10 bg-white/72 p-3 backdrop-blur-xl dark:border-white/10 dark:bg-black/72">
-                {sending || runStatus || pendingGuides.length || visibleQueueTasks.length ? (
+                {codexBusy || runStatus || pendingGuides.length || visibleQueueTasks.length ? (
                     <div className="mx-auto mb-2 max-w-3xl rounded-2xl border border-black/10 bg-[#f9f8f4]/92 p-3 shadow-[0_10px_28px_rgba(23,21,19,.08)] dark:border-white/10 dark:bg-white/[0.06]">
                         <div className="flex items-start justify-between gap-3">
                             <div className="flex min-w-0 items-center gap-2 text-sm font-medium">
-                                {sending || runStatus ? <LoaderCircle className="size-4 shrink-0 animate-spin text-sky-500" /> : <ListTodo className="size-4 shrink-0 text-stone-500 dark:text-stone-300" />}
-                                <span className="truncate">{sending || runStatus ? runStatus || "Codex 后台执行中" : pendingGuides.length ? `${pendingGuides.length} 条引导待发送` : activeQueueCount ? `${activeQueueCount} 条任务排队中` : "任务队列"}</span>
+                                {codexBusy || runStatus ? <LoaderCircle className="size-4 shrink-0 animate-spin text-sky-500" /> : <ListTodo className="size-4 shrink-0 text-stone-500 dark:text-stone-300" />}
+                                <span className="truncate">{codexBusy || runStatus ? runStatus || (remoteBusy && !sending ? "当前会话运行中" : "Codex 后台执行中") : pendingGuides.length ? `${pendingGuides.length} 条待引导` : activeQueueCount ? `${activeQueueCount} 条任务排队中` : "任务队列"}</span>
                             </div>
                             {queuedTasks.some((task) => task.status === "done" || task.status === "failed") ? (
                                 <button type="button" className="shrink-0 text-xs font-medium text-stone-500 transition hover:text-stone-950 dark:text-stone-400 dark:hover:text-stone-100" onClick={clearFinishedQueue}>
@@ -1584,7 +1657,7 @@ export default function MobileAgentPage() {
                                     <div key={pendingGuide.id} className="rounded-2xl border border-sky-400/25 bg-sky-500/[0.08] p-3 text-stone-900 shadow-[inset_0_1px_0_rgba(255,255,255,.45)] dark:border-sky-300/20 dark:bg-sky-300/[0.08] dark:text-stone-100">
                                         <div className="flex items-start justify-between gap-3">
                                             <div className="min-w-0 flex-1">
-                                                <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-sky-700 dark:text-sky-200">待发送引导 #{index + 1}</div>
+                                                <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-sky-700 dark:text-sky-200">待引导 #{index + 1}</div>
                                                 <div className="mt-1 flex items-start gap-2">
                                                     <div className="min-w-0 flex-1 line-clamp-3 break-words text-sm leading-5">{pendingGuide.text}</div>
                                                     <button
@@ -1601,7 +1674,7 @@ export default function MobileAgentPage() {
                                             <button
                                                 type="button"
                                                 className="grid size-8 shrink-0 place-items-center rounded-xl text-stone-500 transition hover:bg-black/[0.05] hover:text-stone-950 dark:text-stone-300 dark:hover:bg-white/[0.08] dark:hover:text-white"
-                                                aria-label="取消待发送引导"
+                                                aria-label="取消待引导"
                                                 onClick={() => clearPendingGuide(pendingGuide.id)}
                                             >
                                                 <X className="size-4" />
@@ -1688,13 +1761,13 @@ export default function MobileAgentPage() {
                         type="button"
                         disabled={!canSend}
                         className="grid size-10 shrink-0 place-items-center rounded-2xl bg-[#0A84FF] text-white shadow-[0_8px_24px_rgba(10,132,255,.32)] transition enabled:hover:scale-[1.03] enabled:active:scale-95 disabled:bg-stone-300 disabled:text-stone-500 disabled:shadow-none dark:bg-[#0A84FF] dark:text-white dark:disabled:bg-white/10 dark:disabled:text-white/35"
-                        aria-label={sending ? "加入任务队列" : "发送"}
+                        aria-label={codexBusy ? "加入引导" : "发送"}
                         onClick={(event) => {
                             event.preventDefault();
                             void submit();
                         }}
                     >
-                        {sending ? <Plus className="size-4" /> : <SendHorizontal className="size-4" />}
+                        {codexBusy ? <Plus className="size-4" /> : <SendHorizontal className="size-4" />}
                     </button>
                 </div>
             </form>
@@ -1827,7 +1900,7 @@ export default function MobileAgentPage() {
                             <div className="space-y-3">
                                 {projects.map((project) => {
                                     const projectActive = activeProject?.id === project.id;
-                                    const switchDisabled = sending || Boolean(pendingPromptRef.current);
+                                    const switchDisabled = codexBusy || Boolean(pendingPromptRef.current);
                                     return (
                                         <div key={project.id} className="space-y-2">
                                             <div
@@ -1930,6 +2003,18 @@ export default function MobileAgentPage() {
                         </div>
 
                         <div className="mt-5 space-y-4">
+                            <div className="rounded-2xl border border-black/10 bg-white/60 p-3 text-sm leading-6 dark:border-white/10 dark:bg-white/[0.05]">
+                                <div className="flex items-center justify-between gap-3">
+                                    <div className="min-w-0">
+                                        <div className="font-medium">卡藏账号额度</div>
+                                        <div className="truncate text-xs text-stone-500 dark:text-stone-400">{promptHubIdentity?.email || promptHubIdentity?.id || "已登录"}</div>
+                                    </div>
+                                    <div className="shrink-0 rounded-full bg-stone-950 px-3 py-1 text-xs font-semibold text-white dark:bg-[#0A84FF]">
+                                        今日 {Math.min(dailyUsage, dailyTurnLimit)}/{dailyTurnLimit}
+                                    </div>
+                                </div>
+                                <p className="mt-2 text-xs leading-5 text-stone-500 dark:text-stone-400">当前版本先做网页侧软限制；公开运营时还需要在服务端按卡藏账号做硬限额，防止绕过前端。</p>
+                            </div>
                             <p className="rounded-2xl border border-amber-500/20 bg-amber-500/10 px-3 py-2 text-xs leading-5 text-amber-800 dark:text-amber-100">
                                 Agent URL 是电脑上 Codex Remote Bridge 的 HTTPS 服务地址，不是画布网页地址、New API 地址或创作 Agent API。不要把 17371 端口无鉴权裸露到公网。
                             </p>

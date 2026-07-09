@@ -36,10 +36,28 @@ export async function steerCodexTurn(prompt: string, emit: AgentEmit, attachment
     try {
         files = await writeAttachmentFiles(attachments);
         codexApp ||= await CodexAppClient.start(emit);
-        await codexApp.steerTurn(options.threadId, prompt, files);
+        let activeTurnId = codexApp.activeTurnId(options.threadId);
+        if (!activeTurnId) {
+            const thread = await loadCodexThread(emit, options.threadId, options.cwd, true);
+            activeTurnId = activeTurnIdFromThread(thread);
+        }
+        await codexApp.steerTurn(options.threadId, prompt, files, activeTurnId);
     } finally {
         await Promise.all(files.map((file) => fs.unlink(file).catch(() => undefined)));
     }
+}
+
+export async function getCodexThreadStatus(emit: AgentEmit, threadId: string, cwd?: string) {
+    codexApp ||= await CodexAppClient.start(emit);
+    const result = threadId ? await loadCodexThread(emit, threadId, cwd, true) : null;
+    const thread = result ? summarizeCodexThread(result) : null;
+    const localActiveTurnId = codexApp.activeTurnId(threadId);
+    const status = String(thread?.status || "").toLowerCase();
+    const statusBusy = busyStatus(status);
+    const inferredActiveTurnId = localActiveTurnId ? "" : activeTurnIdFromThread(result);
+    const activeTurnId = localActiveTurnId || inferredActiveTurnId || "";
+    const busy = Boolean(activeTurnId) || statusBusy;
+    return { thread, busy, activeTurnId, canSteer: Boolean(activeTurnId) };
 }
 
 async function runCodexTurnNow(prompt: string, emit: AgentEmit, attachments: AgentAttachment[], options: CodexRunOptions) {
@@ -202,10 +220,16 @@ class CodexAppClient {
         }
     }
 
-    async steerTurn(threadId: string, prompt: string, images: string[]) {
-        const expectedTurnId = this.activeTurnByThread.get(threadId);
+    async steerTurn(threadId: string, prompt: string, images: string[], activeTurnId = "") {
+        const expectedTurnId = activeTurnId || this.activeTurnByThread.get(threadId);
         if (!expectedTurnId) throw new Error("当前会话没有正在运行的 Codex 任务，无法引导。");
         return this.request("turn/steer", { threadId, input: codexInput(prompt, images), expectedTurnId });
+    }
+
+    activeTurnId(threadId?: string): string {
+        if (threadId) return this.activeTurnByThread.get(threadId) || "";
+        const value = this.activeTurnByThread.values().next().value;
+        return typeof value === "string" ? value : "";
     }
 
     private request(method: string, params: unknown) {
@@ -342,6 +366,30 @@ function assertThreadWorkspace(thread: unknown, cwd?: string) {
 function threadInWorkspace(thread: unknown, cwd: string) {
     const threadCwd = String(field(thread, "cwd") || "");
     return Boolean(threadCwd && path.resolve(threadCwd) === path.resolve(cwd));
+}
+
+function busyStatus(status: string) {
+    return ["running", "in_progress", "active", "busy", "pending"].includes(status.toLowerCase());
+}
+
+function terminalStatus(status: string) {
+    return ["completed", "complete", "done", "failed", "error", "cancelled", "canceled"].includes(status.toLowerCase());
+}
+
+function activeTurnIdFromThread(thread: unknown) {
+    const turns = arrayValue(field(thread, "turns"));
+    for (let index = turns.length - 1; index >= 0; index -= 1) {
+        const turn = turns[index];
+        const id = String(field(turn, "id") || "");
+        if (!id) continue;
+        const status = String(field(turn, "status") || field(turn, "state") || "").toLowerCase();
+        if (busyStatus(status)) return id;
+        if (terminalStatus(status)) continue;
+        const completedAt = field(turn, "completedAt") || field(turn, "completed_at") || field(turn, "finishedAt") || field(turn, "finished_at");
+        const error = field(turn, "error");
+        if (!completedAt && !error && busyStatus(String(field(thread, "status") || ""))) return id;
+    }
+    return "";
 }
 
 function normalizeItem(item: unknown) {

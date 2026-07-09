@@ -364,6 +364,7 @@ export default function MobileAgentPage() {
     const pendingGuideRef = useRef<PendingGuide | null>(null);
     const settingsRef = useRef<Settings>(defaultSettings);
     const activeThreadIdRef = useRef("");
+    const threadSyncSeqRef = useRef(0);
     const scrollerRef = useRef<HTMLDivElement>(null);
     const fileInputRef = useRef<HTMLInputElement>(null);
     const atBottomRef = useRef(true);
@@ -521,7 +522,12 @@ export default function MobileAgentPage() {
         });
     };
 
-    const updateSettings = (patch: Partial<Settings>) => setSettings((value) => ({ ...value, ...patch }));
+    const updateSettings = (patch: Partial<Settings>) =>
+        setSettings((value) => {
+            const next = { ...value, ...patch };
+            settingsRef.current = next;
+            return next;
+        });
 
     function markActiveQueueTask(status: QueuedTaskStatus, error = "") {
         const id = activeQueueTaskIdRef.current;
@@ -747,6 +753,34 @@ export default function MobileAgentPage() {
         return applyThreadMessages(data.messages, pendingPrompt, options);
     };
 
+    const syncThreadInBackground = async (threadId: string, canvasId: string, options: { forceScroll?: boolean; clearWhenEmpty?: boolean; statusText?: string } = {}) => {
+        if (!threadId) return false;
+        const syncSeq = ++threadSyncSeqRef.current;
+        try {
+            const data = await agentFetch<{ workspace?: Workspace; messages?: MobileMessage[] }>(`/agent/codex/threads/${encodeURIComponent(threadId)}/resume`, {
+                method: "POST",
+                body: JSON.stringify({ canvasId }),
+            });
+            if (syncSeq !== threadSyncSeqRef.current) return false;
+            setWorkspace(data.workspace || workspace);
+            activeThreadIdRef.current = threadId;
+            setActiveThreadId(threadId);
+            if (!pendingPromptRef.current) {
+                if (data.messages?.length) applyThreadMessages(data.messages, "", { forceScroll: options.forceScroll });
+                else if (options.clearWhenEmpty) setMessages([]);
+            }
+            if (options.statusText) setTemporaryStatus(options.statusText, true);
+            return true;
+        } catch (error) {
+            if (syncSeq !== threadSyncSeqRef.current) return false;
+            const message = error instanceof Error ? error.message : String(error);
+            setTemporaryStatus("");
+            setConnectionMessage(`已连接 Agent，但会话同步失败：${message}`);
+            pushMessage({ id: createId(), role: "error", title: "会话同步失败", text: message });
+            return false;
+        }
+    };
+
     const refreshThreads = async (quiet = false) => {
         if (!settingsRef.current.agentUrl.trim() || !settingsRef.current.token.trim()) return threads;
         setThreadsLoading(true);
@@ -965,37 +999,35 @@ export default function MobileAgentPage() {
             }
             const canvasId = normalizeCanvasId(settingsRef.current.canvasId);
             const threadId = normalizeThreadId(settingsRef.current.threadId) || activeThreadIdRef.current;
+            let currentWorkspace: Workspace | null = null;
             if (settingsRef.current.workspacePath.trim()) {
                 const data = await agentFetch<{ workspace?: Workspace }>("/agent/codex/workspace", {
                     method: "POST",
                     body: JSON.stringify({ canvasId, workspacePath: settingsRef.current.workspacePath.trim() }),
                 });
-                setWorkspace(data.workspace || null);
-                setActiveThreadId(data.workspace?.activeThreadId || "");
+                currentWorkspace = data.workspace || null;
+            } else {
+                const data = await agentFetch<{ workspace?: Workspace }>(`/agent/codex/workspace?canvasId=${encodeURIComponent(canvasId)}`);
+                currentWorkspace = data.workspace || null;
             }
-
-            const data = await agentFetch<{ workspace?: Workspace }>(`/agent/codex/workspace?canvasId=${encodeURIComponent(canvasId)}`);
-            setWorkspace(data.workspace || null);
-            setActiveThreadId(threadId || data.workspace?.activeThreadId || "");
-
-            if (threadId) {
-                const resumed = await agentFetch<{ workspace?: Workspace; messages?: MobileMessage[] }>(`/agent/codex/threads/${encodeURIComponent(threadId)}/resume`, {
-                    method: "POST",
-                    body: JSON.stringify({ canvasId }),
-                });
-                setWorkspace(resumed.workspace || data.workspace || null);
-                setActiveThreadId(threadId);
-                if (resumed.messages?.length) applyThreadMessages(resumed.messages, "", { forceScroll: !options.syncOnly });
-            }
+            const nextThreadId = threadId || currentWorkspace?.activeThreadId || "";
+            setWorkspace(currentWorkspace);
+            activeThreadIdRef.current = nextThreadId;
+            setActiveThreadId(nextThreadId);
 
             setConnected(true);
             setConnecting(false);
             setConnectionStatus("connected");
-            if (!options.silent) setConnectionMessage("已连接电脑 Codex");
+            if (!options.silent) setConnectionMessage(nextThreadId && !options.syncOnly ? "已连接，正在同步会话..." : "已连接电脑 Codex");
             if (!options.quiet) pushMessage({ id: createId(), role: "status", text: "已连接电脑 Codex" });
             if (!options.syncOnly) {
                 void refreshGitRepos(true);
                 void refreshThreads(true);
+                if (nextThreadId && !options.quiet) {
+                    void syncThreadInBackground(nextThreadId, canvasId, { forceScroll: true, statusText: "会话已同步" }).then((ok) => {
+                        if (ok && !options.silent) setConnectionMessage("已连接电脑 Codex");
+                    });
+                }
             }
 
             const source = new EventSource(withToken(agentEndpoint, `/events?clientId=mobile-codex-${Date.now()}`, settingsRef.current.token));
@@ -1068,6 +1100,7 @@ export default function MobileAgentPage() {
         setActiveProjectId(project.id);
         if (typeof localStorage !== "undefined") localStorage.setItem(activeProjectKey, project.id);
         setWorkspace({ canvasId: project.canvasId, workspacePath: project.workspacePath, activeThreadId: project.threadId });
+        activeThreadIdRef.current = project.threadId;
         setActiveThreadId(project.threadId);
         setThreadSearch("");
         setThreadError("");
@@ -1080,11 +1113,13 @@ export default function MobileAgentPage() {
             return;
         }
 
+        threadSyncSeqRef.current += 1;
         setTemporaryStatus(`正在切换到 ${project.label}...`);
         const ok = await connect({ quiet: true });
         if (ok) {
             setThreadsOpen(false);
-            setTemporaryStatus(`已切换到 ${project.label}`, true);
+            setTemporaryStatus(project.threadId ? `已切换到 ${project.label}，正在同步会话...` : `已切换到 ${project.label}`, !project.threadId);
+            if (project.threadId) void syncThreadInBackground(project.threadId, normalizeCanvasId(project.canvasId), { forceScroll: true, statusText: `已切换到 ${project.label}` });
             void refreshThreads(true);
             void refreshGitRepos(true);
         } else {
@@ -1157,24 +1192,19 @@ export default function MobileAgentPage() {
 
     const selectThread = async (thread: ThreadSummary) => {
         if (!thread.id) return;
-        try {
-            const canvasId = normalizeCanvasId(settingsRef.current.canvasId);
-            setTemporaryStatus("正在切换会话...");
-            const data = await agentFetch<{ workspace?: Workspace; messages?: MobileMessage[] }>(`/agent/codex/threads/${encodeURIComponent(thread.id)}/resume`, {
-                method: "POST",
-                body: JSON.stringify({ canvasId }),
-            });
-            setWorkspace(data.workspace || workspace);
-            setActiveThreadId(thread.id);
-            updateSettings({ threadId: thread.id });
-            if (data.messages?.length) applyThreadMessages(data.messages, "", { forceScroll: true });
-            else setMessages([]);
-            setThreadsOpen(false);
-            setTemporaryStatus("会话已切换", true);
-        } catch (error) {
-            setTemporaryStatus("");
-            pushMessage({ id: createId(), role: "error", title: "切换会话失败", text: error instanceof Error ? error.message : String(error) });
+        if (sending || pendingPromptRef.current || activeQueueTaskIdRef.current) {
+            pushMessage({ id: createId(), role: "status", text: "当前 Codex 任务还在执行，完成后再切换会话，避免把后续消息发到错误会话。" });
+            return;
         }
+        const canvasId = normalizeCanvasId(settingsRef.current.canvasId);
+        threadSyncSeqRef.current += 1;
+        activeThreadIdRef.current = thread.id;
+        settingsRef.current = { ...settingsRef.current, threadId: thread.id };
+        setActiveThreadId(thread.id);
+        updateSettings({ threadId: thread.id });
+        setThreadsOpen(false);
+        setTemporaryStatus("已切换会话，正在同步记录...");
+        void syncThreadInBackground(thread.id, canvasId, { forceScroll: true, clearWhenEmpty: true, statusText: "会话已同步" });
     };
 
     const pushCurrentCommit = async () => {

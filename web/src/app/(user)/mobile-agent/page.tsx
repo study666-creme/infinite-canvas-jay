@@ -415,6 +415,7 @@ export default function MobileAgentPage() {
     const threadSyncSeqRef = useRef(0);
     const scrollerRef = useRef<HTMLDivElement>(null);
     const messageElementsRef = useRef(new Map<string, HTMLElement>());
+    const inputRef = useRef<HTMLTextAreaElement>(null);
     const fileInputRef = useRef<HTMLInputElement>(null);
     const atBottomRef = useRef(true);
 
@@ -668,6 +669,29 @@ export default function MobileAgentPage() {
         const next = pendingGuidesRef.current.filter((draft) => draft.id !== id);
         pendingGuidesRef.current = next;
         setPendingGuides(next);
+    }
+
+    function editPendingGuide(id: string) {
+        const draft = pendingGuidesRef.current.find((item) => item.id === id);
+        if (!draft) return;
+        const currentInput = input.trim();
+        const currentAttachments = attachments;
+        const nextGuides = pendingGuidesRef.current.filter((item) => item.id !== id);
+        if (currentInput || currentAttachments.length) {
+            nextGuides.push({
+                id: createId(),
+                text: currentInput || "请根据图片继续处理当前任务。",
+                attachments: currentAttachments,
+                createdAt: Date.now(),
+            });
+        }
+        const normalizedGuides = nextGuides.slice(-20);
+        pendingGuidesRef.current = normalizedGuides;
+        setPendingGuides(normalizedGuides);
+        setInput(draft.text);
+        setAttachments(draft.attachments || []);
+        setTemporaryStatus("已放回输入框，可继续修改。", true);
+        requestAnimationFrame(() => inputRef.current?.focus());
     }
 
     function hasDailyTurnQuota(actionLabel = "发送") {
@@ -1660,14 +1684,23 @@ export default function MobileAgentPage() {
                                                 <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-sky-700 dark:text-sky-200">待引导 #{index + 1}</div>
                                                 <div className="mt-1 flex items-start gap-2">
                                                     <div className="min-w-0 flex-1 line-clamp-3 break-words text-sm leading-5">{pendingGuide.text}</div>
-                                                    <button
-                                                        type="button"
-                                                        className="mt-0.5 shrink-0 rounded-full bg-[#0A84FF] px-2.5 py-1 text-xs font-semibold text-white shadow-[0_6px_18px_rgba(10,132,255,.24)] transition hover:brightness-105 active:scale-95 disabled:cursor-wait disabled:opacity-65"
-                                                        onClick={() => void confirmPendingGuide(pendingGuide.id)}
-                                                        disabled={steering}
-                                                    >
-                                                        {steering ? "引导中" : "引导"}
-                                                    </button>
+                                                    <div className="mt-0.5 flex shrink-0 items-center gap-1">
+                                                        <button
+                                                            type="button"
+                                                            className="rounded-full border border-black/10 bg-white/70 px-2.5 py-1 text-xs font-semibold text-stone-700 shadow-[inset_0_1px_0_rgba(255,255,255,.65)] transition hover:bg-white active:scale-95 dark:border-white/10 dark:bg-white/[0.08] dark:text-stone-100 dark:hover:bg-white/[0.12]"
+                                                            onClick={() => editPendingGuide(pendingGuide.id)}
+                                                        >
+                                                            修改
+                                                        </button>
+                                                        <button
+                                                            type="button"
+                                                            className="rounded-full bg-[#0A84FF] px-2.5 py-1 text-xs font-semibold text-white shadow-[0_6px_18px_rgba(10,132,255,.24)] transition hover:brightness-105 active:scale-95 disabled:cursor-wait disabled:opacity-65"
+                                                            onClick={() => void confirmPendingGuide(pendingGuide.id)}
+                                                            disabled={steering}
+                                                        >
+                                                            {steering ? "引导中" : "引导"}
+                                                        </button>
+                                                    </div>
                                                 </div>
                                                 {pendingGuide.attachments.length ? <div className="mt-1 text-xs text-stone-500 dark:text-stone-300">{pendingGuide.attachments.length} 张图片</div> : null}
                                             </div>
@@ -1745,6 +1778,7 @@ export default function MobileAgentPage() {
                         <ImagePlus className="size-4" />
                     </button>
                     <textarea
+                        ref={inputRef}
                         value={input}
                         onChange={(event) => setInput(event.target.value)}
                         onKeyDown={(event) => {

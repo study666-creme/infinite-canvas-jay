@@ -1853,10 +1853,43 @@ export default function MobileAgentPage() {
                             </div>
                         </div>
 
-                        <div className="mt-6 grid grid-cols-2 gap-2">
-                            <button type="button" className="inline-flex h-11 items-center justify-center gap-2 rounded-xl border border-black/10 bg-white text-sm font-medium transition hover:bg-sky-50 dark:border-white/10 dark:bg-[#181818] dark:text-stone-100 dark:hover:bg-sky-400/10" onClick={() => void connect()}>
-                                <PlugZap className="size-4" />
-                                连接
+                        {connectionMessage || connecting ? (
+                            <div
+                                className={[
+                                    "mt-5 flex items-start gap-2 rounded-2xl border px-3 py-2 text-xs leading-5",
+                                    connectionStatus === "connected"
+                                        ? "border-emerald-500/20 bg-emerald-500/10 text-emerald-800 dark:text-emerald-100"
+                                        : connectionStatus === "connecting"
+                                          ? "border-sky-500/20 bg-sky-500/10 text-sky-800 dark:text-sky-100"
+                                          : connectionStatus === "error"
+                                            ? "border-red-500/20 bg-red-500/10 text-red-800 dark:text-red-100"
+                                            : "border-amber-500/20 bg-amber-500/10 text-amber-800 dark:text-amber-100",
+                                ].join(" ")}
+                            >
+                                {connecting ? <LoaderCircle className="mt-0.5 size-4 shrink-0 animate-spin" /> : connectionStatus === "connected" ? <CheckCircle2 className="mt-0.5 size-4 shrink-0" /> : <PlugZap className="mt-0.5 size-4 shrink-0" />}
+                                <span>{connectionMessage || (connecting ? "正在连接电脑 Agent..." : "等待连接")}</span>
+                            </div>
+                        ) : null}
+
+                        <div className="mt-3 grid grid-cols-2 gap-2">
+                            <button
+                                type="button"
+                                className={[
+                                    "inline-flex h-11 items-center justify-center gap-2 rounded-xl border text-sm font-medium transition disabled:cursor-wait",
+                                    connecting
+                                        ? "border-sky-500/25 bg-sky-500/12 text-sky-800 dark:text-sky-100"
+                                        : connectionStatus === "connected"
+                                          ? "border-emerald-500/25 bg-emerald-500/12 text-emerald-800 hover:bg-emerald-500/16 dark:text-emerald-100"
+                                          : connectionStatus === "error"
+                                            ? "border-red-500/25 bg-red-500/10 text-red-800 hover:bg-red-500/14 dark:text-red-100"
+                                            : "border-black/10 bg-white hover:bg-sky-50 dark:border-white/10 dark:bg-[#181818] dark:text-stone-100 dark:hover:bg-sky-400/10",
+                                ].join(" ")}
+                                onClick={() => void connect()}
+                                disabled={connecting}
+                                aria-busy={connecting}
+                            >
+                                {connecting ? <LoaderCircle className="size-4 animate-spin" /> : connectionStatus === "connected" ? <CheckCircle2 className="size-4" /> : <PlugZap className="size-4" />}
+                                {connecting ? "正在连接..." : connectionStatus === "connected" ? "已连接" : connectionStatus === "error" ? "重试连接" : "连接"}
                             </button>
                             <button type="button" className="inline-flex h-11 items-center justify-center gap-2 rounded-xl border border-black/10 bg-white text-sm font-medium transition hover:bg-sky-50 disabled:opacity-45 dark:border-white/10 dark:bg-[#181818] dark:text-stone-100 dark:hover:bg-sky-400/10" onClick={() => void newThread()} disabled={!connected}>
                                 <RotateCcw className="size-4" />

@@ -1,7 +1,7 @@
 "use client";
 
 import { ChangeEvent, FormEvent, useEffect, useMemo, useRef, useState } from "react";
-import { CheckCircle2, ChevronDown, Copy, FolderGit2, GitBranch, ImagePlus, LoaderCircle, MessageSquareText, PlugZap, RefreshCcw, RotateCcw, SendHorizontal, Settings2, TerminalSquare, Trash2, UploadCloud, X } from "lucide-react";
+import { CheckCircle2, ChevronDown, Clock3, Copy, FolderGit2, GitBranch, ImagePlus, ListTodo, LoaderCircle, MessageSquareText, PlugZap, Plus, RefreshCcw, RotateCcw, SendHorizontal, Settings2, TerminalSquare, Trash2, UploadCloud, X } from "lucide-react";
 
 type MessageRole = "user" | "assistant" | "tool" | "error" | "status";
 type MobileMessage = { id: string; role: MessageRole; title?: string; text: string; streamId?: string };
@@ -32,12 +32,17 @@ type ThreadSummary = {
     createdAt?: number;
 };
 type AgentAttachment = { name?: string; type?: string; dataUrl?: string };
+type QueuedTaskStatus = "queued" | "running" | "done" | "failed";
+type QueuedTask = { id: string; text: string; attachments: AgentAttachment[]; createdAt: number; status: QueuedTaskStatus; error?: string };
+type ThreadGroup = { key: string; label: string; path: string; threads: ThreadSummary[] };
 
 const settingsKey = "kazang-mobile-codex:settings";
 const messagesKey = "kazang-mobile-codex:messages";
 const pendingRunKey = "kazang-mobile-codex:pending-run";
+const queueKey = "kazang-mobile-codex:task-queue";
 const pendingRunMaxAge = 1000 * 60 * 60 * 12;
 const legacyDefaultWorkspacePath = "D:\\canvas\\infinite-canvas";
+const queueGuides = ["继续修复并验证", "跑测试并汇报结果", "提交并推送当前项目", "整理当前进度和下一步", "检查线上部署状态"];
 const defaultSettings: Settings = {
     agentUrl: "",
     token: "",
@@ -188,6 +193,23 @@ function threadTitle(thread: ThreadSummary) {
     return thread.name || thread.preview || thread.id;
 }
 
+function queueTaskCount(items: QueuedTask[]) {
+    return items.filter((item) => item.status === "queued" || item.status === "running").length;
+}
+
+function normalizeQueue(items: QueuedTask[]) {
+    return items
+        .filter((item) => item?.text?.trim())
+        .slice(-30)
+        .map((item) => ({ ...item, attachments: item.attachments || [], status: item.status === "running" ? "queued" : item.status }));
+}
+
+function threadGroupLabel(path: string) {
+    if (!path) return "Current workspace";
+    const name = repoName(path);
+    return name === path ? path : name;
+}
+
 function formatThreadTime(value?: number) {
     if (!value) return "";
     const ms = value > 10_000_000_000 ? value : value * 1000;
@@ -231,26 +253,44 @@ export default function MobileAgentPage() {
     const [threadSearch, setThreadSearch] = useState("");
     const [threadError, setThreadError] = useState("");
     const [attachments, setAttachments] = useState<AgentAttachment[]>([]);
+    const [queueOpen, setQueueOpen] = useState(false);
+    const [queueInput, setQueueInput] = useState("");
+    const [queuedTasks, setQueuedTasks] = useState<QueuedTask[]>([]);
     const [runStatus, setRunStatus] = useState("");
     const [unreadCount, setUnreadCount] = useState(0);
     const eventSourceRef = useRef<EventSource | null>(null);
     const pollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const statusTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const pendingPromptRef = useRef("");
+    const activeQueueTaskIdRef = useRef("");
+    const queuedTasksRef = useRef<QueuedTask[]>([]);
     const settingsRef = useRef<Settings>(defaultSettings);
     const activeThreadIdRef = useRef("");
     const scrollerRef = useRef<HTMLDivElement>(null);
     const fileInputRef = useRef<HTMLInputElement>(null);
     const atBottomRef = useRef(true);
 
-    const canSend = useMemo(() => Boolean(input.trim()) && !sending, [input, sending]);
+    const canSend = useMemo(() => Boolean(input.trim()), [input]);
+    const activeQueueCount = useMemo(() => queueTaskCount(queuedTasks), [queuedTasks]);
     const selectedRepo = useMemo(() => repos.find((repo) => samePath(repo.repoPath, settings.gitRepoPath)) || null, [repos, settings.gitRepoPath]);
+    const groupedThreads = useMemo<ThreadGroup[]>(() => {
+        const groups = new Map<string, ThreadGroup>();
+        for (const thread of threads) {
+            const path = thread.cwd || workspace?.workspacePath || "Current workspace";
+            const key = path.trim().toLowerCase() || "current";
+            const existing = groups.get(key);
+            if (existing) existing.threads.push(thread);
+            else groups.set(key, { key, label: threadGroupLabel(path), path, threads: [thread] });
+        }
+        return [...groups.values()];
+    }, [threads, workspace?.workspacePath]);
 
     useEffect(() => {
         const loadedSettings = sanitizeSettings(readJson<Partial<Settings>>(localStorage.getItem(settingsKey), {}));
         settingsRef.current = loadedSettings;
         setSettings(loadedSettings);
         setMessages(readJson<MobileMessage[]>(localStorage.getItem(messagesKey), []));
+        setQueuedTasks(normalizeQueue(readJson<QueuedTask[]>(localStorage.getItem(queueKey), [])));
         setHydrated(true);
         return () => {
             eventSourceRef.current?.close();
@@ -266,6 +306,11 @@ export default function MobileAgentPage() {
     useEffect(() => {
         activeThreadIdRef.current = activeThreadId;
     }, [activeThreadId]);
+
+    useEffect(() => {
+        queuedTasksRef.current = queuedTasks;
+        if (hydrated) localStorage.setItem(queueKey, JSON.stringify(queuedTasks));
+    }, [hydrated, queuedTasks]);
 
     useEffect(() => {
         if (hydrated) localStorage.setItem(settingsKey, JSON.stringify(settings));
@@ -322,10 +367,81 @@ export default function MobileAgentPage() {
 
     const updateSettings = (patch: Partial<Settings>) => setSettings((value) => ({ ...value, ...patch }));
 
+    function markActiveQueueTask(status: QueuedTaskStatus, error = "") {
+        const id = activeQueueTaskIdRef.current;
+        if (!id) return;
+        setQueuedTasks((items) => {
+            const next = items.map((item) => (item.id === id ? { ...item, status, error } : item));
+            queuedTasksRef.current = next;
+            return next;
+        });
+        activeQueueTaskIdRef.current = "";
+    }
+
     function stopThreadPoll() {
         if (!pollTimerRef.current) return;
         clearTimeout(pollTimerRef.current);
         pollTimerRef.current = null;
+    }
+
+    function finishCurrentTurn(statusText = "本轮完成", autoClear = true) {
+        pendingPromptRef.current = "";
+        setSending(false);
+        clearPendingRun();
+        stopThreadPoll();
+        markActiveQueueTask("done");
+        setTemporaryStatus(statusText, autoClear);
+        window.setTimeout(() => void runNextQueuedTask(), 350);
+    }
+
+    function failCurrentTurn(errorText: string) {
+        pendingPromptRef.current = "";
+        setSending(false);
+        stopThreadPoll();
+        setTemporaryStatus("");
+        markActiveQueueTask("failed", errorText);
+        window.setTimeout(() => void runNextQueuedTask(), 350);
+    }
+
+    function enqueueTask(text: string, taskAttachments: AgentAttachment[] = []) {
+        const task: QueuedTask = {
+            id: createId(),
+            text: text.trim(),
+            attachments: taskAttachments,
+            createdAt: Date.now(),
+            status: "queued",
+        };
+        setQueuedTasks((items) => {
+            const next = normalizeQueue([...items, task]);
+            queuedTasksRef.current = next;
+            return next;
+        });
+        pushMessage({ id: createId(), role: "status", text: `已加入任务队列：${task.text}` });
+        window.setTimeout(() => void runNextQueuedTask(), 100);
+        return task;
+    }
+
+    function addQueueTaskFromDrawer() {
+        const text = queueInput.trim();
+        if (!text) return;
+        enqueueTask(text);
+        setQueueInput("");
+    }
+
+    function removeQueueTask(id: string) {
+        setQueuedTasks((items) => {
+            const next = items.filter((item) => item.id !== id || item.status === "running");
+            queuedTasksRef.current = next;
+            return next;
+        });
+    }
+
+    function clearFinishedQueue() {
+        setQueuedTasks((items) => {
+            const next = items.filter((item) => item.status === "queued" || item.status === "running");
+            queuedTasksRef.current = next;
+            return next;
+        });
     }
 
     function scrollToLatest() {
@@ -447,11 +563,7 @@ export default function MobileAgentPage() {
             try {
                 const items = await refreshThreadMessages(threadId, canvasId, prompt);
                 if (hasReplyAfterPrompt(items, prompt)) {
-                    pendingPromptRef.current = "";
-                    setSending(false);
-                    clearPendingRun();
-                    stopThreadPoll();
-                    setTemporaryStatus("本轮完成", true);
+                    finishCurrentTurn("本轮完成", true);
                     return;
                 }
             } catch (error) {
@@ -462,6 +574,7 @@ export default function MobileAgentPage() {
                 setSending(false);
                 clearPendingRun();
                 stopThreadPoll();
+                markActiveQueueTask("failed", "等待 Codex 返回超时");
                 setTemporaryStatus("");
                 pushMessage({ id: createId(), role: "status", text: "Codex 还没返回结果。回到页面或点右上角连接按钮，会继续同步当前会话记录。" });
                 return;
@@ -486,11 +599,7 @@ export default function MobileAgentPage() {
             try {
                 const items = await refreshThreadMessages(pendingRun.threadId, pendingRun.canvasId, pendingRun.prompt);
                 if (hasReplyAfterPrompt(items, pendingRun.prompt)) {
-                    pendingPromptRef.current = "";
-                    setSending(false);
-                    clearPendingRun();
-                    stopThreadPoll();
-                    setTemporaryStatus("已同步最新结果", true);
+                    finishCurrentTurn("已同步最新结果", true);
                     return;
                 }
                 pollThreadUntilReply(pendingRun.threadId, pendingRun.canvasId, pendingRun.prompt);
@@ -518,17 +627,20 @@ export default function MobileAgentPage() {
             return;
         }
         if (event.type === "turn.completed") {
-            setSending(false);
-            if (!pendingPromptRef.current) stopThreadPoll();
-            setTemporaryStatus("本轮完成", true);
+            if (!pendingPromptRef.current) {
+                setSending(false);
+                stopThreadPoll();
+                setTemporaryStatus("本轮完成", true);
+            } else {
+                setTemporaryStatus("本轮完成，正在同步记录...");
+            }
             upsertStreamMessage({ id: `done-${Date.now()}`, role: "status", text: pendingPromptRef.current ? "本轮完成，正在同步记录..." : "本轮完成" });
             return;
         }
         if (event.type === "error") {
-            setSending(false);
-            setTemporaryStatus("");
-            stopThreadPoll();
-            pushMessage({ id: createId(), role: "error", title: "Codex", text: normalizeText(event.message || itemField(item, "message")) || "Codex 出错" });
+            const message = normalizeText(event.message || itemField(item, "message")) || "Codex 出错";
+            failCurrentTurn(message);
+            pushMessage({ id: createId(), role: "error", title: "Codex", text: message });
             return;
         }
         if ((event.type === "item.updated" || event.type === "item.completed") && itemType === "agent_message") {
@@ -612,29 +724,21 @@ export default function MobileAgentPage() {
             });
             source.addEventListener("agent_error", (event) => {
                 const data = parseEventData<{ message?: string }>(event);
-                setSending(false);
-                setTemporaryStatus("");
-                stopThreadPoll();
-                pushMessage({ id: createId(), role: "error", title: "Agent", text: data?.message || "Agent 出错" });
+                const message = data?.message || "Agent 出错";
+                failCurrentTurn(message);
+                pushMessage({ id: createId(), role: "error", title: "Agent", text: message });
             });
             source.addEventListener("agent_done", () => {
                 const threadId = activeThreadIdRef.current || normalizeThreadId(settingsRef.current.threadId);
                 const canvasId = normalizeCanvasId(settingsRef.current.canvasId);
                 const pendingPrompt = pendingPromptRef.current;
                 if (!threadId) {
-                    pendingPromptRef.current = "";
-                    setSending(false);
-                    setTemporaryStatus("");
-                    stopThreadPoll();
+                    failCurrentTurn("没有可同步的 Codex 会话");
                     return;
                 }
                 void refreshThreadMessages(threadId, canvasId, pendingPrompt).then((items) => {
                     if (!pendingPrompt || hasReplyAfterPrompt(items, pendingPrompt)) {
-                        pendingPromptRef.current = "";
-                        setSending(false);
-                        clearPendingRun();
-                        stopThreadPoll();
-                        setTemporaryStatus("本轮完成", true);
+                        finishCurrentTurn("本轮完成", true);
                     }
                 });
             });
@@ -740,24 +844,22 @@ export default function MobileAgentPage() {
         }
     };
 
-    const submit = async (event?: FormEvent<HTMLFormElement>) => {
-        event?.preventDefault();
-        const prompt = input.trim();
-        if (!prompt || sending) return;
+    async function submitPrompt(prompt: string, currentAttachments: AgentAttachment[], options: { queuedTaskId?: string } = {}) {
         if (!settingsRef.current.agentUrl.trim() || !settingsRef.current.token.trim()) {
             setConnectionStatus("error");
             setConnectionMessage("请先填写 Agent URL 和 Token");
             setSettingsOpen(true);
+            if (options.queuedTaskId) markActiveQueueTask("queued");
             pushMessage({ id: createId(), role: "error", title: "发送失败", text: "请先填写 Agent URL 和 Token。" });
             return;
         }
         if (!connected) {
             const ok = await connect({ quiet: true });
-            if (!ok) return;
+            if (!ok) {
+                if (options.queuedTaskId) markActiveQueueTask("queued");
+                return;
+            }
         }
-        const currentAttachments = attachments;
-        setInput("");
-        setAttachments([]);
         setSending(true);
         pendingPromptRef.current = prompt;
         setTemporaryStatus("Codex 正在接收任务...");
@@ -777,13 +879,46 @@ export default function MobileAgentPage() {
                 pollThreadUntilReply(data.threadId, canvasId, prompt);
             }
         } catch (error) {
-            setSending(false);
-            pendingPromptRef.current = "";
-            stopThreadPoll();
-            setTemporaryStatus("");
-            setAttachments(currentAttachments);
-            pushMessage({ id: createId(), role: "error", title: "发送失败", text: error instanceof Error ? error.message : String(error) });
+            const message = error instanceof Error ? error.message : String(error);
+            if (options.queuedTaskId) {
+                failCurrentTurn(message);
+            } else {
+                setSending(false);
+                pendingPromptRef.current = "";
+                stopThreadPoll();
+                setTemporaryStatus("");
+                setAttachments(currentAttachments);
+            }
+            pushMessage({ id: createId(), role: "error", title: "发送失败", text: message });
         }
+    }
+
+    async function runNextQueuedTask() {
+        if (pendingPromptRef.current || activeQueueTaskIdRef.current) return;
+        const nextTask = queuedTasksRef.current.find((item) => item.status === "queued");
+        if (!nextTask) return;
+        activeQueueTaskIdRef.current = nextTask.id;
+        setQueuedTasks((items) => {
+            const next = items.map((item) => (item.id === nextTask.id ? { ...item, status: "running" as QueuedTaskStatus, error: "" } : item));
+            queuedTasksRef.current = next;
+            return next;
+        });
+        setTemporaryStatus(`正在执行队列任务：${nextTask.text.slice(0, 36)}${nextTask.text.length > 36 ? "..." : ""}`);
+        await submitPrompt(nextTask.text, nextTask.attachments || [], { queuedTaskId: nextTask.id });
+    }
+
+    const submit = async (event?: FormEvent<HTMLFormElement>) => {
+        event?.preventDefault();
+        const prompt = input.trim();
+        if (!prompt) return;
+        const currentAttachments = attachments;
+        setInput("");
+        setAttachments([]);
+        if (sending || pendingPromptRef.current || activeQueueTaskIdRef.current) {
+            enqueueTask(prompt, currentAttachments);
+            return;
+        }
+        await submitPrompt(prompt, currentAttachments);
     };
 
     const copyMessage = async (message: MobileMessage) => {
@@ -815,6 +950,10 @@ export default function MobileAgentPage() {
                     <div className="truncate text-xs text-stone-500 dark:text-stone-400">{workspace?.workspacePath || "未连接工作目录"}</div>
                 </div>
                 <div className="flex items-center gap-1">
+                    <button type="button" className="relative grid size-9 place-items-center text-stone-500 transition hover:text-stone-950 dark:text-stone-400 dark:hover:text-white" onClick={() => setQueueOpen(true)} aria-label="任务队列" title="任务队列">
+                        <ListTodo className="size-4" />
+                        {activeQueueCount ? <span className="absolute right-0.5 top-0.5 min-w-4 rounded-full bg-sky-500 px-1 text-[10px] font-semibold leading-4 text-white">{activeQueueCount}</span> : null}
+                    </button>
                     <button type="button" className="grid size-9 place-items-center text-stone-500 transition hover:text-stone-950 dark:text-stone-400 dark:hover:text-white" onClick={() => { setThreadsOpen(true); void refreshThreads(true); }} aria-label="会话" title="会话">
                         <MessageSquareText className="size-4" />
                     </button>
@@ -925,23 +1064,110 @@ export default function MobileAgentPage() {
                         placeholder={connected ? "让 Codex 继续做项目任务..." : "可以先输入，发送时会尝试连接电脑 Agent"}
                         className="max-h-36 min-h-10 flex-1 bg-transparent px-1 py-2 text-[16px] leading-6 outline-none placeholder:text-stone-400"
                     />
-                    <button type="submit" disabled={!canSend} className="grid size-10 shrink-0 place-items-center rounded-2xl bg-stone-950 text-white transition enabled:hover:scale-[1.03] disabled:opacity-35 dark:bg-white dark:text-black" aria-label="发送">
-                        {sending ? <LoaderCircle className="size-4 animate-spin" /> : <SendHorizontal className="size-4" />}
+                    <button type="submit" disabled={!canSend} className="grid size-10 shrink-0 place-items-center rounded-2xl bg-stone-950 text-white transition enabled:hover:scale-[1.03] disabled:opacity-35 dark:bg-white dark:text-black" aria-label={sending ? "加入任务队列" : "发送"}>
+                        {sending ? <Plus className="size-4" /> : <SendHorizontal className="size-4" />}
                     </button>
                 </div>
             </form>
 
+            {queueOpen ? (
+                <div className="fixed inset-0 z-50 bg-black/35 backdrop-blur-sm" onClick={() => setQueueOpen(false)}>
+                    <section className="absolute bottom-0 left-0 right-0 max-h-[88vh] overflow-y-auto rounded-t-[1.75rem] border border-black/10 bg-[#f7f5ef] p-5 shadow-2xl sm:left-auto sm:top-0 sm:h-full sm:w-[430px] sm:rounded-none dark:border-white/10 dark:bg-[#101010]" onClick={(event) => event.stopPropagation()}>
+                        <div className="flex items-center justify-between gap-3">
+                            <div>
+                                <h2 className="text-lg font-semibold">任务队列</h2>
+                                <p className="mt-1 text-xs leading-5 text-stone-500 dark:text-stone-400">队列会按顺序发送到当前 Codex 会话；手机页面恢复后会继续同步并执行下一条。</p>
+                            </div>
+                            <button type="button" className="grid size-9 shrink-0 place-items-center text-stone-500 transition hover:text-stone-950 dark:hover:text-white" onClick={() => setQueueOpen(false)} aria-label="关闭">
+                                <X className="size-4" />
+                            </button>
+                        </div>
+
+                        <div className="mt-4 rounded-2xl border border-black/10 bg-white/65 p-3 dark:border-white/10 dark:bg-white/[0.05]">
+                            <textarea
+                                value={queueInput}
+                                onChange={(event) => setQueueInput(event.target.value)}
+                                rows={4}
+                                placeholder="写下一条要排队执行的任务..."
+                                className="min-h-28 w-full resize-none bg-transparent text-[15px] leading-6 outline-none placeholder:text-stone-400 dark:text-stone-100"
+                            />
+                            <div className="mt-3 flex flex-wrap gap-2">
+                                {queueGuides.map((guide) => (
+                                    <button
+                                        key={guide}
+                                        type="button"
+                                        className="rounded-full border border-black/10 bg-white/70 px-3 py-1.5 text-xs text-stone-700 transition hover:border-sky-400/40 hover:bg-sky-500/10 dark:border-white/10 dark:bg-white/[0.06] dark:text-stone-200 dark:hover:bg-sky-400/10"
+                                        onClick={() => setQueueInput((value) => (value.trim() ? `${value.trim()}\n${guide}` : guide))}
+                                    >
+                                        {guide}
+                                    </button>
+                                ))}
+                            </div>
+                            <div className="mt-4 flex items-center justify-between gap-2">
+                                <button type="button" className="inline-flex h-10 items-center justify-center gap-2 rounded-xl bg-stone-950 px-4 text-sm font-medium text-white disabled:opacity-40 dark:bg-white dark:text-black" disabled={!queueInput.trim()} onClick={addQueueTaskFromDrawer}>
+                                    <Plus className="size-4" />
+                                    加入队列
+                                </button>
+                                <button type="button" className="inline-flex h-10 items-center justify-center gap-2 rounded-xl border border-black/10 bg-white/70 px-3 text-sm text-stone-600 transition hover:text-stone-950 disabled:opacity-40 dark:border-white/10 dark:bg-white/[0.06] dark:text-stone-300 dark:hover:text-white" onClick={clearFinishedQueue} disabled={!queuedTasks.some((item) => item.status === "done" || item.status === "failed")}>
+                                    <Trash2 className="size-4" />
+                                    清理完成
+                                </button>
+                            </div>
+                        </div>
+
+                        <div className="mt-4 space-y-2">
+                            {queuedTasks.map((task, index) => (
+                                <div key={task.id} className="rounded-2xl border border-black/10 bg-white/70 px-3 py-3 text-left dark:border-white/10 dark:bg-white/[0.05]">
+                                    <div className="flex items-start justify-between gap-3">
+                                        <div className="min-w-0 flex-1">
+                                            <div className="flex items-center gap-2 text-xs text-stone-500 dark:text-stone-400">
+                                                {task.status === "running" ? <LoaderCircle className="size-3.5 animate-spin" /> : <Clock3 className="size-3.5" />}
+                                                <span>#{index + 1}</span>
+                                                <span
+                                                    className={[
+                                                        "rounded-full px-2 py-0.5",
+                                                        task.status === "running"
+                                                            ? "bg-sky-500/12 text-sky-700 dark:text-sky-200"
+                                                            : task.status === "failed"
+                                                              ? "bg-red-500/12 text-red-700 dark:text-red-200"
+                                                              : task.status === "done"
+                                                                ? "bg-emerald-500/12 text-emerald-700 dark:text-emerald-200"
+                                                                : "bg-black/[0.05] text-stone-600 dark:bg-white/[0.08] dark:text-stone-300",
+                                                    ].join(" ")}
+                                                >
+                                                    {task.status === "running" ? "执行中" : task.status === "failed" ? "失败" : task.status === "done" ? "完成" : "待执行"}
+                                                </span>
+                                                {task.attachments.length ? <span>{task.attachments.length} 张图</span> : null}
+                                            </div>
+                                            <div className="mt-2 whitespace-pre-wrap break-words text-sm leading-6 text-stone-900 dark:text-stone-100">{task.text}</div>
+                                            {task.error ? <div className="mt-2 text-xs leading-5 text-red-700 dark:text-red-200">{task.error}</div> : null}
+                                        </div>
+                                        <button type="button" className="grid size-8 shrink-0 place-items-center rounded-xl text-stone-400 transition hover:bg-black/[0.04] hover:text-stone-900 disabled:opacity-30 dark:hover:bg-white/[0.08] dark:hover:text-white" onClick={() => removeQueueTask(task.id)} disabled={task.status === "running"} aria-label="删除队列任务">
+                                            <Trash2 className="size-4" />
+                                        </button>
+                                    </div>
+                                </div>
+                            ))}
+                            {!queuedTasks.length ? <div className="rounded-2xl bg-black/[0.04] px-3 py-5 text-center text-xs leading-5 text-stone-500 dark:bg-white/[0.05] dark:text-stone-400">暂无排队任务。当前任务运行时，也可以直接在底部输入框继续发送，内容会自动进入队列。</div> : null}
+                        </div>
+                    </section>
+                </div>
+            ) : null}
+
             {threadsOpen ? (
                 <div className="fixed inset-0 z-50 bg-black/35 backdrop-blur-sm" onClick={() => setThreadsOpen(false)}>
                     <section className="absolute bottom-0 left-0 right-0 max-h-[88vh] overflow-y-auto rounded-t-[1.75rem] border border-black/10 bg-[#f7f5ef] p-5 shadow-2xl sm:bottom-auto sm:right-auto sm:top-0 sm:h-full sm:w-[430px] sm:rounded-none dark:border-white/10 dark:bg-[#101010]" onClick={(event) => event.stopPropagation()}>
-                        <div className="flex items-center justify-between">
-                            <h2 className="text-lg font-semibold">选择会话</h2>
+                        <div className="flex items-center justify-between gap-3">
+                            <div>
+                                <h2 className="text-lg font-semibold">选择会话</h2>
+                                <p className="mt-1 text-xs leading-5 text-stone-500 dark:text-stone-400">按工作目录分区显示；当前后端返回的是已连接 workspace 的会话。</p>
+                            </div>
                             <button type="button" className="grid size-9 place-items-center text-stone-500 transition hover:text-stone-950 dark:hover:text-white" onClick={() => setThreadsOpen(false)} aria-label="关闭">
                                 <X className="size-4" />
                             </button>
                         </div>
                         <div className="mt-4 flex gap-2">
-                            <input value={threadSearch} onChange={(event) => setThreadSearch(event.target.value)} placeholder="搜索当前工作区会话" className="h-11 min-w-0 flex-1 rounded-xl border border-black/10 bg-white px-3 outline-none focus:border-stone-500 dark:border-white/10 dark:bg-white/[0.06]" />
+                            <input value={threadSearch} onChange={(event) => setThreadSearch(event.target.value)} placeholder="搜索当前工作区会话" className="h-11 min-w-0 flex-1 rounded-xl border border-black/10 bg-white px-3 text-stone-950 outline-none placeholder:text-stone-400 focus:border-stone-500 dark:border-white/10 dark:bg-white/[0.06] dark:text-stone-100" />
                             <button type="button" className="grid size-11 place-items-center rounded-xl border border-black/10 bg-white text-stone-600 disabled:opacity-45 dark:border-white/10 dark:bg-white/[0.06] dark:text-stone-300" onClick={() => void refreshThreads()} disabled={threadsLoading || !settings.agentUrl.trim() || !settings.token.trim()} aria-label="刷新会话">
                                 <RefreshCcw className={`size-4 ${threadsLoading ? "animate-spin" : ""}`} />
                             </button>
@@ -957,23 +1183,38 @@ export default function MobileAgentPage() {
                             </button>
                         </div>
                         {threadError ? <div className="mt-3 rounded-xl border border-red-500/20 bg-red-500/10 px-3 py-2 text-xs leading-5 text-red-800 dark:text-red-100">{threadError}</div> : null}
-                        <div className="mt-4 space-y-2">
-                            {threads.map((thread) => (
-                                <button
-                                    key={thread.id}
-                                    type="button"
-                                    className={[
-                                        "block w-full rounded-2xl border px-3 py-3 text-left transition",
-                                        thread.id === activeThreadId ? "border-stone-950 bg-stone-950 text-white dark:border-white dark:bg-white dark:text-black" : "border-black/10 bg-white/70 hover:bg-white dark:border-white/10 dark:bg-white/[0.05] dark:hover:bg-white/[0.08]",
-                                    ].join(" ")}
-                                    onClick={() => void selectThread(thread)}
-                                >
-                                    <div className="line-clamp-2 text-sm font-medium leading-5">{threadTitle(thread)}</div>
-                                    <div className="mt-1 flex items-center justify-between gap-2 text-xs opacity-60">
-                                        <span className="truncate">{thread.cwd || workspace?.workspacePath || "workspace"}</span>
-                                        <span className="shrink-0">{formatThreadTime(thread.updatedAt || thread.createdAt)}</span>
+                        <div className="mt-4 space-y-5">
+                            {groupedThreads.map((group) => (
+                                <div key={group.key}>
+                                    <div className="mb-2 flex items-center justify-between gap-3 px-1">
+                                        <div className="min-w-0">
+                                            <div className="truncate text-xs font-semibold uppercase tracking-[0.08em] text-stone-500 dark:text-stone-400">{group.label}</div>
+                                            <div className="truncate text-[11px] leading-4 text-stone-400 dark:text-stone-500">{group.path}</div>
+                                        </div>
+                                        <div className="shrink-0 text-[11px] text-stone-400 dark:text-stone-500">{group.threads.length}</div>
                                     </div>
-                                </button>
+                                    <div className="space-y-2">
+                                        {group.threads.map((thread) => (
+                                            <button
+                                                key={thread.id}
+                                                type="button"
+                                                className={[
+                                                    "block w-full rounded-2xl border px-3 py-3 text-left transition",
+                                                    thread.id === activeThreadId
+                                                        ? "border-sky-500/45 bg-sky-500/12 text-stone-950 shadow-[0_10px_28px_rgba(14,165,233,.16)] dark:border-sky-400/45 dark:bg-sky-400/12 dark:text-stone-50"
+                                                        : "border-black/10 bg-white/70 text-stone-900 hover:bg-white dark:border-white/10 dark:bg-white/[0.05] dark:text-stone-100 dark:hover:bg-white/[0.08]",
+                                                ].join(" ")}
+                                                onClick={() => void selectThread(thread)}
+                                            >
+                                                <div className="line-clamp-2 text-sm font-medium leading-5">{threadTitle(thread)}</div>
+                                                <div className="mt-1 flex items-center justify-between gap-2 text-xs opacity-60">
+                                                    <span className="truncate">{thread.id}</span>
+                                                    <span className="shrink-0">{formatThreadTime(thread.updatedAt || thread.createdAt)}</span>
+                                                </div>
+                                            </button>
+                                        ))}
+                                    </div>
+                                </div>
                             ))}
                             {!threads.length ? <div className="rounded-2xl bg-black/[0.04] px-3 py-4 text-center text-xs leading-5 text-stone-500 dark:bg-white/[0.05] dark:text-stone-400">连接后点击刷新，会列出当前 Workspace 下的 Codex 会话。</div> : null}
                         </div>

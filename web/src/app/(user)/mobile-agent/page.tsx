@@ -91,9 +91,9 @@ function isCanvasWebUrl(value: string) {
         const host = url.hostname.toLowerCase();
         const currentHost = typeof window === "undefined" ? "" : window.location.hostname.toLowerCase();
         const path = url.pathname.toLowerCase();
-        return host === currentHost || host === "canvas.prompt-hubs.com" || host === "infinite-canvas-jay.vercel.app" || path === "/mobile-agent" || path.startsWith("/mobile-agent/") || path === "/canvas" || path.startsWith("/canvas/");
+        return host === currentHost || host === "canvas.prompt-hubs.com" || host === "infinite-canvas-jay.vercel.app" || path === "/codex-remote" || path.startsWith("/codex-remote/") || path === "/mobile-agent" || path.startsWith("/mobile-agent/") || path === "/canvas" || path.startsWith("/canvas/");
     } catch {
-        return /(?:^|\/)(mobile-agent|canvas)(?:\/|$)/i.test(raw);
+        return /(?:^|\/)(codex-remote|mobile-agent|canvas)(?:\/|$)/i.test(raw);
     }
 }
 

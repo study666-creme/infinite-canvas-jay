@@ -2,6 +2,7 @@
 
 import type { ReactNode } from "react";
 import { FormEvent, useEffect, useState } from "react";
+import { usePathname } from "next/navigation";
 import { AlertCircle, LoaderCircle, LockKeyhole, LogIn, ShieldCheck } from "lucide-react";
 
 import { prepareCanvasStorageForSession, setCanvasStorageUserFromSession } from "@/app/(user)/canvas/stores/use-canvas-store";
@@ -14,6 +15,7 @@ import { PROMPT_HUB_DEFAULTS, type PromptHubSession } from "@/services/prompt-hu
 type AuthState = "checking" | "ready" | "authenticated";
 
 export function PromptHubAuthGate({ children }: { children: ReactNode }) {
+    const pathname = usePathname();
     const apiBase = usePromptHubStore((state) => state.apiBase);
     const savedEmail = usePromptHubStore((state) => state.email);
     const session = usePromptHubStore((state) => state.session);
@@ -27,6 +29,9 @@ export function PromptHubAuthGate({ children }: { children: ReactNode }) {
     const [state, setState] = useState<AuthState>("checking");
     const [submitting, setSubmitting] = useState(false);
     const [error, setError] = useState("");
+    const codexRemoteAuth = pathname === "/codex-remote" || pathname.startsWith("/codex-remote/") || pathname === "/mobile-agent" || pathname.startsWith("/mobile-agent/");
+    const authTitle = codexRemoteAuth ? "登录后使用 Codex Remote" : "登录后使用画布";
+    const authDescription = codexRemoteAuth ? "Codex Remote 沿用卡片库账号权限；真正控制电脑仍需要你的 Agent URL 和 Connect token。" : "画布、资产、生成和远程 Codex 控制会沿用卡片库账号权限。";
 
     useEffect(() => setEmail((value) => value || savedEmail), [savedEmail]);
 
@@ -116,8 +121,8 @@ export function PromptHubAuthGate({ children }: { children: ReactNode }) {
                             <ShieldCheck className="size-4" />
                             卡藏账号
                         </div>
-                        <h1 className="mt-2 text-2xl font-semibold tracking-tight">登录后使用画布</h1>
-                        <p className="mt-2 text-sm leading-6 text-stone-500 dark:text-stone-400">画布、资产、生成和远程 Codex 控制会沿用卡片库账号权限。</p>
+                        <h1 className="mt-2 text-2xl font-semibold tracking-tight">{authTitle}</h1>
+                        <p className="mt-2 text-sm leading-6 text-stone-500 dark:text-stone-400">{authDescription}</p>
                     </div>
                 </div>
 

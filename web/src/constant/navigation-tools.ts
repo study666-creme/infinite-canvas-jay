@@ -7,7 +7,7 @@ export const navigationTools = [
         icon: Maximize2,
     },
     {
-        slug: "mobile-agent",
+        slug: "codex-remote",
         label: "Codex Remote",
         icon: MessageCircle,
     },

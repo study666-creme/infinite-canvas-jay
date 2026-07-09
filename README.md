@@ -41,7 +41,7 @@ npm run build
 
 ## 登录与数据
 
-线上画布沿用卡片库的卡藏账号登录。未登录用户不能进入画布、资产、生成工作台或 Codex Remote 控制页。
+线上画布沿用卡片库的卡藏账号登录。未登录用户不能进入画布、资产和生成工作台。Codex Remote 的公开网页入口可以直接打开，但真正控制电脑仍需要用户自己的 Agent URL 和 Connect token。
 
 - 画布项目、资产库、AI 渠道配置仍主要保存在当前浏览器本地；画布与资产会按卡藏用户 ID 分桶，避免同一设备换账号后混用。
 - 卡藏生图、卡片库读取、Prompt Hub 媒体代理会使用当前登录 token；未登录用户不能无成本调用这些线上代理接口。
@@ -49,7 +49,9 @@ npm run build
 
 ## Codex Remote
 
-打开 `/mobile-agent` 可以把手机变成 Codex Remote Console，连接电脑上的本机 Agent 后继续让 Codex 读项目、改代码、跑命令和部署。它是可独立拆出的自托管 Codex 控制台；画布需要 Codex 当 Agent 大脑时，应作为可选 adapter/MCP 能力接入。
+打开 `/codex-remote` 可以把手机变成 Codex Remote Console，连接电脑上的本机 Agent 后继续让 Codex 读项目、改代码、跑命令和部署。它是可独立拆出的自托管 Codex 控制台；画布需要 Codex 当 Agent 大脑时，应作为可选 adapter/MCP 能力接入。旧入口 `/mobile-agent` 保留兼容。
+
+线上体验入口：`https://infinite-canvas-jay.vercel.app/codex-remote`。这个页面本身可以直接访问；要实际控制 Codex，需要在自己的电脑上启动本机 Agent 并填写 Agent URL + token。
 
 局域网使用示例：
 
@@ -60,7 +62,7 @@ cd D:\canvas\infinite-canvas\canvas-agent
 npm run dev
 ```
 
-启动后终端会输出 `Connect token` 和可访问地址。同局域网可填入 `http://电脑局域网IP:17371`。远程使用时，请通过 Cloudflare Tunnel、Tailscale Funnel、ZeroTier 内网地址或 VPS 反代提供 **HTTPS Agent URL**，再在 `/mobile-agent` 填入该地址、token 和工作目录。
+启动后终端会输出 `Connect token` 和可访问地址。同局域网可填入 `http://电脑局域网IP:17371`。远程使用时，请通过 Cloudflare Tunnel、Tailscale Funnel、ZeroTier 内网地址或 VPS 反代提供 **HTTPS Agent URL**，再在 `/codex-remote` 填入该地址、token 和工作目录。
 
 想让重启后手机不用重新填 token / URL，可以固定启动参数：
 

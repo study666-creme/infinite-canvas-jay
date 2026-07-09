@@ -29,13 +29,13 @@ Local URL: http://127.0.0.1:17371
 Connect token: xxxxxx
 ```
 
-在画布右上角点击 `Agent`，或打开 `/mobile-agent`，填入地址和 token 后连接。
+在画布右上角点击 `Agent`，或打开 `/codex-remote`，填入地址和 token 后连接。旧入口 `/mobile-agent` 保留兼容。
 
 Codex app 插件会读取启动输出里的 Local URL 和 Connect token，并直接打开画布网页地址；Canvas Agent 不负责生成画布打开 URL。
 
 Canvas Agent 默认只监听 `127.0.0.1`。网页第一次带正确 token 连接后，Canvas Agent 会记录该网页 Origin；之后其他 Origin 不能复用这个本地 Agent，除非用户清理 `~/.infinite-canvas/canvas-agent.json` 里的 `origins`。
 
-远程使用时，请把本机 Agent 放在受保护的 HTTPS 地址后面（Tailscale/ZeroTier、Cloudflare Tunnel、VPS 反代均可），再在 `/mobile-agent` 填入 HTTPS Agent URL 和 Connect token。不要把 `17371` 无鉴权裸露到公网；卡藏登录只保护网页入口，Agent URL + token 仍是执行本机 Codex 的关键凭证。
+远程使用时，请把本机 Agent 放在受保护的 HTTPS 地址后面（Tailscale/ZeroTier、Cloudflare Tunnel、VPS 反代均可），再在 `/codex-remote` 填入 HTTPS Agent URL 和 Connect token。不要把 `17371` 无鉴权裸露到公网；网页登录只保护网页入口，Agent URL + token 仍是执行本机 Codex 的关键凭证。
 
 重启后想保持手机端配置不变，可以固定 token 和公开地址：
 

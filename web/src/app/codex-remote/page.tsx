@@ -1,6 +1,5 @@
 import type { Metadata } from "next";
 
-import { PromptHubAuthGate } from "@/components/layout/prompt-hub-auth-gate";
 import { CodexRemoteConsole } from "@/components/codex-remote/codex-remote-console";
 
 export const metadata: Metadata = {
@@ -11,9 +10,7 @@ export const metadata: Metadata = {
 export default function CodexRemotePage() {
     return (
         <div className="h-dvh overflow-hidden bg-[#f5f3ee] text-stone-950 dark:bg-[#070707] dark:text-stone-100">
-            <PromptHubAuthGate>
-                <CodexRemoteConsole />
-            </PromptHubAuthGate>
+            <CodexRemoteConsole />
         </div>
     );
 }

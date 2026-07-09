@@ -706,10 +706,7 @@ export function CodexRemoteConsole() {
     }
 
     function hasDailyTurnQuota(actionLabel = "发送") {
-        if (!quotaUserId) {
-            pushMessage({ id: createId(), role: "error", title: `${actionLabel}受限`, text: "请先登录卡藏账号后再使用 Codex Remote。" });
-            return false;
-        }
+        if (!quotaUserId) return true;
         const current = readDailyUsage(quotaUserId);
         if (current >= dailyTurnLimit) {
             setDailyUsage(current);
@@ -2069,18 +2066,25 @@ export function CodexRemoteConsole() {
                         </div>
 
                         <div className="mt-5 space-y-4">
-                            <div className="rounded-2xl border border-black/10 bg-white/60 p-3 text-sm leading-6 dark:border-white/10 dark:bg-white/[0.05]">
-                                <div className="flex items-center justify-between gap-3">
-                                    <div className="min-w-0">
-                                        <div className="font-medium">卡藏账号额度</div>
-                                        <div className="truncate text-xs text-stone-500 dark:text-stone-400">{promptHubIdentity?.email || promptHubIdentity?.id || "已登录"}</div>
+                            {quotaUserId ? (
+                                <div className="rounded-2xl border border-black/10 bg-white/60 p-3 text-sm leading-6 dark:border-white/10 dark:bg-white/[0.05]">
+                                    <div className="flex items-center justify-between gap-3">
+                                        <div className="min-w-0">
+                                            <div className="font-medium">卡藏账号额度</div>
+                                            <div className="truncate text-xs text-stone-500 dark:text-stone-400">{promptHubIdentity?.email || promptHubIdentity?.id || "已登录"}</div>
+                                        </div>
+                                        <div className="shrink-0 rounded-full bg-stone-950 px-3 py-1 text-xs font-semibold text-white dark:bg-[#0A84FF]">
+                                            今日 {Math.min(dailyUsage, dailyTurnLimit)}/{dailyTurnLimit}
+                                        </div>
                                     </div>
-                                    <div className="shrink-0 rounded-full bg-stone-950 px-3 py-1 text-xs font-semibold text-white dark:bg-[#0A84FF]">
-                                        今日 {Math.min(dailyUsage, dailyTurnLimit)}/{dailyTurnLimit}
-                                    </div>
+                                    <p className="mt-2 text-xs leading-5 text-stone-500 dark:text-stone-400">当前版本先做网页侧软限制；公开运营时还需要在服务端按卡藏账号做硬限额，防止绕过前端。</p>
                                 </div>
-                                <p className="mt-2 text-xs leading-5 text-stone-500 dark:text-stone-400">当前版本先做网页侧软限制；公开运营时还需要在服务端按卡藏账号做硬限额，防止绕过前端。</p>
-                            </div>
+                            ) : (
+                                <div className="rounded-2xl border border-black/10 bg-white/60 p-3 text-sm leading-6 dark:border-white/10 dark:bg-white/[0.05]">
+                                    <div className="font-medium">自托管模式</div>
+                                    <p className="mt-1 text-xs leading-5 text-stone-500 dark:text-stone-400">这个页面只连接你自己电脑上的 Codex Remote Bridge；不消耗本站额度，也不需要先登录卡藏账号。</p>
+                                </div>
+                            )}
                             <p className="rounded-2xl border border-amber-500/20 bg-amber-500/10 px-3 py-2 text-xs leading-5 text-amber-800 dark:text-amber-100">
                                 Agent URL 是电脑上 Codex Remote Bridge 的 HTTPS 服务地址，不是画布网页地址、New API 地址或创作 Agent API。不要把 17371 端口无鉴权裸露到公网。
                             </p>

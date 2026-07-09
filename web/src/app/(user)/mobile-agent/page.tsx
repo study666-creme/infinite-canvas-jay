@@ -43,7 +43,7 @@ const queueKey = "kazang-mobile-codex:task-queue";
 const pendingRunMaxAge = 1000 * 60 * 60 * 12;
 const legacyDefaultWorkspacePath = "D:\\canvas\\infinite-canvas";
 const queueGuides = ["继续修复并验证", "跑测试并汇报结果", "提交并推送当前项目", "整理当前进度和下一步", "检查线上部署状态"];
-const mobileAgentUiVersion = "队列版 2026-07-09";
+const mobileAgentUiVersion = "队列版 2 2026-07-09";
 const defaultSettings: Settings = {
     agentUrl: "",
     token: "",
@@ -271,7 +271,7 @@ export default function MobileAgentPage() {
     const fileInputRef = useRef<HTMLInputElement>(null);
     const atBottomRef = useRef(true);
 
-    const canSend = useMemo(() => Boolean(input.trim()), [input]);
+    const canSend = useMemo(() => Boolean(input.trim() || attachments.length), [attachments.length, input]);
     const activeQueueCount = useMemo(() => queueTaskCount(queuedTasks), [queuedTasks]);
     const selectedRepo = useMemo(() => repos.find((repo) => samePath(repo.repoPath, settings.gitRepoPath)) || null, [repos, settings.gitRepoPath]);
     const groupedThreads = useMemo<ThreadGroup[]>(() => {
@@ -910,9 +910,9 @@ export default function MobileAgentPage() {
 
     const submit = async (event?: FormEvent<HTMLFormElement>) => {
         event?.preventDefault();
-        const prompt = input.trim();
-        if (!prompt) return;
         const currentAttachments = attachments;
+        const prompt = input.trim() || (currentAttachments.length ? "请根据图片继续处理当前任务。" : "");
+        if (!prompt) return;
         setInput("");
         setAttachments([]);
         if (sending || pendingPromptRef.current || activeQueueTaskIdRef.current) {
@@ -1060,13 +1060,25 @@ export default function MobileAgentPage() {
                         value={input}
                         onChange={(event) => setInput(event.target.value)}
                         onKeyDown={(event) => {
-                            if (event.key === "Enter" && !event.shiftKey) void submit();
+                            if (event.key === "Enter" && !event.shiftKey) {
+                                event.preventDefault();
+                                void submit();
+                            }
                         }}
                         rows={1}
                         placeholder={connected ? "让 Codex 继续做项目任务..." : "可以先输入，发送时会尝试连接电脑 Agent"}
                         className="max-h-36 min-h-10 flex-1 bg-transparent px-1 py-2 text-[16px] leading-6 outline-none placeholder:text-stone-400"
                     />
-                    <button type="submit" disabled={!canSend} className="grid size-10 shrink-0 place-items-center rounded-2xl bg-stone-950 text-white transition enabled:hover:scale-[1.03] disabled:opacity-35 dark:bg-white dark:text-black" aria-label={sending ? "加入任务队列" : "发送"}>
+                    <button
+                        type="button"
+                        disabled={!canSend}
+                        className="grid size-10 shrink-0 place-items-center rounded-2xl bg-stone-950 text-white transition enabled:hover:scale-[1.03] disabled:opacity-35 dark:bg-white dark:text-black"
+                        aria-label={sending ? "加入任务队列" : "发送"}
+                        onClick={(event) => {
+                            event.preventDefault();
+                            void submit();
+                        }}
+                    >
                         {sending ? <Plus className="size-4" /> : <SendHorizontal className="size-4" />}
                     </button>
                 </div>
@@ -1169,17 +1181,17 @@ export default function MobileAgentPage() {
                             </button>
                         </div>
                         <div className="mt-4 flex gap-2">
-                            <input value={threadSearch} onChange={(event) => setThreadSearch(event.target.value)} placeholder="搜索当前工作区会话" className="h-11 min-w-0 flex-1 rounded-xl border border-black/10 bg-white px-3 text-stone-950 outline-none placeholder:text-stone-400 focus:border-stone-500 dark:border-white/10 dark:bg-white/[0.06] dark:text-stone-100" />
-                            <button type="button" className="grid size-11 place-items-center rounded-xl border border-black/10 bg-white text-stone-600 disabled:opacity-45 dark:border-white/10 dark:bg-white/[0.06] dark:text-stone-300" onClick={() => void refreshThreads()} disabled={threadsLoading || !settings.agentUrl.trim() || !settings.token.trim()} aria-label="刷新会话">
+                            <input value={threadSearch} onChange={(event) => setThreadSearch(event.target.value)} placeholder="搜索当前工作区会话" className="h-11 min-w-0 flex-1 rounded-xl border border-black/10 bg-white px-3 text-stone-950 outline-none placeholder:text-stone-400 focus:border-stone-500 dark:border-white/10 dark:bg-[#181818] dark:text-stone-100" />
+                            <button type="button" className="grid size-11 place-items-center rounded-xl border border-black/10 bg-white text-stone-600 disabled:opacity-45 dark:border-white/10 dark:bg-[#181818] dark:text-stone-300" onClick={() => void refreshThreads()} disabled={threadsLoading || !settings.agentUrl.trim() || !settings.token.trim()} aria-label="刷新会话">
                                 <RefreshCcw className={`size-4 ${threadsLoading ? "animate-spin" : ""}`} />
                             </button>
                         </div>
                         <div className="mt-3 grid grid-cols-2 gap-2">
-                            <button type="button" className="inline-flex h-11 items-center justify-center gap-2 rounded-xl border border-black/10 bg-white text-sm font-medium disabled:opacity-45 dark:border-white/10 dark:bg-white/[0.06]" onClick={() => void connect()}>
+                            <button type="button" className="inline-flex h-11 items-center justify-center gap-2 rounded-xl border border-black/10 bg-white text-sm font-medium disabled:opacity-45 dark:border-white/10 dark:bg-[#181818] dark:text-stone-100" onClick={() => void connect()}>
                                 <PlugZap className="size-4" />
                                 连接
                             </button>
-                            <button type="button" className="inline-flex h-11 items-center justify-center gap-2 rounded-xl border border-black/10 bg-white text-sm font-medium disabled:opacity-45 dark:border-white/10 dark:bg-white/[0.06]" onClick={() => void newThread()} disabled={!connected}>
+                            <button type="button" className="inline-flex h-11 items-center justify-center gap-2 rounded-xl border border-black/10 bg-white text-sm font-medium disabled:opacity-45 dark:border-white/10 dark:bg-[#181818] dark:text-stone-100" onClick={() => void newThread()} disabled={!connected}>
                                 <RotateCcw className="size-4" />
                                 新对话
                             </button>
@@ -1203,8 +1215,8 @@ export default function MobileAgentPage() {
                                                 className={[
                                                     "block w-full rounded-2xl border px-3 py-3 text-left transition",
                                                     thread.id === activeThreadId
-                                                        ? "border-sky-500/45 bg-sky-500/12 text-stone-950 shadow-[0_10px_28px_rgba(14,165,233,.16)] dark:border-sky-400/45 dark:bg-sky-400/12 dark:text-stone-50"
-                                                        : "border-black/10 bg-white/70 text-stone-900 hover:bg-white dark:border-white/10 dark:bg-white/[0.05] dark:text-stone-100 dark:hover:bg-white/[0.08]",
+                                                        ? "border-sky-500/45 bg-sky-500/12 text-stone-950 shadow-[0_10px_28px_rgba(14,165,233,.16)] dark:border-sky-400/45 dark:bg-[#0d2631] dark:text-stone-50"
+                                                        : "border-black/10 bg-white/70 text-stone-900 hover:bg-white dark:border-white/10 dark:bg-[#151515] dark:text-stone-100 dark:hover:bg-[#1d1d1d]",
                                                 ].join(" ")}
                                                 onClick={() => void selectThread(thread)}
                                             >

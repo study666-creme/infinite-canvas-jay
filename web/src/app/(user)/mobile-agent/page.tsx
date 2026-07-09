@@ -43,6 +43,7 @@ const queueKey = "kazang-mobile-codex:task-queue";
 const pendingRunMaxAge = 1000 * 60 * 60 * 12;
 const legacyDefaultWorkspacePath = "D:\\canvas\\infinite-canvas";
 const queueGuides = ["继续修复并验证", "跑测试并汇报结果", "提交并推送当前项目", "整理当前进度和下一步", "检查线上部署状态"];
+const mobileAgentUiVersion = "队列版 2026-07-09";
 const defaultSettings: Settings = {
     agentUrl: "",
     token: "",
@@ -946,6 +947,7 @@ export default function MobileAgentPage() {
                     <div className="flex items-center gap-2 text-base font-semibold leading-6">
                         <TerminalSquare className="size-4" />
                         移动 Codex
+                        <span className="rounded-full border border-black/10 bg-black/[0.04] px-2 py-0.5 text-[11px] font-medium leading-4 text-stone-500 dark:border-white/10 dark:bg-white/[0.06] dark:text-stone-400">{mobileAgentUiVersion}</span>
                     </div>
                     <div className="truncate text-xs text-stone-500 dark:text-stone-400">{workspace?.workspacePath || "未连接工作目录"}</div>
                 </div>

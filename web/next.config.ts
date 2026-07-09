@@ -50,5 +50,16 @@ export default function nextConfig(phase: string): NextConfig {
             NEXT_PUBLIC_APP_VERSION: localVersion,
             NEXT_PUBLIC_APP_RELEASES: JSON.stringify(releases),
         },
+        async headers() {
+            const mobileAgentCacheHeaders = [
+                { key: "Cache-Control", value: "no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0, s-maxage=0" },
+                { key: "Pragma", value: "no-cache" },
+                { key: "Expires", value: "0" },
+            ];
+            return [
+                { source: "/mobile-agent", headers: mobileAgentCacheHeaders },
+                { source: "/mobile-agent/:path*", headers: mobileAgentCacheHeaders },
+            ];
+        },
     };
 }

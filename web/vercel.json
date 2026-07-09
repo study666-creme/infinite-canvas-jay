@@ -1,5 +1,6 @@
 {
-  "framework": "nextjs",
-  "installCommand": "npm ci --legacy-peer-deps || npm install --legacy-peer-deps",
-  "buildCommand": "npm run build"
+  "env": {
+    "NEXT_PUBLIC_CODEX_REMOTE_DEMO_MODE": "1",
+    "NEXT_PUBLIC_CODEX_REMOTE_DAILY_LIMIT": "10"
+  }
 }

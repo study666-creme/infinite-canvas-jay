@@ -1,7 +1,7 @@
 "use client";
 
 import { ChangeEvent, FormEvent, useEffect, useMemo, useRef, useState } from "react";
-import { CheckCircle2, ChevronDown, Clock3, Copy, FolderGit2, GitBranch, ImagePlus, ListTodo, LoaderCircle, MessageSquareText, PlugZap, Plus, RefreshCcw, RotateCcw, SendHorizontal, Settings2, TerminalSquare, Trash2, UploadCloud, X } from "lucide-react";
+import { CheckCircle2, ChevronDown, Clock3, Copy, FolderGit2, GitBranch, ImagePlus, ListTodo, LoaderCircle, Menu, Pencil, PlugZap, Plus, RefreshCcw, RotateCcw, SendHorizontal, Settings2, TerminalSquare, Trash2, UploadCloud, X } from "lucide-react";
 
 type MessageRole = "user" | "assistant" | "tool" | "error" | "status";
 type MobileMessage = { id: string; role: MessageRole; title?: string; text: string; streamId?: string };
@@ -36,12 +36,14 @@ type QueuedTaskStatus = "queued" | "running" | "done" | "failed";
 type QueuedTask = { id: string; text: string; attachments: AgentAttachment[]; createdAt: number; status: QueuedTaskStatus; error?: string };
 type ThreadGroup = { key: string; label: string; path: string; threads: ThreadSummary[] };
 type ProjectPreset = { id: string; label: string; canvasId: string; workspacePath: string; threadId: string; gitRepoPath?: string };
+type ProjectDraft = { label: string; canvasId: string; workspacePath: string; threadId: string; gitRepoPath: string };
 
 const settingsKey = "kazang-mobile-codex:settings";
 const messagesKey = "kazang-mobile-codex:messages";
 const pendingRunKey = "kazang-mobile-codex:pending-run";
 const queueKey = "kazang-mobile-codex:task-queue";
 const activeProjectKey = "kazang-mobile-codex:active-project";
+const projectsKey = "kazang-mobile-codex:projects";
 const pendingRunMaxAge = 1000 * 60 * 60 * 12;
 const legacyDefaultWorkspacePath = "D:\\canvas\\infinite-canvas";
 const queueGuides = ["继续修复并验证", "跑测试并汇报结果", "提交并推送当前项目", "整理当前进度和下一步", "检查线上部署状态"];
@@ -61,6 +63,7 @@ const defaultSettings: Settings = {
     model: "",
     effort: "",
 };
+const emptyProjectDraft: ProjectDraft = { label: "", canvasId: "", workspacePath: "", threadId: "", gitRepoPath: "" };
 
 function createId() {
     return typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
@@ -194,14 +197,37 @@ function samePath(a: string, b: string) {
     return a.trim().replaceAll("/", "\\").toLowerCase() === b.trim().replaceAll("/", "\\").toLowerCase();
 }
 
-function findProjectPreset(value: Partial<Settings>, currentWorkspace?: Workspace | null) {
+function normalizeProjectList(items: ProjectPreset[]) {
+    const seen = new Set<string>();
+    return items
+        .filter((item) => item?.id && item?.label)
+        .map((item) => ({
+            id: String(item.id),
+            label: String(item.label),
+            canvasId: normalizeCanvasId(item.canvasId || item.id),
+            workspacePath: item.workspacePath || "",
+            threadId: normalizeThreadId(item.threadId || ""),
+            gitRepoPath: item.gitRepoPath || "",
+        }))
+        .filter((item) => {
+            if (seen.has(item.id)) return false;
+            seen.add(item.id);
+            return true;
+        });
+}
+
+function projectCanvasIdFromDraft(draft: ProjectDraft, id: string) {
+    return normalizeCanvasId(draft.canvasId || draft.threadId || id);
+}
+
+function findProjectPreset(projects: ProjectPreset[], value: Partial<Settings>, currentWorkspace?: Workspace | null) {
     const canvasId = normalizeCanvasId(value.canvasId || "");
     const threadId = normalizeThreadId(value.threadId || "");
     const workspacePath = value.workspacePath || currentWorkspace?.workspacePath || "";
     return (
-        projectPresets.find((project) => project.canvasId === canvasId) ||
-        projectPresets.find((project) => threadId === project.threadId) ||
-        projectPresets.find((project) => workspacePath && samePath(workspacePath, project.workspacePath)) ||
+        projects.find((project) => project.canvasId === canvasId) ||
+        projects.find((project) => threadId && threadId === project.threadId) ||
+        projects.find((project) => workspacePath && project.workspacePath && samePath(workspacePath, project.workspacePath)) ||
         null
     );
 }
@@ -272,7 +298,11 @@ export default function MobileAgentPage() {
     const [pushing, setPushing] = useState(false);
     const [settingsOpen, setSettingsOpen] = useState(false);
     const [threadsOpen, setThreadsOpen] = useState(false);
+    const [projects, setProjects] = useState<ProjectPreset[]>(projectPresets);
     const [activeProjectId, setActiveProjectId] = useState("");
+    const [projectFormOpen, setProjectFormOpen] = useState(false);
+    const [editingProjectId, setEditingProjectId] = useState("");
+    const [projectDraft, setProjectDraft] = useState<ProjectDraft>(emptyProjectDraft);
     const [workspace, setWorkspace] = useState<Workspace | null>(null);
     const [activeThreadId, setActiveThreadId] = useState("");
     const [copiedId, setCopiedId] = useState("");
@@ -310,8 +340,8 @@ export default function MobileAgentPage() {
     const activeQueueCount = useMemo(() => queueTaskCount(queuedTasks), [queuedTasks]);
     const visibleQueueTasks = useMemo(() => queuedTasks.filter((task) => task.status !== "done"), [queuedTasks]);
     const selectedRepo = useMemo(() => repos.find((repo) => samePath(repo.repoPath, settings.gitRepoPath)) || null, [repos, settings.gitRepoPath]);
-    const detectedProject = useMemo(() => findProjectPreset(settings, workspace), [settings.canvasId, settings.threadId, settings.workspacePath, workspace]);
-    const activeProject = useMemo(() => detectedProject || projectPresets.find((project) => project.id === activeProjectId) || null, [activeProjectId, detectedProject]);
+    const detectedProject = useMemo(() => findProjectPreset(projects, settings, workspace), [projects, settings.canvasId, settings.threadId, settings.workspacePath, workspace]);
+    const activeProject = useMemo(() => detectedProject || projects.find((project) => project.id === activeProjectId) || null, [activeProjectId, detectedProject, projects]);
     const groupedThreads = useMemo<ThreadGroup[]>(() => {
         const groups = new Map<string, ThreadGroup>();
         for (const thread of threads) {
@@ -326,9 +356,11 @@ export default function MobileAgentPage() {
 
     useEffect(() => {
         const loadedSettings = sanitizeSettings(readJson<Partial<Settings>>(localStorage.getItem(settingsKey), {}));
+        const storedProjects = localStorage.getItem(projectsKey);
+        const initialProjects = storedProjects === null ? projectPresets : normalizeProjectList(readJson<ProjectPreset[]>(storedProjects, []));
         const savedProjectId = localStorage.getItem(activeProjectKey) || "";
-        const matchedProject = findProjectPreset(loadedSettings);
-        const savedProject = projectPresets.find((project) => project.id === savedProjectId) || null;
+        const matchedProject = findProjectPreset(initialProjects, loadedSettings);
+        const savedProject = initialProjects.find((project) => project.id === savedProjectId) || null;
         const initialProject = matchedProject || savedProject;
         const initialSettings = initialProject && !matchedProject
             ? sanitizeSettings({
@@ -341,6 +373,7 @@ export default function MobileAgentPage() {
             : loadedSettings;
         settingsRef.current = initialSettings;
         setSettings(initialSettings);
+        setProjects(initialProjects);
         setActiveProjectId(initialProject?.id || "");
         setMessages(readStoredMessages(normalizeCanvasId(initialSettings.canvasId)));
         setQueuedTasks(normalizeQueue(readJson<QueuedTask[]>(localStorage.getItem(queueKey), [])));
@@ -376,10 +409,14 @@ export default function MobileAgentPage() {
     }, [activeProjectId, hydrated]);
 
     useEffect(() => {
+        if (hydrated) localStorage.setItem(projectsKey, JSON.stringify(projects));
+    }, [hydrated, projects]);
+
+    useEffect(() => {
         if (!hydrated) return;
-        const matchedProject = findProjectPreset(settings, workspace);
+        const matchedProject = findProjectPreset(projects, settings, workspace);
         if (matchedProject && matchedProject.id !== activeProjectId) setActiveProjectId(matchedProject.id);
-    }, [activeProjectId, hydrated, settings, workspace]);
+    }, [activeProjectId, hydrated, projects, settings, workspace]);
 
     useEffect(() => {
         if (!hydrated) return;
@@ -949,6 +986,69 @@ export default function MobileAgentPage() {
         }
     };
 
+    function startAddProject() {
+        setEditingProjectId("");
+        setProjectDraft(emptyProjectDraft);
+        setProjectFormOpen(true);
+    }
+
+    function startEditProject(project: ProjectPreset) {
+        setEditingProjectId(project.id);
+        setProjectDraft({
+            label: project.label,
+            canvasId: project.canvasId,
+            workspacePath: project.workspacePath,
+            threadId: project.threadId,
+            gitRepoPath: project.gitRepoPath || "",
+        });
+        setProjectFormOpen(true);
+    }
+
+    function saveProject() {
+        const label = projectDraft.label.trim();
+        const workspacePath = projectDraft.workspacePath.trim();
+        if (!label) {
+            setThreadError("请填写项目名称。");
+            return;
+        }
+        if (!workspacePath) {
+            setThreadError("请填写 Workspace 路径。");
+            return;
+        }
+        const id = editingProjectId || `custom-${createId()}`;
+        const nextProject: ProjectPreset = {
+            id,
+            label,
+            canvasId: projectCanvasIdFromDraft(projectDraft, id),
+            workspacePath,
+            threadId: normalizeThreadId(projectDraft.threadId),
+            gitRepoPath: projectDraft.gitRepoPath.trim(),
+        };
+        setProjects((items) => {
+            const next = editingProjectId ? items.map((item) => (item.id === editingProjectId ? nextProject : item)) : [...items, nextProject];
+            return normalizeProjectList(next);
+        });
+        setThreadError("");
+        setProjectFormOpen(false);
+        setEditingProjectId("");
+        setProjectDraft(emptyProjectDraft);
+        if (!editingProjectId || activeProjectId === editingProjectId) void selectProject(nextProject);
+    }
+
+    function deleteProject(project: ProjectPreset) {
+        if (sending || pendingPromptRef.current || activeQueueTaskIdRef.current) {
+            pushMessage({ id: createId(), role: "status", text: "当前 Codex 任务还在执行，完成后再删除项目。" });
+            return;
+        }
+        const nextProjects = projects.filter((item) => item.id !== project.id);
+        setProjects(nextProjects);
+        if (activeProjectId === project.id) {
+            const nextProject = nextProjects[0];
+            setActiveProjectId(nextProject?.id || "");
+            if (nextProject) void selectProject(nextProject);
+        }
+    }
+
     const selectThread = async (thread: ThreadSummary) => {
         if (!thread.id) return;
         try {
@@ -1132,6 +1232,9 @@ export default function MobileAgentPage() {
     return (
         <main className="flex h-full flex-col bg-[#f5f3ee] text-stone-950 dark:bg-[#070707] dark:text-stone-100">
             <header className="flex shrink-0 items-center justify-between gap-3 border-b border-black/10 bg-white/60 px-4 py-3 backdrop-blur-xl dark:border-white/10 dark:bg-white/[0.04]">
+                <button type="button" className="grid size-9 shrink-0 place-items-center rounded-xl text-stone-500 transition hover:bg-black/[0.04] hover:text-stone-950 dark:text-stone-400 dark:hover:bg-sky-400/10 dark:hover:text-sky-100" onClick={() => { setThreadsOpen(true); void refreshThreads(true); }} aria-label="打开侧边栏" title="打开侧边栏">
+                    <Menu className="size-4" />
+                </button>
                 <div className="min-w-0 flex-1">
                     <div className="flex min-w-0 items-center gap-2 text-base font-semibold leading-6">
                         <TerminalSquare className="size-4 shrink-0" />
@@ -1140,9 +1243,6 @@ export default function MobileAgentPage() {
                     <div className="truncate text-xs text-stone-500 dark:text-stone-400">{activeProject ? `${activeProject.label} · ${workspace?.workspacePath || activeProject.workspacePath}` : workspace?.workspacePath || "未连接工作目录"}</div>
                 </div>
                 <div className="flex shrink-0 items-center gap-1">
-                    <button type="button" className="grid size-9 place-items-center rounded-xl text-stone-500 transition hover:bg-black/[0.04] hover:text-stone-950 dark:text-stone-400 dark:hover:bg-sky-400/10 dark:hover:text-sky-100" onClick={() => { setThreadsOpen(true); void refreshThreads(true); }} aria-label="会话" title="会话">
-                        <MessageSquareText className="size-4" />
-                    </button>
                     <button type="button" className="grid size-9 place-items-center rounded-xl text-stone-500 transition hover:bg-black/[0.04] hover:text-stone-950 dark:text-stone-400 dark:hover:bg-sky-400/10 dark:hover:text-sky-100" onClick={() => void connect()} aria-label="连接" title="连接">
                         {connecting ? <LoaderCircle className="size-4 animate-spin" /> : connected ? <CheckCircle2 className="size-4" /> : <PlugZap className="size-4" />}
                     </button>
@@ -1345,11 +1445,16 @@ export default function MobileAgentPage() {
                             <div className="flex items-center justify-between gap-3">
                                 <div>
                                     <h2 className="text-lg font-semibold">项目与会话</h2>
-                                    <p className="mt-1 text-xs leading-5 text-stone-500 dark:text-stone-400">每个项目使用独立隔离 ID、Workspace 和默认 Codex 会话。</p>
+                                    <p className="mt-1 text-xs leading-5 text-stone-500 dark:text-stone-400">选择项目、继续会话或新增自己的入口。</p>
                                 </div>
-                                <button type="button" className="grid size-9 place-items-center rounded-xl text-stone-500 transition hover:bg-black/[0.04] hover:text-stone-950 dark:hover:bg-sky-400/10 dark:hover:text-sky-100" onClick={() => setThreadsOpen(false)} aria-label="关闭">
-                                    <X className="size-4" />
-                                </button>
+                                <div className="flex shrink-0 items-center gap-1">
+                                    <button type="button" className="grid size-9 place-items-center rounded-xl text-stone-500 transition hover:bg-black/[0.04] hover:text-stone-950 dark:hover:bg-sky-400/10 dark:hover:text-sky-100" onClick={startAddProject} aria-label="新增项目">
+                                        <Plus className="size-4" />
+                                    </button>
+                                    <button type="button" className="grid size-9 place-items-center rounded-xl text-stone-500 transition hover:bg-black/[0.04] hover:text-stone-950 dark:hover:bg-sky-400/10 dark:hover:text-sky-100" onClick={() => setThreadsOpen(false)} aria-label="关闭">
+                                        <X className="size-4" />
+                                    </button>
+                                </div>
                             </div>
                             <div className="mt-4 flex gap-2">
                                 <input value={threadSearch} onChange={(event) => setThreadSearch(event.target.value)} placeholder="搜索当前项目会话" className="h-11 min-w-0 flex-1 rounded-xl border border-black/10 bg-white px-3 text-stone-950 outline-none placeholder:text-stone-400 focus:border-stone-500 dark:border-white/10 dark:bg-[#181818] dark:text-stone-100" />
@@ -1371,47 +1476,101 @@ export default function MobileAgentPage() {
                         </div>
 
                         <div className="min-h-0 flex-1 overflow-y-auto p-4">
-                            <div className="mb-2 px-1 text-xs font-semibold uppercase tracking-[0.08em] text-stone-500 dark:text-stone-400">项目分区</div>
+                            {projectFormOpen ? (
+                                <div className="mb-4 rounded-2xl border border-black/10 bg-white/70 p-3 dark:border-white/10 dark:bg-white/[0.05]">
+                                    <div className="mb-3 flex items-center justify-between gap-2">
+                                        <div className="text-sm font-semibold">{editingProjectId ? "编辑项目" : "新增项目"}</div>
+                                        <button type="button" className="grid size-8 place-items-center rounded-xl text-stone-500 transition hover:bg-black/[0.04] hover:text-stone-950 dark:hover:bg-sky-400/10 dark:hover:text-sky-100" onClick={() => { setProjectFormOpen(false); setEditingProjectId(""); setProjectDraft(emptyProjectDraft); }} aria-label="取消">
+                                            <X className="size-4" />
+                                        </button>
+                                    </div>
+                                    <div className="space-y-3">
+                                        <label className="block">
+                                            <span className="text-xs font-medium text-stone-500 dark:text-stone-400">名称</span>
+                                            <input value={projectDraft.label} onChange={(event) => setProjectDraft((value) => ({ ...value, label: event.target.value }))} placeholder="我的项目" className="mt-1 h-10 w-full rounded-xl border border-black/10 bg-white px-3 text-sm outline-none focus:border-stone-500 dark:border-white/10 dark:bg-[#181818]" />
+                                        </label>
+                                        <label className="block">
+                                            <span className="text-xs font-medium text-stone-500 dark:text-stone-400">Workspace</span>
+                                            <input value={projectDraft.workspacePath} onChange={(event) => setProjectDraft((value) => ({ ...value, workspacePath: event.target.value }))} placeholder="D:\project" className="mt-1 h-10 w-full rounded-xl border border-black/10 bg-white px-3 text-sm outline-none focus:border-stone-500 dark:border-white/10 dark:bg-[#181818]" />
+                                        </label>
+                                        <label className="block">
+                                            <span className="text-xs font-medium text-stone-500 dark:text-stone-400">Codex Thread ID</span>
+                                            <input value={projectDraft.threadId} onChange={(event) => setProjectDraft((value) => ({ ...value, threadId: event.target.value }))} placeholder="codex://threads/019f..." className="mt-1 h-10 w-full rounded-xl border border-black/10 bg-white px-3 text-sm outline-none focus:border-stone-500 dark:border-white/10 dark:bg-[#181818]" />
+                                        </label>
+                                        <div className="grid grid-cols-2 gap-2">
+                                            <label className="block">
+                                                <span className="text-xs font-medium text-stone-500 dark:text-stone-400">Canvas ID</span>
+                                                <input value={projectDraft.canvasId} onChange={(event) => setProjectDraft((value) => ({ ...value, canvasId: event.target.value }))} placeholder="自动" className="mt-1 h-10 w-full rounded-xl border border-black/10 bg-white px-3 text-sm outline-none focus:border-stone-500 dark:border-white/10 dark:bg-[#181818]" />
+                                            </label>
+                                            <label className="block">
+                                                <span className="text-xs font-medium text-stone-500 dark:text-stone-400">Git Repo</span>
+                                                <input value={projectDraft.gitRepoPath} onChange={(event) => setProjectDraft((value) => ({ ...value, gitRepoPath: event.target.value }))} placeholder="可留空" className="mt-1 h-10 w-full rounded-xl border border-black/10 bg-white px-3 text-sm outline-none focus:border-stone-500 dark:border-white/10 dark:bg-[#181818]" />
+                                            </label>
+                                        </div>
+                                    </div>
+                                    <button type="button" className="mt-3 inline-flex h-10 w-full items-center justify-center gap-2 rounded-xl bg-stone-950 px-4 text-sm font-medium text-white transition hover:bg-stone-800 dark:bg-[#0A84FF] dark:hover:bg-[#2F9BFF]" onClick={saveProject}>
+                                        <CheckCircle2 className="size-4" />
+                                        保存
+                                    </button>
+                                </div>
+                            ) : null}
+
+                            <div className="mb-2 flex items-center justify-between gap-2 px-1">
+                                <div className="text-xs font-semibold uppercase tracking-[0.08em] text-stone-500 dark:text-stone-400">项目</div>
+                                <button type="button" className="inline-flex h-8 items-center gap-1 rounded-xl px-2 text-xs font-medium text-stone-500 transition hover:bg-black/[0.04] hover:text-stone-950 dark:text-stone-400 dark:hover:bg-sky-400/10 dark:hover:text-sky-100" onClick={startAddProject}>
+                                    <Plus className="size-3.5" />
+                                    新增
+                                </button>
+                            </div>
                             <div className="space-y-3">
-                                {projectPresets.map((project) => {
+                                {projects.map((project) => {
                                     const projectActive = activeProject?.id === project.id;
                                     const switchDisabled = sending || Boolean(pendingPromptRef.current);
                                     return (
                                         <div key={project.id} className="space-y-2">
-                                            <button
-                                                type="button"
+                                            <div
                                                 className={[
-                                                    "block w-full rounded-xl border px-3 py-3 text-left transition disabled:opacity-55",
+                                                    "flex gap-2 rounded-xl border p-2 transition",
                                                     projectActive
                                                         ? "border-sky-500/45 bg-sky-500/12 text-stone-950 shadow-[0_10px_28px_rgba(14,165,233,.14)] dark:border-sky-400/45 dark:bg-[#0d2631] dark:text-stone-50"
                                                         : "border-black/10 bg-white/70 text-stone-900 hover:border-sky-300/45 hover:bg-sky-50 dark:border-white/10 dark:bg-[#151515] dark:text-stone-100 dark:hover:border-sky-400/30 dark:hover:bg-sky-400/10",
                                                 ].join(" ")}
-                                                onClick={() => void selectProject(project)}
-                                                disabled={switchDisabled}
                                             >
-                                                <div className="flex items-center justify-between gap-2">
-                                                    <span className="text-sm font-semibold">{project.label}</span>
-                                                    {projectActive ? <span className="rounded-full bg-sky-500/15 px-2 py-0.5 text-[11px] font-medium text-sky-700 dark:text-sky-100">当前</span> : null}
+                                                <button type="button" className="min-w-0 flex-1 text-left disabled:opacity-55" onClick={() => void selectProject(project)} disabled={switchDisabled}>
+                                                    <div className="flex items-center justify-between gap-2">
+                                                        <span className="truncate text-sm font-semibold">{project.label}</span>
+                                                        {projectActive ? <span className="shrink-0 rounded-full bg-sky-500/15 px-2 py-0.5 text-[11px] font-medium text-sky-700 dark:text-sky-100">当前</span> : null}
+                                                    </div>
+                                                    <div className="mt-1 truncate text-xs opacity-65">{project.workspacePath}</div>
+                                                    <div className="mt-1 truncate text-[11px] opacity-50">{project.threadId || "未指定默认会话"}</div>
+                                                </button>
+                                                <div className="flex shrink-0 flex-col gap-1">
+                                                    <button type="button" className="grid size-8 place-items-center rounded-xl text-stone-400 transition hover:bg-black/[0.04] hover:text-stone-950 dark:hover:bg-sky-400/10 dark:hover:text-sky-100" onClick={() => startEditProject(project)} aria-label="编辑项目">
+                                                        <Pencil className="size-3.5" />
+                                                    </button>
+                                                    <button type="button" className="grid size-8 place-items-center rounded-xl text-stone-400 transition hover:bg-black/[0.04] hover:text-red-600 disabled:opacity-30 dark:hover:bg-red-400/10 dark:hover:text-red-100" onClick={() => deleteProject(project)} disabled={switchDisabled} aria-label="删除项目">
+                                                        <Trash2 className="size-3.5" />
+                                                    </button>
                                                 </div>
-                                                <div className="mt-1 truncate text-xs opacity-65">{project.workspacePath}</div>
-                                                <div className="mt-1 truncate text-[11px] opacity-50">{project.threadId}</div>
-                                            </button>
+                                            </div>
 
                                             {projectActive ? (
                                                 <div className="ml-3 space-y-2 border-l border-black/10 pl-3 dark:border-white/10">
-                                                    <button
-                                                        type="button"
-                                                        className={[
-                                                            "block w-full rounded-xl border px-3 py-2.5 text-left transition",
-                                                            project.threadId === activeThreadId
-                                                                ? "border-sky-500/35 bg-sky-500/10 text-stone-950 dark:border-sky-400/35 dark:bg-sky-400/10 dark:text-stone-50"
-                                                                : "border-black/10 bg-white/60 text-stone-800 hover:bg-white dark:border-white/10 dark:bg-white/[0.05] dark:text-stone-200 dark:hover:bg-sky-400/10",
-                                                        ].join(" ")}
-                                                        onClick={() => void selectProject(project)}
-                                                    >
-                                                        <div className="text-sm font-medium leading-5">固定会话</div>
-                                                        <div className="mt-1 truncate text-[11px] opacity-55">{project.threadId}</div>
-                                                    </button>
+                                                    {project.threadId ? (
+                                                        <button
+                                                            type="button"
+                                                            className={[
+                                                                "block w-full rounded-xl border px-3 py-2.5 text-left transition",
+                                                                project.threadId === activeThreadId
+                                                                    ? "border-sky-500/35 bg-sky-500/10 text-stone-950 dark:border-sky-400/35 dark:bg-sky-400/10 dark:text-stone-50"
+                                                                    : "border-black/10 bg-white/60 text-stone-800 hover:bg-white dark:border-white/10 dark:bg-white/[0.05] dark:text-stone-200 dark:hover:bg-sky-400/10",
+                                                            ].join(" ")}
+                                                            onClick={() => void selectProject(project)}
+                                                        >
+                                                            <div className="text-sm font-medium leading-5">默认会话</div>
+                                                            <div className="mt-1 truncate text-[11px] opacity-55">{project.threadId}</div>
+                                                        </button>
+                                                    ) : null}
 
                                                     {groupedThreads.map((group) => {
                                                         const groupThreads = group.threads.filter((thread) => thread.id !== project.threadId);
@@ -1451,6 +1610,7 @@ export default function MobileAgentPage() {
                                         </div>
                                     );
                                 })}
+                                {!projects.length ? <div className="rounded-xl bg-black/[0.04] px-3 py-4 text-center text-xs leading-5 text-stone-500 dark:bg-white/[0.05] dark:text-stone-400">还没有项目。点“新增”添加一个 Workspace。</div> : null}
                             </div>
                         </div>
                     </section>

@@ -1448,9 +1448,18 @@ export default function MobileAgentPage() {
                         {pendingGuide ? (
                             <div className="mt-3 rounded-2xl border border-sky-400/25 bg-sky-500/[0.08] p-3 text-stone-900 shadow-[inset_0_1px_0_rgba(255,255,255,.45)] dark:border-sky-300/20 dark:bg-sky-300/[0.08] dark:text-stone-100">
                                 <div className="flex items-start justify-between gap-3">
-                                    <div className="min-w-0">
+                                    <div className="min-w-0 flex-1">
                                         <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-sky-700 dark:text-sky-200">待确认引导</div>
-                                        <div className="mt-1 line-clamp-3 break-words text-sm leading-5">{pendingGuide.text}</div>
+                                        <div className="mt-1 flex items-start gap-2">
+                                            <div className="min-w-0 flex-1 line-clamp-3 break-words text-sm leading-5">{pendingGuide.text}</div>
+                                            <button
+                                                type="button"
+                                                className="mt-0.5 shrink-0 rounded-full bg-[#0A84FF] px-2.5 py-1 text-xs font-semibold text-white shadow-[0_6px_18px_rgba(10,132,255,.24)] transition hover:brightness-105 active:scale-95"
+                                                onClick={() => confirmPendingGuide()}
+                                            >
+                                                引导
+                                            </button>
+                                        </div>
                                         {pendingGuide.attachments.length ? <div className="mt-1 text-xs text-stone-500 dark:text-stone-300">{pendingGuide.attachments.length} 张图片</div> : null}
                                     </div>
                                     <button
@@ -1460,16 +1469,6 @@ export default function MobileAgentPage() {
                                         onClick={clearPendingGuide}
                                     >
                                         <X className="size-4" />
-                                    </button>
-                                </div>
-                                <div className="mt-3 flex flex-wrap gap-2">
-                                    <button
-                                        type="button"
-                                        className="inline-flex items-center gap-1.5 rounded-full bg-[#0A84FF] px-3 py-1.5 text-xs font-semibold text-white shadow-[0_8px_22px_rgba(10,132,255,.28)] transition hover:brightness-105 active:scale-95"
-                                        onClick={() => confirmPendingGuide()}
-                                    >
-                                        <CheckCircle2 className="size-3.5" />
-                                        作为引导发送
                                     </button>
                                 </div>
                             </div>

@@ -178,6 +178,10 @@ function codexModelSettings(settings: Settings) {
     };
 }
 
+function shouldChooseWorkspaceAfterConnect(settings: Settings) {
+    return normalizeCanvasId(settings.canvasId) === "default" && !settings.workspacePath.trim() && !normalizeThreadId(settings.threadId);
+}
+
 function workspaceSearchParams(workspaceId: string, extra: Record<string, string> = {}) {
     return new URLSearchParams({ workspaceId, canvasId: workspaceId, ...extra });
 }
@@ -1070,10 +1074,11 @@ export function CodexRemoteConsole() {
             const data = await agentFetch<{ projects?: ProjectPreset[]; data?: ThreadSummary[] }>(`/agent/codex/workspaces?${query.toString()}`);
             const discoveredProjects = normalizeProjectList(data.projects || []);
             const discoveredThreads = data.data || [];
+            const mergedProjects = mergeProjectLists(projects, discoveredProjects);
             setThreads(discoveredThreads);
-            setProjects((items) => mergeProjectLists(items, discoveredProjects));
+            setProjects(mergedProjects);
             if (!quiet) pushMessage({ id: createId(), role: "status", text: discoveredProjects.length ? `已从电脑发现 ${discoveredProjects.length} 个 Codex 工作区。` : "没有发现新的 Codex 工作区。" });
-            return discoveredProjects;
+            return mergedProjects;
         } catch (error) {
             const message = error instanceof Error ? error.message : String(error);
             const fallbackMessage = isAgentRouteNotFound(message)
@@ -1260,6 +1265,9 @@ export function CodexRemoteConsole() {
                 currentWorkspace = data.workspace || null;
             }
             const nextThreadId = threadId || currentWorkspace?.activeThreadId || "";
+            const projectChoiceNeeded = !options.syncOnly && shouldChooseWorkspaceAfterConnect(settingsRef.current);
+            const discoveredProjects = !options.syncOnly ? await refreshWorkspaceProjects(true) : [];
+            const showProjectChooser = projectChoiceNeeded && discoveredProjects.length > 0;
             setWorkspace(currentWorkspace);
             activeThreadIdRef.current = nextThreadId;
             setActiveThreadId(nextThreadId);
@@ -1267,12 +1275,19 @@ export function CodexRemoteConsole() {
             setConnected(true);
             setConnecting(false);
             setConnectionStatus("connected");
-            if (!options.silent) setConnectionMessage(nextThreadId && !options.syncOnly ? "已连接，正在同步会话..." : "已连接电脑 Codex");
+            if (!options.silent) setConnectionMessage(showProjectChooser ? "已连接，请选择要继续的项目" : nextThreadId && !options.syncOnly ? "已连接，正在同步会话..." : "已连接电脑 Codex");
             if (!options.quiet) pushMessage({ id: createId(), role: "status", text: "已连接电脑 Codex" });
             if (!options.syncOnly) {
                 void refreshGitRepos(true);
-                void refreshThreads(true);
-                if (nextThreadId && !options.quiet) {
+                if (showProjectChooser) {
+                    setSettingsOpen(false);
+                    setThreadsOpen(true);
+                    setTemporaryStatus("已发现电脑上的项目，请选择要继续的会话。", true);
+                    if (!options.quiet) pushMessage({ id: createId(), role: "status", text: "已发现电脑上的项目，已打开项目列表。" });
+                } else {
+                    void refreshThreads(true);
+                }
+                if (!showProjectChooser && nextThreadId && !options.quiet) {
                     void syncThreadInBackground(nextThreadId, canvasId, { forceScroll: true, statusText: "会话已同步" }).then((ok) => {
                         if (ok && !options.silent) setConnectionMessage("已连接电脑 Codex");
                     });
@@ -1285,7 +1300,7 @@ export function CodexRemoteConsole() {
                 setConnected(true);
                 setConnecting(false);
                 setConnectionStatus("connected");
-                if (!options.silent) setConnectionMessage("实时通道已连接");
+                if (!options.silent && !showProjectChooser) setConnectionMessage("实时通道已连接");
             });
             source.addEventListener("agent_event", (event) => {
                 const data = parseEventData<AgentEvent>(event);
@@ -1551,7 +1566,7 @@ export function CodexRemoteConsole() {
             if (targetThreadId) writePendingRun({ threadId: targetThreadId, canvasId, prompt, startedAt: Date.now() });
             const data = await agentFetch<{ threadId?: string }>("/agent/codex/turn", {
                 method: "POST",
-                body: JSON.stringify(workspaceRequestBody(canvasId, { prompt, canvasAgent: true, mode: "canvas", threadId: targetThreadId || undefined, attachments: currentAttachments, ...codexModelSettings(settingsRef.current) })),
+                body: JSON.stringify(workspaceRequestBody(canvasId, { prompt, threadId: targetThreadId || undefined, attachments: currentAttachments, ...codexModelSettings(settingsRef.current) })),
             });
             if (data.threadId) {
                 spendDailyTurn();
@@ -2214,39 +2229,47 @@ export function CodexRemoteConsole() {
                                 <input value={settings.token} onChange={(event) => updateSettings({ token: event.target.value })} type="password" autoComplete="new-password" className="mt-2 h-11 w-full rounded-xl border border-black/10 bg-white px-3 outline-none focus:border-stone-500 dark:border-white/10 dark:bg-white/[0.06]" />
                                 <span className="mt-1 block text-xs leading-5 text-stone-500 dark:text-stone-400">本机 Agent 启动输出的 Connect token，不是 Codex API Key。</span>
                             </label>
-                            <label className="block">
-                                <span className="text-sm font-medium">Workspace</span>
-                                <input value={settings.workspacePath} onChange={(event) => updateSettings({ workspacePath: event.target.value })} placeholder="可留空" className="mt-2 h-11 w-full rounded-xl border border-black/10 bg-white px-3 outline-none focus:border-stone-500 dark:border-white/10 dark:bg-white/[0.06]" />
-                                <span className="mt-1 block text-xs leading-5 text-stone-500 dark:text-stone-400">留空使用 agent 已保存的工作区。指定 Codex 会话时，Workspace 必须和该会话的 cwd 一致。</span>
-                            </label>
-                            <label className="block">
-                                <span className="text-sm font-medium">Workspace ID</span>
-                                <input value={settings.canvasId} onChange={(event) => updateSettings({ canvasId: event.target.value })} placeholder="default 或项目名" className="mt-2 h-11 w-full rounded-xl border border-black/10 bg-white px-3 outline-none focus:border-stone-500 dark:border-white/10 dark:bg-white/[0.06]" />
-                                <span className="mt-1 block text-xs leading-5 text-stone-500 dark:text-stone-400">只用于区分本机项目分桶，不是 Codex 会话；旧版 /canvas/019... 仍可兼容。</span>
-                            </label>
-                            <label className="block">
-                                <span className="text-sm font-medium">Codex Thread ID</span>
-                                <input value={settings.threadId} onChange={(event) => updateSettings({ threadId: event.target.value })} placeholder="codex://threads/019f..." className="mt-2 h-11 w-full rounded-xl border border-black/10 bg-white px-3 outline-none focus:border-stone-500 dark:border-white/10 dark:bg-white/[0.06]" />
-                                <span className="mt-1 block text-xs leading-5 text-stone-500 dark:text-stone-400">要继续指定 Codex 会话就填这里；可填完整 codex://threads/... 或只填 ID。</span>
-                            </label>
+                            <p className="rounded-2xl border border-sky-500/15 bg-sky-500/10 px-3 py-2 text-xs leading-5 text-sky-800 dark:text-sky-100">
+                                只填上面两项即可。连接成功后会自动列出电脑上的项目，点项目就能进入对应 Codex 会话。
+                            </p>
 
-                            <div className="rounded-2xl border border-black/10 bg-white/60 p-3 dark:border-white/10 dark:bg-white/[0.05]">
-                                <div className="flex items-center gap-2 text-sm font-medium">
-                                    <Settings2 className="size-4" />
-                                    模型与强度
+                            <details className="rounded-2xl border border-black/10 bg-white/60 p-3 text-sm dark:border-white/10 dark:bg-white/[0.05]">
+                                <summary className="cursor-pointer select-none font-medium">高级：手动指定会话 / 模型</summary>
+                                <div className="mt-4 space-y-4">
+                                    <label className="block">
+                                        <span className="text-sm font-medium">Workspace</span>
+                                        <input value={settings.workspacePath} onChange={(event) => updateSettings({ workspacePath: event.target.value })} placeholder="可留空" className="mt-2 h-11 w-full rounded-xl border border-black/10 bg-white px-3 outline-none focus:border-stone-500 dark:border-white/10 dark:bg-white/[0.06]" />
+                                        <span className="mt-1 block text-xs leading-5 text-stone-500 dark:text-stone-400">留空使用 agent 已保存的工作区。指定 Codex 会话时，Workspace 必须和该会话的 cwd 一致。</span>
+                                    </label>
+                                    <label className="block">
+                                        <span className="text-sm font-medium">Workspace ID</span>
+                                        <input value={settings.canvasId} onChange={(event) => updateSettings({ canvasId: event.target.value })} placeholder="default 或项目名" className="mt-2 h-11 w-full rounded-xl border border-black/10 bg-white px-3 outline-none focus:border-stone-500 dark:border-white/10 dark:bg-white/[0.06]" />
+                                        <span className="mt-1 block text-xs leading-5 text-stone-500 dark:text-stone-400">只用于区分本机项目分桶，不是 Codex 会话；旧版 /canvas/019... 仍可兼容。</span>
+                                    </label>
+                                    <label className="block">
+                                        <span className="text-sm font-medium">Codex Thread ID</span>
+                                        <input value={settings.threadId} onChange={(event) => updateSettings({ threadId: event.target.value })} placeholder="codex://threads/019f..." className="mt-2 h-11 w-full rounded-xl border border-black/10 bg-white px-3 outline-none focus:border-stone-500 dark:border-white/10 dark:bg-white/[0.06]" />
+                                        <span className="mt-1 block text-xs leading-5 text-stone-500 dark:text-stone-400">要继续指定 Codex 会话就填这里；可填完整 codex://threads/... 或只填 ID。</span>
+                                    </label>
+                                    <div>
+                                        <div className="flex items-center gap-2 text-sm font-medium">
+                                            <Settings2 className="size-4" />
+                                            模型与强度
+                                        </div>
+                                        <p className="mt-1 text-xs leading-5 text-stone-500 dark:text-stone-400">留空则沿用电脑 Codex 默认设置；填写后会传给本机 Codex app-server。</p>
+                                        <div className="mt-3 grid grid-cols-2 gap-2">
+                                            <input value={settings.model} onChange={(event) => updateSettings({ model: event.target.value })} placeholder="模型，如 gpt-5.5" className="h-11 rounded-xl border border-black/10 bg-white/60 px-3 text-sm outline-none focus:border-stone-500 dark:border-white/10 dark:bg-white/[0.06]" />
+                                            <select value={settings.effort} onChange={(event) => updateSettings({ effort: event.target.value })} className="h-11 rounded-xl border border-black/10 bg-white/60 px-3 text-sm outline-none focus:border-stone-500 dark:border-white/10 dark:bg-white/[0.06]">
+                                                <option value="">沿用默认强度</option>
+                                                <option value="low">low</option>
+                                                <option value="medium">medium</option>
+                                                <option value="high">high</option>
+                                                <option value="xhigh">xhigh</option>
+                                            </select>
+                                        </div>
+                                    </div>
                                 </div>
-                                <p className="mt-1 text-xs leading-5 text-stone-500 dark:text-stone-400">留空则沿用电脑 Codex 默认设置；填写后会传给本机 Codex app-server。</p>
-                                <div className="mt-3 grid grid-cols-2 gap-2">
-                                    <input value={settings.model} onChange={(event) => updateSettings({ model: event.target.value })} placeholder="模型，如 gpt-5.5" className="h-11 rounded-xl border border-black/10 bg-white/60 px-3 text-sm outline-none focus:border-stone-500 dark:border-white/10 dark:bg-white/[0.06]" />
-                                    <select value={settings.effort} onChange={(event) => updateSettings({ effort: event.target.value })} className="h-11 rounded-xl border border-black/10 bg-white/60 px-3 text-sm outline-none focus:border-stone-500 dark:border-white/10 dark:bg-white/[0.06]">
-                                        <option value="">沿用默认强度</option>
-                                        <option value="low">low</option>
-                                        <option value="medium">medium</option>
-                                        <option value="high">high</option>
-                                        <option value="xhigh">xhigh</option>
-                                    </select>
-                                </div>
-                            </div>
+                            </details>
 
                             <div className="rounded-2xl border border-black/10 bg-white/60 p-3 dark:border-white/10 dark:bg-white/[0.05]">
                                 <div className="flex items-center justify-between gap-3">

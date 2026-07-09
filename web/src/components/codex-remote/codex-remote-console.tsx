@@ -253,7 +253,7 @@ function samePath(a: string, b: string) {
     return a.trim().replaceAll("/", "\\").toLowerCase() === b.trim().replaceAll("/", "\\").toLowerCase();
 }
 
-function normalizeProjectList(items: ProjectPreset[]) {
+function normalizeProjectList(items: ProjectPreset[]): ProjectPreset[] {
     const seen = new Set<string>();
     return items
         .filter((item) => item?.id && item?.label)
@@ -295,6 +295,41 @@ function mergeProjectLists(current: ProjectPreset[], incoming: ProjectPreset[]) 
         }
     }
     return normalizeProjectList(next);
+}
+
+function mergeThreadLists(current: ThreadSummary[], incoming: ThreadSummary[]) {
+    const items = new Map<string, ThreadSummary>();
+    [...current, ...incoming].forEach((thread) => {
+        if (!thread?.id) return;
+        items.set(thread.id, { ...(items.get(thread.id) || {}), ...thread });
+    });
+    return [...items.values()].sort((a, b) => (b.updatedAt || b.createdAt || 0) - (a.updatedAt || a.createdAt || 0));
+}
+
+function workspaceCanvasIdFromPath(workspacePath: string) {
+    const name = repoName(workspacePath).replace(/[^a-zA-Z0-9._-]/g, "-").slice(0, 32) || "workspace";
+    let hash = 0;
+    for (let index = 0; index < workspacePath.length; index += 1) hash = (hash * 31 + workspacePath.charCodeAt(index)) | 0;
+    return normalizeCanvasId(`${name}-${Math.abs(hash).toString(36)}`);
+}
+
+function projectFromThread(thread: ThreadSummary, projects: ProjectPreset[]): ProjectPreset | null {
+    const workspacePath = thread.cwd?.trim() || "";
+    if (!workspacePath) return null;
+    const existing =
+        projects.find((project) => project.workspacePath && samePath(project.workspacePath, workspacePath)) ||
+        projects.find((project) => project.threadId && project.threadId === thread.id);
+    if (existing) return { ...existing, threadId: thread.id };
+    const canvasId = workspaceCanvasIdFromPath(workspacePath);
+    return {
+        id: canvasId,
+        label: threadGroupLabel(workspacePath),
+        canvasId,
+        workspaceId: canvasId,
+        workspacePath,
+        threadId: thread.id,
+        gitRepoPath: "",
+    };
 }
 
 function projectCanvasIdFromDraft(draft: ProjectDraft, id: string) {
@@ -1040,7 +1075,7 @@ export function CodexRemoteConsole() {
             if (threadSearch.trim()) query.set("searchTerm", threadSearch.trim());
             const data = await agentFetch<{ workspace?: Workspace; data?: ThreadSummary[] }>(`/agent/codex/threads?${query.toString()}`);
             const nextThreads = data.data || [];
-            setThreads(nextThreads);
+            setThreads((items) => mergeThreadLists(items, nextThreads));
             if (data.workspace) setWorkspace(data.workspace);
             if (!quiet) pushMessage({ id: createId(), role: "status", text: nextThreads.length ? `已读取 ${nextThreads.length} 个当前工作区会话。` : "当前工作区没有可显示的 Codex 会话。" });
             return nextThreads;
@@ -1458,6 +1493,23 @@ export function CodexRemoteConsole() {
         if (!thread.id) return;
         if (codexBusy || pendingPromptRef.current || activeQueueTaskIdRef.current) {
             pushMessage({ id: createId(), role: "status", text: "当前 Codex 任务还在执行，完成后再切换会话，避免把后续消息发到错误会话。" });
+            return;
+        }
+        const threadProject = projectFromThread(thread, projects);
+        if (threadProject) {
+            setProjects((items) => {
+                const next = normalizeProjectList(items);
+                const index = next.findIndex(
+                    (project) =>
+                        project.id === threadProject.id ||
+                        project.canvasId === threadProject.canvasId ||
+                        (project.workspacePath && threadProject.workspacePath && samePath(project.workspacePath, threadProject.workspacePath)),
+                );
+                if (index >= 0) next[index] = { ...next[index], ...threadProject, threadId: thread.id };
+                else next.push(threadProject);
+                return normalizeProjectList(next);
+            });
+            await selectProject(threadProject);
             return;
         }
         const canvasId = normalizeCanvasId(settingsRef.current.canvasId);
@@ -2082,6 +2134,9 @@ export function CodexRemoteConsole() {
                                 {projects.map((project) => {
                                     const projectActive = activeProject?.id === project.id;
                                     const switchDisabled = codexBusy || Boolean(pendingPromptRef.current);
+                                    const projectThreadGroups = groupedThreads
+                                        .map((group) => ({ ...group, threads: group.threads.filter((thread) => !thread.cwd || !project.workspacePath || samePath(thread.cwd, project.workspacePath)) }))
+                                        .filter((group) => group.threads.length);
                                     return (
                                         <div key={project.id} className="space-y-2">
                                             <div
@@ -2128,7 +2183,7 @@ export function CodexRemoteConsole() {
                                                         </button>
                                                     ) : null}
 
-                                                    {groupedThreads.map((group) => {
+                                                    {projectThreadGroups.map((group) => {
                                                         const groupThreads = group.threads.filter((thread) => thread.id !== project.threadId);
                                                         if (!groupThreads.length) return null;
                                                         return (

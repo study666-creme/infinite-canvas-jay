@@ -181,7 +181,7 @@ export function startHttpServer() {
         console.log(`Local URL: ${config.url}`);
         if (listenHost === "0.0.0.0") lanUrls(port).forEach((url) => console.log(`LAN URL: ${url}`));
         console.log(`Connect token: ${config.token}`);
-        console.log("Codex MCP: codex mcp add infinite-canvas -- npx -y @basketikun/canvas-agent mcp");
+        console.log("Codex MCP: codex mcp add infinite-canvas -- npx -y codex-remote-bridge mcp");
     });
 }
 

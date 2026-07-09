@@ -23,7 +23,7 @@ const DEFAULT_AGENT_URL = "http://127.0.0.1:17371";
 const AGENT_CONNECT_STEPS = [
     { title: "安装 Codex 插件", text: "在 Codex app 安装卡藏画布插件后，首次使用插件会自动启动本地 Agent。" },
     { title: "打开画布连接", text: "回到这里点击连接，网页会自动读取本机 Agent 配置。" },
-    { title: "手动启动备用", text: "如果自动发现失败，再运行下面命令。", command: "npx -y @basketikun/canvas-agent" },
+    { title: "手动启动备用", text: "如果自动发现失败，再运行下面命令。", command: "npx -y codex-remote-bridge" },
 ];
 
 type AgentEventPayload = {

@@ -89,7 +89,7 @@ codex plugin add infinite-canvas@infinite-canvas-local
 插件默认通过以下命令启动 MCP，并会在 MCP 启动时自动尝试拉起本地 Agent：
 
 ```bash
-npx -y @basketikun/canvas-agent mcp
+npx -y codex-remote-bridge mcp
 ```
 
 ## 手动排查
@@ -105,7 +105,7 @@ bun run dev
 然后启动本地 Agent。端口不是 `3000` 时，把 `CANVAS_URL` 换成真实本地画布地址：
 
 ```bash
-CANVAS_URL=http://localhost:3000 npx -y @basketikun/canvas-agent
+CANVAS_URL=http://localhost:3000 npx -y codex-remote-bridge
 ```
 
 手动排查时先从 Agent 输出或 `http://127.0.0.1:17371/config` 读取本地地址和 token，然后直接打开 `<画布网页地址>/canvas?mode=new&agentUrl=<Local URL>&agentToken=<Connect token>`。不要通过页面点击来新建画布；`mode=new` 会让网页自动创建具体画布并连接本地 Agent。

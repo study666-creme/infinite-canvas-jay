@@ -3,7 +3,7 @@
   "configVersion": 1,
   "workspaces": {
     "": {
-      "name": "@basketikun/canvas-agent",
+      "name": "codex-remote-bridge",
       "dependencies": {
         "@modelcontextprotocol/sdk": "^1.12.1",
         "@openai/codex": "^0.143.0",

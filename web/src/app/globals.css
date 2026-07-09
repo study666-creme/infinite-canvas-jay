@@ -1436,6 +1436,18 @@
         animation: canvas-black-glass-sweep 2.2s linear infinite;
     }
 
+    .mobile-agent-thinking-sweep-text {
+        display: inline-block;
+        color: transparent;
+        background: linear-gradient(105deg, rgba(255, 255, 255, 0.58) 0%, rgba(255, 255, 255, 0.86) 22%, #ffffff 38%, #7dd3fc 50%, #ffffff 62%, rgba(255, 255, 255, 0.82) 78%, rgba(255, 255, 255, 0.58) 100%);
+        background-size: 240% 100%;
+        background-position: 120% 0;
+        -webkit-background-clip: text;
+        background-clip: text;
+        text-shadow: 0 0 18px rgba(125, 211, 252, 0.18);
+        animation: mobile-agent-thinking-sweep-text 2.15s linear infinite;
+    }
+
     .canvas-black-glass-edge {
         position: absolute;
         inset: 0;
@@ -1751,7 +1763,8 @@
         .canvas-generation-beam::before,
         .canvas-generation-spinner,
         .canvas-generation-track.is-indeterminate .canvas-generation-fill,
-        .canvas-generation-action-button.ant-btn.is-running {
+        .canvas-generation-action-button.ant-btn.is-running,
+        .mobile-agent-thinking-sweep-text {
             animation: none;
         }
     }
@@ -1763,6 +1776,16 @@
 
         100% {
             transform: translate3d(50%, 0, 0) rotate(12deg);
+        }
+    }
+
+    @keyframes mobile-agent-thinking-sweep-text {
+        0% {
+            background-position: 120% 0;
+        }
+
+        100% {
+            background-position: -120% 0;
         }
     }
 

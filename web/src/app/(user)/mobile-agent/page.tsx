@@ -43,7 +43,7 @@ const queueKey = "kazang-mobile-codex:task-queue";
 const pendingRunMaxAge = 1000 * 60 * 60 * 12;
 const legacyDefaultWorkspacePath = "D:\\canvas\\infinite-canvas";
 const queueGuides = ["继续修复并验证", "跑测试并汇报结果", "提交并推送当前项目", "整理当前进度和下一步", "检查线上部署状态"];
-const mobileAgentUiVersion = "队列版 3 2026-07-09";
+const mobileAgentUiVersion = "队列版 4 2026-07-09";
 const defaultSettings: Settings = {
     agentUrl: "",
     token: "",
@@ -986,8 +986,10 @@ export default function MobileAgentPage() {
             ) : null}
 
             {sending || runStatus ? (
-                <div className="shrink-0 border-b border-black/10 bg-amber-500/10 px-4 py-2 text-xs leading-5 text-amber-800 dark:border-white/10 dark:text-amber-100">
-                    {runStatus || "Codex 后台执行中。手机锁屏或切后台后，回到页面会自动同步当前会话记录。"}
+                <div className="canvas-black-glass-sweep relative isolate shrink-0 overflow-hidden border-b border-sky-300/15 bg-[#111316] px-4 py-2 text-xs leading-5 shadow-[inset_0_1px_0_rgba(255,255,255,.05)] dark:border-white/10">
+                    <span className="mobile-agent-thinking-sweep-text relative z-10 font-medium">
+                        {runStatus || "Codex 后台执行中。手机锁屏或切后台后，回到页面会自动同步当前会话记录。"}
+                    </span>
                 </div>
             ) : null}
 

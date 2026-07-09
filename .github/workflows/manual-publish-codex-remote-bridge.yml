@@ -1,19 +1,13 @@
-name: Publish Canvas Agent
+name: Manual Publish Codex Remote Bridge
 
 on:
-  push:
-    branches:
-      - main
-    paths:
-      - "canvas-agent/**"
-      - ".github/workflows/publish-canvas-agent.yml"
   workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: publish-canvas-agent
+  group: manual-publish-codex-remote-bridge
   cancel-in-progress: false
 
 jobs:

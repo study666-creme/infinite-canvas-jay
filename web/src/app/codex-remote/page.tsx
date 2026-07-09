@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 
-import MobileAgentPage from "@/app/(user)/mobile-agent/page";
 import { PromptHubAuthGate } from "@/components/layout/prompt-hub-auth-gate";
+import { CodexRemoteConsole } from "@/components/codex-remote/codex-remote-console";
 
 export const metadata: Metadata = {
     title: "Codex Remote",
@@ -12,7 +12,7 @@ export default function CodexRemotePage() {
     return (
         <div className="h-dvh overflow-hidden bg-[#f5f3ee] text-stone-950 dark:bg-[#070707] dark:text-stone-100">
             <PromptHubAuthGate>
-                <MobileAgentPage />
+                <CodexRemoteConsole />
             </PromptHubAuthGate>
         </div>
     );

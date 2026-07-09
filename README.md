@@ -13,7 +13,7 @@
 
 本项目保留 AGPL-3.0 许可证，详见 [LICENSE](LICENSE)。产品 UI 已使用「卡藏」品牌，但仓库层面的开源义务不能删除。线上部署时，请确保对应源码可访问。
 
-更完整的说明见 [OPEN-SOURCE.md](OPEN-SOURCE.md)。Codex Remote 独立开源、`workspaceId` 和 Codex 合规边界见 [CODEX-REMOTE-OPEN-SOURCE.md](CODEX-REMOTE-OPEN-SOURCE.md)。
+更完整的说明见 [OPEN-SOURCE.md](OPEN-SOURCE.md)。Codex Remote 的独立拆分计划、`workspaceId` 和 Codex 合规边界见 [CODEX-REMOTE-OPEN-SOURCE.md](CODEX-REMOTE-OPEN-SOURCE.md)。
 
 ## 快速开始
 
@@ -50,7 +50,9 @@ npm run build
 
 ## Codex Remote
 
-打开 `/codex-remote` 可以把手机变成 Codex Remote Console，连接电脑上的本机 Agent 后继续让 Codex 读项目、改代码、跑命令和部署。它是可独立拆出的自托管 Codex 控制台；画布需要 Codex 当 Agent 大脑时，应作为可选 adapter/MCP 能力接入。旧入口 `/mobile-agent` 保留兼容。
+打开 `/codex-remote` 可以把手机变成 Codex Remote Console，连接电脑上的本机 bridge 后继续让 Codex 读项目、改代码、跑命令和部署。它是准备独立拆出的自托管 Codex 控制台；画布需要 Codex 当 Agent 大脑时，应作为可选 adapter/MCP 能力接入。旧入口 `/mobile-agent` 保留兼容。
+
+当前阶段不要把画布 Agent 当成已开源产品发布。`/codex-remote` 是先挂在同一个 Web 应用里的独立入口，用来验证移动 Codex 体验；真正开源前应再拆成独立仓库/独立包名，并把画布 MCP 能力做成可选 adapter。
 
 线上体验入口：`https://infinite-canvas-jay.vercel.app/codex-remote`。这个页面需要先登录卡藏账号；要实际控制 Codex，还需要在自己的电脑上启动本机 Agent 并填写 Agent URL + token。
 
@@ -63,7 +65,7 @@ cd D:\canvas\infinite-canvas\canvas-agent
 npm run dev
 ```
 
-启动后终端会输出 `Connect token` 和可访问地址。同局域网可填入 `http://电脑局域网IP:17371`。远程使用时，请通过 Cloudflare Tunnel、Tailscale Funnel、ZeroTier 内网地址或 VPS 反代提供 **HTTPS Agent URL**，再在 `/codex-remote` 填入该地址、token 和工作目录。
+启动后终端会输出 `Connect token` 和可访问地址。同局域网可填入 `http://电脑局域网IP:17371`。远程使用时，请通过 Cloudflare Tunnel、Tailscale Funnel、ZeroTier 内网地址或 VPS 反代提供 **HTTPS Bridge URL**，再在 `/codex-remote` 填入该地址、token 和工作目录。
 
 想让重启后手机不用重新填 token / URL，可以固定启动参数：
 

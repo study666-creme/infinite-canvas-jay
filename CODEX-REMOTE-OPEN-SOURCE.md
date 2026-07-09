@@ -1,8 +1,10 @@
 # Codex Remote 开源与解耦说明
 
-`/codex-remote` 和本地 `canvas-agent` 中的 Codex 控制能力，本质上是一个自托管的 **Codex Remote Console**：手机网页连接用户自己电脑上的本机 bridge，再由 bridge 调用本机 Codex app-server 继续项目任务。旧入口 `/mobile-agent` 只作为兼容路由保留。
+`/codex-remote` 和当前本地 bridge 中的 Codex 控制能力，本质上是一个自托管的 **Codex Remote Console**：手机网页连接用户自己电脑上的 bridge，再由 bridge 调用本机 Codex app-server 继续项目任务。旧入口 `/mobile-agent` 只作为兼容路由保留。
 
 它不应该强依赖 Infinite Canvas。画布可以保留入口，但独立开源时应拆成一个通用项目，并作为和画布同级的线上入口挂载。
+
+当前阶段先不要把画布 Agent 或画布 MCP 能力当成已开源产品发布。对外可以先展示 `/codex-remote` 的网页体验和自托管 bridge 思路；真正开源前，应把项目命名、目录结构、包名和文档统一到 `Codex Remote`，并把画布能力降级为可选 adapter。
 
 当前线上入口约定为 `/codex-remote`。线上演示版要求先登录卡藏账号，注册仍走卡片库；实际控制 Codex 时仍需要在自己的电脑上运行 bridge 并填写 Agent URL + token。
 

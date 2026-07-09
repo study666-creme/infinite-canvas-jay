@@ -1,11 +1,11 @@
-# Codex Remote Bridge / Infinite Canvas Agent
+# Codex Remote Bridge
 
-本地 Agent 有两层用途：
+这个目录目前是历史兼容目录：早期它叫 `canvas-agent`，现在对外应称为 **Codex Remote Bridge**。它有两层用途：
 
 - Codex Remote Bridge：让手机网页远程控制用户自己电脑上的 Codex，会话、引导、图片附件、git push 都走本机 bridge。
 - Infinite Canvas Agent：当画布需要 Codex 作为 Agent 大脑时，显式注入画布 MCP 和画布操作提示。
 
-独立开源时应优先把 Codex Remote Bridge 抽成通用能力，画布只作为可选 adapter。本地开发时优先连接 `http://localhost:3000`，不需要先使用线上站点。
+独立开源时应优先把 Codex Remote Bridge 抽成通用能力，画布只作为可选 adapter。当前不要把画布 Agent / 画布 MCP 能力当成已发布的开源产品。本地开发时优先连接 `http://localhost:3000`，不需要先使用线上站点。
 
 ## 启动
 
@@ -55,9 +55,9 @@ Codex Remote 的开源拆分和风险边界见仓库根目录 [CODEX-REMOTE-OPEN
 
 ## 发布
 
-`canvas-agent` 使用自己的 `package.json` 版本号，不跟仓库根目录 `VERSION` 绑定。推送到 `main` 后，GitHub Actions 会检查 npm 上是否已经存在当前包版本；不存在时才发布 `codex-remote-bridge`。
+`codex-remote-bridge` 使用自己的 `package.json` 版本号，不跟仓库根目录 `VERSION` 绑定。当前 npm 发布 workflow 只允许手动触发，不会在推送到 `main` 时自动发布。
 
-发布前需要在 GitHub 仓库 Secrets 中配置 `NPM_TOKEN`。
+真正准备公开 bridge 时，再在 GitHub 仓库 Secrets 中配置 `NPM_TOKEN` 并手动触发发布。
 
 ## Codex MCP
 

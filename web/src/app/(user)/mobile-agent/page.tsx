@@ -287,9 +287,14 @@ function isAgentRouteNotFound(message: string) {
     return /\b404\b/i.test(message) || /\bnot found\b/i.test(message);
 }
 
-function normalizePendingGuide(value: PendingGuide | null) {
+function normalizePendingGuideItem(value: PendingGuide | null | undefined) {
     if (!value?.text?.trim()) return null;
     return { ...value, text: value.text.trim(), attachments: value.attachments || [] };
+}
+
+function normalizePendingGuides(value: PendingGuide | PendingGuide[] | null) {
+    const items = Array.isArray(value) ? value : value ? [value] : [];
+    return items.map(normalizePendingGuideItem).filter((item): item is PendingGuide => Boolean(item)).slice(-20);
 }
 
 function threadGroupLabel(path: string) {
@@ -348,7 +353,7 @@ export default function MobileAgentPage() {
     const [threadError, setThreadError] = useState("");
     const [attachments, setAttachments] = useState<AgentAttachment[]>([]);
     const [queuedTasks, setQueuedTasks] = useState<QueuedTask[]>([]);
-    const [pendingGuide, setPendingGuide] = useState<PendingGuide | null>(null);
+    const [pendingGuides, setPendingGuides] = useState<PendingGuide[]>([]);
     const [runStatus, setRunStatus] = useState("");
     const [unreadCount, setUnreadCount] = useState(0);
     const eventSourceRef = useRef<EventSource | null>(null);
@@ -361,7 +366,7 @@ export default function MobileAgentPage() {
     const pendingPromptRef = useRef("");
     const activeQueueTaskIdRef = useRef("");
     const queuedTasksRef = useRef<QueuedTask[]>([]);
-    const pendingGuideRef = useRef<PendingGuide | null>(null);
+    const pendingGuidesRef = useRef<PendingGuide[]>([]);
     const settingsRef = useRef<Settings>(defaultSettings);
     const activeThreadIdRef = useRef("");
     const threadSyncSeqRef = useRef(0);
@@ -410,7 +415,7 @@ export default function MobileAgentPage() {
         setActiveProjectId(initialProject?.id || "");
         setMessages(readStoredMessages(normalizeCanvasId(initialSettings.canvasId)));
         setQueuedTasks(normalizeQueue(readJson<QueuedTask[]>(localStorage.getItem(queueKey), [])));
-        setPendingGuide(normalizePendingGuide(readJson<PendingGuide | null>(localStorage.getItem(pendingGuideKey), null)));
+        setPendingGuides(normalizePendingGuides(readJson<PendingGuide | PendingGuide[] | null>(localStorage.getItem(pendingGuideKey), null)));
         setHydrated(true);
         return () => {
             eventSourceRef.current?.close();
@@ -435,11 +440,11 @@ export default function MobileAgentPage() {
     }, [hydrated, queuedTasks]);
 
     useEffect(() => {
-        pendingGuideRef.current = pendingGuide;
+        pendingGuidesRef.current = pendingGuides;
         if (!hydrated) return;
-        if (pendingGuide) localStorage.setItem(pendingGuideKey, JSON.stringify(pendingGuide));
+        if (pendingGuides.length) localStorage.setItem(pendingGuideKey, JSON.stringify(pendingGuides));
         else localStorage.removeItem(pendingGuideKey);
-    }, [hydrated, pendingGuide]);
+    }, [hydrated, pendingGuides]);
 
     useEffect(() => {
         if (hydrated) localStorage.setItem(settingsKey, JSON.stringify(settings));
@@ -559,6 +564,7 @@ export default function MobileAgentPage() {
         stopThreadPoll();
         stopCompletionFallback();
         markActiveQueueTask("done");
+        drainPendingGuidesToQueue();
         setTemporaryStatus(statusText, autoClear);
         window.setTimeout(() => void runNextQueuedTask(), 350);
     }
@@ -570,6 +576,7 @@ export default function MobileAgentPage() {
         stopCompletionFallback();
         setTemporaryStatus("");
         markActiveQueueTask("failed", errorText);
+        drainPendingGuidesToQueue();
         window.setTimeout(() => void runNextQueuedTask(), 350);
     }
 
@@ -590,6 +597,39 @@ export default function MobileAgentPage() {
         return task;
     }
 
+    function appendQueuedTasks(tasks: QueuedTask[], placement: "append" | "next" = "append") {
+        if (!tasks.length) return;
+        setQueuedTasks((items) => {
+            const insertIndex = placement === "next" ? items.findIndex((item) => item.status === "queued") : -1;
+            const merged = insertIndex >= 0 ? [...items.slice(0, insertIndex), ...tasks, ...items.slice(insertIndex)] : [...items, ...tasks];
+            const next = normalizeQueue(merged);
+            queuedTasksRef.current = next;
+            return next;
+        });
+    }
+
+    function pendingGuideToTask(draft: PendingGuide, extraGuide = "") {
+        const text = [draft.text.trim(), extraGuide.trim()].filter(Boolean).join("\n");
+        if (!text) return null;
+        return {
+            id: createId(),
+            text,
+            attachments: draft.attachments || [],
+            createdAt: Date.now(),
+            status: "queued" as QueuedTaskStatus,
+        };
+    }
+
+    function drainPendingGuidesToQueue() {
+        const drafts = pendingGuidesRef.current;
+        if (!drafts.length) return false;
+        const tasks = drafts.map((draft) => pendingGuideToTask(draft)).filter((task): task is QueuedTask => Boolean(task));
+        pendingGuidesRef.current = [];
+        setPendingGuides([]);
+        appendQueuedTasks(tasks, "next");
+        return tasks.length > 0;
+    }
+
     function setPendingGuideDraft(text: string, taskAttachments: AgentAttachment[] = []) {
         const trimmed = text.trim();
         if (!trimmed && !taskAttachments.length) return null;
@@ -599,28 +639,31 @@ export default function MobileAgentPage() {
             attachments: taskAttachments,
             createdAt: Date.now(),
         };
-        pendingGuideRef.current = draft;
-        setPendingGuide(draft);
-        setTemporaryStatus("已放到待确认引导，点击后才会发送。", true);
+        const next = [...pendingGuidesRef.current, draft].slice(-20);
+        pendingGuidesRef.current = next;
+        setPendingGuides(next);
+        setTemporaryStatus("已加入待发送引导，当前任务结束后会自动继续。", true);
         return draft;
     }
 
-    function clearPendingGuide() {
-        pendingGuideRef.current = null;
-        setPendingGuide(null);
+    function clearPendingGuide(id: string) {
+        const next = pendingGuidesRef.current.filter((draft) => draft.id !== id);
+        pendingGuidesRef.current = next;
+        setPendingGuides(next);
     }
 
-    function confirmPendingGuide(extraGuide = "") {
-        const draft = pendingGuideRef.current;
+    function confirmPendingGuide(id: string, extraGuide = "") {
+        const draft = pendingGuidesRef.current.find((item) => item.id === id);
         if (!draft) return;
-        const text = [draft.text.trim(), extraGuide.trim()].filter(Boolean).join("\n");
-        if (!text) {
-            clearPendingGuide();
+        const task = pendingGuideToTask(draft, extraGuide);
+        if (!task) {
+            clearPendingGuide(id);
             return;
         }
-        enqueueTask(text, draft.attachments || []);
-        clearPendingGuide();
-        setTemporaryStatus("已加入队列，当前任务结束后继续执行。", true);
+        appendQueuedTasks([task], "next");
+        clearPendingGuide(id);
+        window.setTimeout(() => void runNextQueuedTask(), 100);
+        setTemporaryStatus("已插入队列，当前任务结束后继续执行。", true);
     }
 
     function removeQueueTask(id: string) {
@@ -1461,12 +1504,12 @@ export default function MobileAgentPage() {
             ) : null}
 
             <form onSubmit={(event) => void submit(event)} className="shrink-0 border-t border-black/10 bg-white/72 p-3 backdrop-blur-xl dark:border-white/10 dark:bg-black/72">
-                {sending || runStatus || pendingGuide || visibleQueueTasks.length ? (
+                {sending || runStatus || pendingGuides.length || visibleQueueTasks.length ? (
                     <div className="mx-auto mb-2 max-w-3xl rounded-2xl border border-black/10 bg-[#f9f8f4]/92 p-3 shadow-[0_10px_28px_rgba(23,21,19,.08)] dark:border-white/10 dark:bg-white/[0.06]">
                         <div className="flex items-start justify-between gap-3">
                             <div className="flex min-w-0 items-center gap-2 text-sm font-medium">
                                 {sending || runStatus ? <LoaderCircle className="size-4 shrink-0 animate-spin text-sky-500" /> : <ListTodo className="size-4 shrink-0 text-stone-500 dark:text-stone-300" />}
-                                <span className="truncate">{sending || runStatus ? runStatus || "Codex 后台执行中" : pendingGuide ? "待确认引导" : activeQueueCount ? `${activeQueueCount} 条任务排队中` : "任务队列"}</span>
+                                <span className="truncate">{sending || runStatus ? runStatus || "Codex 后台执行中" : pendingGuides.length ? `${pendingGuides.length} 条引导待发送` : activeQueueCount ? `${activeQueueCount} 条任务排队中` : "任务队列"}</span>
                             </div>
                             {queuedTasks.some((task) => task.status === "done" || task.status === "failed") ? (
                                 <button type="button" className="shrink-0 text-xs font-medium text-stone-500 transition hover:text-stone-950 dark:text-stone-400 dark:hover:text-stone-100" onClick={clearFinishedQueue}>
@@ -1475,32 +1518,36 @@ export default function MobileAgentPage() {
                             ) : null}
                         </div>
 
-                        {pendingGuide ? (
-                            <div className="mt-3 rounded-2xl border border-sky-400/25 bg-sky-500/[0.08] p-3 text-stone-900 shadow-[inset_0_1px_0_rgba(255,255,255,.45)] dark:border-sky-300/20 dark:bg-sky-300/[0.08] dark:text-stone-100">
-                                <div className="flex items-start justify-between gap-3">
-                                    <div className="min-w-0 flex-1">
-                                        <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-sky-700 dark:text-sky-200">待确认引导</div>
-                                        <div className="mt-1 flex items-start gap-2">
-                                            <div className="min-w-0 flex-1 line-clamp-3 break-words text-sm leading-5">{pendingGuide.text}</div>
+                        {pendingGuides.length ? (
+                            <div className="mt-3 space-y-2">
+                                {pendingGuides.map((pendingGuide, index) => (
+                                    <div key={pendingGuide.id} className="rounded-2xl border border-sky-400/25 bg-sky-500/[0.08] p-3 text-stone-900 shadow-[inset_0_1px_0_rgba(255,255,255,.45)] dark:border-sky-300/20 dark:bg-sky-300/[0.08] dark:text-stone-100">
+                                        <div className="flex items-start justify-between gap-3">
+                                            <div className="min-w-0 flex-1">
+                                                <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-sky-700 dark:text-sky-200">待发送引导 #{index + 1}</div>
+                                                <div className="mt-1 flex items-start gap-2">
+                                                    <div className="min-w-0 flex-1 line-clamp-3 break-words text-sm leading-5">{pendingGuide.text}</div>
+                                                    <button
+                                                        type="button"
+                                                        className="mt-0.5 shrink-0 rounded-full bg-[#0A84FF] px-2.5 py-1 text-xs font-semibold text-white shadow-[0_6px_18px_rgba(10,132,255,.24)] transition hover:brightness-105 active:scale-95"
+                                                        onClick={() => confirmPendingGuide(pendingGuide.id)}
+                                                    >
+                                                        引导
+                                                    </button>
+                                                </div>
+                                                {pendingGuide.attachments.length ? <div className="mt-1 text-xs text-stone-500 dark:text-stone-300">{pendingGuide.attachments.length} 张图片</div> : null}
+                                            </div>
                                             <button
                                                 type="button"
-                                                className="mt-0.5 shrink-0 rounded-full bg-[#0A84FF] px-2.5 py-1 text-xs font-semibold text-white shadow-[0_6px_18px_rgba(10,132,255,.24)] transition hover:brightness-105 active:scale-95"
-                                                onClick={() => confirmPendingGuide()}
+                                                className="grid size-8 shrink-0 place-items-center rounded-xl text-stone-500 transition hover:bg-black/[0.05] hover:text-stone-950 dark:text-stone-300 dark:hover:bg-white/[0.08] dark:hover:text-white"
+                                                aria-label="取消待发送引导"
+                                                onClick={() => clearPendingGuide(pendingGuide.id)}
                                             >
-                                                引导
+                                                <X className="size-4" />
                                             </button>
                                         </div>
-                                        {pendingGuide.attachments.length ? <div className="mt-1 text-xs text-stone-500 dark:text-stone-300">{pendingGuide.attachments.length} 张图片</div> : null}
                                     </div>
-                                    <button
-                                        type="button"
-                                        className="grid size-8 shrink-0 place-items-center rounded-xl text-stone-500 transition hover:bg-black/[0.05] hover:text-stone-950 dark:text-stone-300 dark:hover:bg-white/[0.08] dark:hover:text-white"
-                                        aria-label="取消待确认引导"
-                                        onClick={clearPendingGuide}
-                                    >
-                                        <X className="size-4" />
-                                    </button>
-                                </div>
+                                ))}
                             </div>
                         ) : null}
 

@@ -1,11 +1,11 @@
 "use client";
 
-import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
-import { CheckCircle2, Copy, FolderGit2, GitBranch, LoaderCircle, PlugZap, RefreshCcw, RotateCcw, SendHorizontal, Settings2, TerminalSquare, Trash2, UploadCloud, X } from "lucide-react";
+import { ChangeEvent, FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import { CheckCircle2, ChevronDown, Copy, FolderGit2, GitBranch, ImagePlus, LoaderCircle, MessageSquareText, PlugZap, RefreshCcw, RotateCcw, SendHorizontal, Settings2, TerminalSquare, Trash2, UploadCloud, X } from "lucide-react";
 
 type MessageRole = "user" | "assistant" | "tool" | "error" | "status";
 type MobileMessage = { id: string; role: MessageRole; title?: string; text: string; streamId?: string };
-type Settings = { agentUrl: string; token: string; canvasId: string; threadId: string; workspacePath: string; gitRepoPath: string };
+type Settings = { agentUrl: string; token: string; canvasId: string; threadId: string; workspacePath: string; gitRepoPath: string; model: string; effort: string };
 type Workspace = { canvasId: string; workspacePath: string; activeThreadId?: string };
 type AgentEvent = { type?: string; item?: Record<string, unknown>; usage?: unknown; message?: string };
 type PendingRun = { threadId: string; canvasId: string; prompt: string; startedAt: number };
@@ -22,6 +22,16 @@ type GitRepoInfo = {
     warnings: string[];
     pushBlocked: boolean;
 };
+type ThreadSummary = {
+    id: string;
+    preview?: string;
+    name?: string | null;
+    cwd?: string;
+    status?: string;
+    updatedAt?: number;
+    createdAt?: number;
+};
+type AgentAttachment = { name?: string; type?: string; dataUrl?: string };
 
 const settingsKey = "kazang-mobile-codex:settings";
 const messagesKey = "kazang-mobile-codex:messages";
@@ -35,6 +45,8 @@ const defaultSettings: Settings = {
     threadId: "",
     workspacePath: "",
     gitRepoPath: "",
+    model: "",
+    effort: "",
 };
 
 function createId() {
@@ -131,6 +143,13 @@ function toolLabel(name: string) {
     return name || "工具调用";
 }
 
+function itemStatusLabel(itemType: string, tool: string) {
+    if (itemType === "commandExecution") return "正在执行命令";
+    if (itemType === "fileChange") return "正在修改文件";
+    if (tool) return `正在执行：${toolLabel(tool)}`;
+    return "正在处理";
+}
+
 function parseEventData<T>(event: Event) {
     try {
         return JSON.parse((event as MessageEvent).data) as T;
@@ -165,6 +184,29 @@ function repoName(repoPath: string) {
     return repoPath.split(/[\\/]/).filter(Boolean).pop() || repoPath;
 }
 
+function threadTitle(thread: ThreadSummary) {
+    return thread.name || thread.preview || thread.id;
+}
+
+function formatThreadTime(value?: number) {
+    if (!value) return "";
+    const ms = value > 10_000_000_000 ? value : value * 1000;
+    return new Date(ms).toLocaleString("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" });
+}
+
+function isNearBottom(element: HTMLElement, distance = 80) {
+    return element.scrollHeight - element.scrollTop - element.clientHeight < distance;
+}
+
+function readFileAsDataUrl(file: File) {
+    return new Promise<AgentAttachment>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve({ name: file.name, type: file.type, dataUrl: String(reader.result || "") });
+        reader.onerror = () => reject(reader.error || new Error("读取图片失败"));
+        reader.readAsDataURL(file);
+    });
+}
+
 export default function MobileAgentPage() {
     const [settings, setSettings] = useState<Settings>(defaultSettings);
     const [messages, setMessages] = useState<MobileMessage[]>([]);
@@ -174,6 +216,7 @@ export default function MobileAgentPage() {
     const [sending, setSending] = useState(false);
     const [pushing, setPushing] = useState(false);
     const [settingsOpen, setSettingsOpen] = useState(false);
+    const [threadsOpen, setThreadsOpen] = useState(false);
     const [workspace, setWorkspace] = useState<Workspace | null>(null);
     const [activeThreadId, setActiveThreadId] = useState("");
     const [copiedId, setCopiedId] = useState("");
@@ -183,12 +226,22 @@ export default function MobileAgentPage() {
     const [repos, setRepos] = useState<GitRepoInfo[]>([]);
     const [reposLoading, setReposLoading] = useState(false);
     const [repoError, setRepoError] = useState("");
+    const [threads, setThreads] = useState<ThreadSummary[]>([]);
+    const [threadsLoading, setThreadsLoading] = useState(false);
+    const [threadSearch, setThreadSearch] = useState("");
+    const [threadError, setThreadError] = useState("");
+    const [attachments, setAttachments] = useState<AgentAttachment[]>([]);
+    const [runStatus, setRunStatus] = useState("");
+    const [unreadCount, setUnreadCount] = useState(0);
     const eventSourceRef = useRef<EventSource | null>(null);
     const pollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const statusTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const pendingPromptRef = useRef("");
     const settingsRef = useRef<Settings>(defaultSettings);
     const activeThreadIdRef = useRef("");
     const scrollerRef = useRef<HTMLDivElement>(null);
+    const fileInputRef = useRef<HTMLInputElement>(null);
+    const atBottomRef = useRef(true);
 
     const canSend = useMemo(() => Boolean(input.trim()) && !sending, [input, sending]);
     const selectedRepo = useMemo(() => repos.find((repo) => samePath(repo.repoPath, settings.gitRepoPath)) || null, [repos, settings.gitRepoPath]);
@@ -202,6 +255,7 @@ export default function MobileAgentPage() {
         return () => {
             eventSourceRef.current?.close();
             stopThreadPoll();
+            if (statusTimerRef.current) clearTimeout(statusTimerRef.current);
         };
     }, []);
 
@@ -219,7 +273,14 @@ export default function MobileAgentPage() {
 
     useEffect(() => {
         localStorage.setItem(messagesKey, JSON.stringify(messages.slice(-120)));
-        scrollerRef.current?.scrollTo({ top: scrollerRef.current.scrollHeight, behavior: "smooth" });
+        const scroller = scrollerRef.current;
+        if (!scroller) return;
+        if (atBottomRef.current) {
+            requestAnimationFrame(() => scroller.scrollTo({ top: scroller.scrollHeight, behavior: "smooth" }));
+            setUnreadCount(0);
+        } else {
+            setUnreadCount((value) => value + 1);
+        }
     }, [messages]);
 
     useEffect(() => {
@@ -239,6 +300,12 @@ export default function MobileAgentPage() {
             document.removeEventListener("visibilitychange", handleVisibility);
         };
     }, [hydrated, activeThreadId, settings.agentUrl, settings.token, settings.canvasId, settings.threadId]);
+
+    const setTemporaryStatus = (text: string, autoClear = false) => {
+        setRunStatus(text);
+        if (statusTimerRef.current) clearTimeout(statusTimerRef.current);
+        if (autoClear) statusTimerRef.current = setTimeout(() => setRunStatus(""), 1800);
+    };
 
     const pushMessage = (message: MobileMessage) => setMessages((items) => [...items, message].slice(-140));
 
@@ -261,6 +328,22 @@ export default function MobileAgentPage() {
         pollTimerRef.current = null;
     }
 
+    function scrollToLatest() {
+        const scroller = scrollerRef.current;
+        if (!scroller) return;
+        atBottomRef.current = true;
+        scroller.scrollTo({ top: scroller.scrollHeight, behavior: "smooth" });
+        setUnreadCount(0);
+    }
+
+    function handleScroll() {
+        const scroller = scrollerRef.current;
+        if (!scroller) return;
+        const nearBottom = isNearBottom(scroller);
+        atBottomRef.current = nearBottom;
+        if (nearBottom) setUnreadCount(0);
+    }
+
     function sameText(a: string, b: string) {
         return a.trim().replace(/\s+/g, " ") === b.trim().replace(/\s+/g, " ");
     }
@@ -281,6 +364,8 @@ export default function MobileAgentPage() {
     function applyThreadMessages(items: MobileMessage[] | undefined, pendingPrompt = "") {
         if (!items?.length) return [];
         if (pendingPrompt && promptIndex(items, pendingPrompt) < 0) return items;
+        atBottomRef.current = true;
+        setUnreadCount(0);
         setMessages(items);
         return items;
     }
@@ -303,6 +388,30 @@ export default function MobileAgentPage() {
             setActiveThreadId(data.workspace.activeThreadId || threadId);
         }
         return applyThreadMessages(data.messages, pendingPrompt);
+    };
+
+    const refreshThreads = async (quiet = false) => {
+        if (!settingsRef.current.agentUrl.trim() || !settingsRef.current.token.trim()) return threads;
+        setThreadsLoading(true);
+        setThreadError("");
+        try {
+            const canvasId = normalizeCanvasId(settingsRef.current.canvasId);
+            const query = new URLSearchParams({ canvasId });
+            if (threadSearch.trim()) query.set("searchTerm", threadSearch.trim());
+            const data = await agentFetch<{ workspace?: Workspace; data?: ThreadSummary[] }>(`/agent/codex/threads?${query.toString()}`);
+            const nextThreads = data.data || [];
+            setThreads(nextThreads);
+            if (data.workspace) setWorkspace(data.workspace);
+            if (!quiet) pushMessage({ id: createId(), role: "status", text: nextThreads.length ? `已读取 ${nextThreads.length} 个当前工作区会话。` : "当前工作区没有可显示的 Codex 会话。" });
+            return nextThreads;
+        } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            setThreadError(message);
+            if (!quiet) pushMessage({ id: createId(), role: "error", title: "会话读取失败", text: message });
+            return threads;
+        } finally {
+            setThreadsLoading(false);
+        }
     };
 
     const refreshGitRepos = async (quiet = false) => {
@@ -342,6 +451,7 @@ export default function MobileAgentPage() {
                     setSending(false);
                     clearPendingRun();
                     stopThreadPoll();
+                    setTemporaryStatus("本轮完成", true);
                     return;
                 }
             } catch (error) {
@@ -352,6 +462,7 @@ export default function MobileAgentPage() {
                 setSending(false);
                 clearPendingRun();
                 stopThreadPoll();
+                setTemporaryStatus("");
                 pushMessage({ id: createId(), role: "status", text: "Codex 还没返回结果。回到页面或点右上角连接按钮，会继续同步当前会话记录。" });
                 return;
             }
@@ -367,6 +478,7 @@ export default function MobileAgentPage() {
         if (pendingRun) {
             pendingPromptRef.current = pendingRun.prompt;
             setSending(true);
+            setTemporaryStatus("正在同步后台执行结果...");
             setActiveThreadId(pendingRun.threadId);
             if (currentSettings.threadId !== pendingRun.threadId || normalizeCanvasId(currentSettings.canvasId) !== pendingRun.canvasId) {
                 updateSettings({ threadId: pendingRun.threadId, canvasId: pendingRun.canvasId });
@@ -378,6 +490,7 @@ export default function MobileAgentPage() {
                     setSending(false);
                     clearPendingRun();
                     stopThreadPoll();
+                    setTemporaryStatus("已同步最新结果", true);
                     return;
                 }
                 pollThreadUntilReply(pendingRun.threadId, pendingRun.canvasId, pendingRun.prompt);
@@ -400,17 +513,20 @@ export default function MobileAgentPage() {
         const itemType = normalizeText(itemField(item, "type"));
         if (event.type === "turn.started") {
             setSending(true);
+            setTemporaryStatus("Codex 正在思考...");
             upsertStreamMessage({ id: "turn-status", role: "status", text: "Codex 正在处理..." });
             return;
         }
         if (event.type === "turn.completed") {
             setSending(false);
             if (!pendingPromptRef.current) stopThreadPoll();
+            setTemporaryStatus("本轮完成", true);
             upsertStreamMessage({ id: `done-${Date.now()}`, role: "status", text: pendingPromptRef.current ? "本轮完成，正在同步记录..." : "本轮完成" });
             return;
         }
         if (event.type === "error") {
             setSending(false);
+            setTemporaryStatus("");
             stopThreadPoll();
             pushMessage({ id: createId(), role: "error", title: "Codex", text: normalizeText(event.message || itemField(item, "message")) || "Codex 出错" });
             return;
@@ -418,15 +534,19 @@ export default function MobileAgentPage() {
         if ((event.type === "item.updated" || event.type === "item.completed") && itemType === "agent_message") {
             const id = normalizeText(itemField(item, "id")) || createId();
             const text = normalizeText(itemField(item, "text"));
-            if (text) upsertStreamMessage({ id, streamId: id, role: "assistant", title: "Codex", text });
+            if (text) {
+                setTemporaryStatus("Codex 正在输出回复...");
+                upsertStreamMessage({ id, streamId: id, role: "assistant", title: "Codex", text });
+            }
             return;
         }
         if (event.type === "item.started" || event.type === "item.completed") {
             const tool = normalizeText(itemField(item, "tool"));
-            if (tool || itemType === "commandExecution") {
+            if (tool || itemType === "commandExecution" || itemType === "fileChange") {
                 const id = normalizeText(itemField(item, "id")) || createId();
-                const label = itemType === "commandExecution" ? "命令" : toolLabel(tool);
+                const label = itemType === "commandExecution" ? "命令" : itemType === "fileChange" ? "文件变更" : toolLabel(tool);
                 const status = normalizeText(itemField(item, "status")) || (event.type === "item.started" ? "执行中" : "完成");
+                setTemporaryStatus(event.type === "item.started" ? itemStatusLabel(itemType, tool) : `${label} 已完成`, event.type === "item.completed");
                 upsertStreamMessage({ id, streamId: id, role: "tool", title: label, text: status });
             }
         }
@@ -467,7 +587,7 @@ export default function MobileAgentPage() {
                 });
                 setWorkspace(resumed.workspace || data.workspace || null);
                 setActiveThreadId(threadId);
-                if (resumed.messages?.length) setMessages(resumed.messages);
+                if (resumed.messages?.length) applyThreadMessages(resumed.messages);
             }
 
             setConnected(true);
@@ -476,6 +596,7 @@ export default function MobileAgentPage() {
             setConnectionMessage("已连接电脑 Codex");
             if (!options.quiet) pushMessage({ id: createId(), role: "status", text: "已连接电脑 Codex" });
             void refreshGitRepos(true);
+            void refreshThreads(true);
 
             const source = new EventSource(withToken(agentEndpoint, `/events?clientId=mobile-codex-${Date.now()}`, settingsRef.current.token));
             eventSourceRef.current = source;
@@ -492,6 +613,7 @@ export default function MobileAgentPage() {
             source.addEventListener("agent_error", (event) => {
                 const data = parseEventData<{ message?: string }>(event);
                 setSending(false);
+                setTemporaryStatus("");
                 stopThreadPoll();
                 pushMessage({ id: createId(), role: "error", title: "Agent", text: data?.message || "Agent 出错" });
             });
@@ -502,6 +624,7 @@ export default function MobileAgentPage() {
                 if (!threadId) {
                     pendingPromptRef.current = "";
                     setSending(false);
+                    setTemporaryStatus("");
                     stopThreadPoll();
                     return;
                 }
@@ -511,6 +634,7 @@ export default function MobileAgentPage() {
                         setSending(false);
                         clearPendingRun();
                         stopThreadPoll();
+                        setTemporaryStatus("本轮完成", true);
                     }
                 });
             });
@@ -528,6 +652,28 @@ export default function MobileAgentPage() {
             setConnectionMessage(message);
             pushMessage({ id: createId(), role: "error", title: "连接失败", text: message });
             return false;
+        }
+    };
+
+    const selectThread = async (thread: ThreadSummary) => {
+        if (!thread.id) return;
+        try {
+            const canvasId = normalizeCanvasId(settingsRef.current.canvasId);
+            setTemporaryStatus("正在切换会话...");
+            const data = await agentFetch<{ workspace?: Workspace; messages?: MobileMessage[] }>(`/agent/codex/threads/${encodeURIComponent(thread.id)}/resume`, {
+                method: "POST",
+                body: JSON.stringify({ canvasId }),
+            });
+            setWorkspace(data.workspace || workspace);
+            setActiveThreadId(thread.id);
+            updateSettings({ threadId: thread.id });
+            if (data.messages?.length) applyThreadMessages(data.messages);
+            else setMessages([]);
+            setThreadsOpen(false);
+            setTemporaryStatus("会话已切换", true);
+        } catch (error) {
+            setTemporaryStatus("");
+            pushMessage({ id: createId(), role: "error", title: "切换会话失败", text: error instanceof Error ? error.message : String(error) });
         }
     };
 
@@ -558,6 +704,7 @@ export default function MobileAgentPage() {
         const remote = repo.defaultRemote || "origin";
         const branch = repo.defaultBranch || "main";
         setPushing(true);
+        setTemporaryStatus(`正在推送 ${repoName(repo.repoPath)}...`);
         pushMessage({ id: createId(), role: "status", text: `正在让电脑执行 git push ${remote} HEAD:${branch}\n${repo.repoPath}` });
         try {
             const data = await agentFetch<{ stdout?: string; stderr?: string; remote?: string; branch?: string; repo?: GitRepoInfo; repoPath?: string }>("/agent/git/push", {
@@ -565,8 +712,10 @@ export default function MobileAgentPage() {
                 body: JSON.stringify({ canvasId: normalizeCanvasId(settingsRef.current.canvasId), repoPath: repo.repoPath, remote, branch }),
             });
             pushMessage({ id: createId(), role: "tool", title: "Git push", text: data.stdout || data.stderr || `已推送 ${repoName(data.repo?.repoPath || repo.repoPath)} 到 ${data.remote || remote}/${data.branch || branch}` });
+            setTemporaryStatus("推送完成", true);
             void refreshGitRepos(true);
         } catch (error) {
+            setTemporaryStatus("");
             pushMessage({ id: createId(), role: "error", title: "推送失败", text: error instanceof Error ? error.message : String(error) });
         } finally {
             setPushing(false);
@@ -575,7 +724,7 @@ export default function MobileAgentPage() {
 
     const newThread = async () => {
         try {
-            const data = await agentFetch<{ workspace?: Workspace; thread?: { id?: string } }>("/agent/codex/threads/new", {
+            const data = await agentFetch<{ workspace?: Workspace; thread?: { id?: string }; messages?: MobileMessage[] }>("/agent/codex/threads/new", {
                 method: "POST",
                 body: JSON.stringify({ canvasId: normalizeCanvasId(settingsRef.current.canvasId) }),
             });
@@ -583,7 +732,9 @@ export default function MobileAgentPage() {
             setActiveThreadId(data.thread?.id || data.workspace?.activeThreadId || "");
             if (data.thread?.id || data.workspace?.activeThreadId) updateSettings({ threadId: data.thread?.id || data.workspace?.activeThreadId || "" });
             setMessages([]);
+            setThreadsOpen(false);
             pushMessage({ id: createId(), role: "status", text: "已创建新 Codex 对话" });
+            void refreshThreads(true);
         } catch (error) {
             pushMessage({ id: createId(), role: "error", title: "新对话失败", text: error instanceof Error ? error.message : String(error) });
         }
@@ -604,10 +755,13 @@ export default function MobileAgentPage() {
             const ok = await connect({ quiet: true });
             if (!ok) return;
         }
+        const currentAttachments = attachments;
         setInput("");
+        setAttachments([]);
         setSending(true);
         pendingPromptRef.current = prompt;
-        pushMessage({ id: createId(), role: "user", text: prompt });
+        setTemporaryStatus("Codex 正在接收任务...");
+        pushMessage({ id: createId(), role: "user", text: currentAttachments.length ? `${prompt}\n\n[图片附件 ${currentAttachments.length} 张]` : prompt });
         upsertStreamMessage({ id: "turn-status", role: "status", text: "Codex 正在处理..." });
         try {
             const canvasId = normalizeCanvasId(settingsRef.current.canvasId);
@@ -615,7 +769,7 @@ export default function MobileAgentPage() {
             if (targetThreadId) writePendingRun({ threadId: targetThreadId, canvasId, prompt, startedAt: Date.now() });
             const data = await agentFetch<{ threadId?: string }>("/agent/codex/turn", {
                 method: "POST",
-                body: JSON.stringify({ prompt, canvasId, threadId: targetThreadId || undefined }),
+                body: JSON.stringify({ prompt, canvasId, threadId: targetThreadId || undefined, attachments: currentAttachments }),
             });
             if (data.threadId) {
                 setActiveThreadId(data.threadId);
@@ -626,6 +780,8 @@ export default function MobileAgentPage() {
             setSending(false);
             pendingPromptRef.current = "";
             stopThreadPoll();
+            setTemporaryStatus("");
+            setAttachments(currentAttachments);
             pushMessage({ id: createId(), role: "error", title: "发送失败", text: error instanceof Error ? error.message : String(error) });
         }
     };
@@ -634,6 +790,18 @@ export default function MobileAgentPage() {
         await navigator.clipboard.writeText(message.text);
         setCopiedId(message.id);
         window.setTimeout(() => setCopiedId(""), 1200);
+    };
+
+    const pickImages = async (event: ChangeEvent<HTMLInputElement>) => {
+        const files = [...(event.target.files || [])].filter((file) => file.type.startsWith("image/")).slice(0, 6);
+        event.target.value = "";
+        if (!files.length) return;
+        try {
+            const next = await Promise.all(files.map(readFileAsDataUrl));
+            setAttachments((items) => [...items, ...next].slice(0, 6));
+        } catch (error) {
+            pushMessage({ id: createId(), role: "error", title: "图片读取失败", text: error instanceof Error ? error.message : String(error) });
+        }
     };
 
     return (
@@ -647,6 +815,9 @@ export default function MobileAgentPage() {
                     <div className="truncate text-xs text-stone-500 dark:text-stone-400">{workspace?.workspacePath || "未连接工作目录"}</div>
                 </div>
                 <div className="flex items-center gap-1">
+                    <button type="button" className="grid size-9 place-items-center text-stone-500 transition hover:text-stone-950 dark:text-stone-400 dark:hover:text-white" onClick={() => { setThreadsOpen(true); void refreshThreads(true); }} aria-label="会话" title="会话">
+                        <MessageSquareText className="size-4" />
+                    </button>
                     <button type="button" className="grid size-9 place-items-center text-stone-500 transition hover:text-stone-950 dark:text-stone-400 dark:hover:text-white" onClick={() => void connect()} aria-label="连接" title="连接">
                         {connecting ? <LoaderCircle className="size-4 animate-spin" /> : connected ? <CheckCircle2 className="size-4" /> : <PlugZap className="size-4" />}
                     </button>
@@ -673,13 +844,13 @@ export default function MobileAgentPage() {
                 </div>
             ) : null}
 
-            {sending ? (
+            {sending || runStatus ? (
                 <div className="shrink-0 border-b border-black/10 bg-amber-500/10 px-4 py-2 text-xs leading-5 text-amber-800 dark:border-white/10 dark:text-amber-100">
-                    Codex 后台执行中。手机锁屏或切后台后，回到页面会自动同步当前会话记录。
+                    {runStatus || "Codex 后台执行中。手机锁屏或切后台后，回到页面会自动同步当前会话记录。"}
                 </div>
             ) : null}
 
-            <div ref={scrollerRef} className="min-h-0 flex-1 overflow-y-auto px-4 py-5">
+            <div ref={scrollerRef} onScroll={handleScroll} className="min-h-0 flex-1 overflow-y-auto px-4 py-5">
                 <div className="mx-auto flex max-w-3xl flex-col gap-3">
                     {messages.length ? (
                         messages.map((message) => (
@@ -719,8 +890,31 @@ export default function MobileAgentPage() {
                 </div>
             </div>
 
+            {unreadCount > 0 ? (
+                <button type="button" onClick={scrollToLatest} className="fixed bottom-24 left-1/2 z-20 inline-flex -translate-x-1/2 items-center gap-1 rounded-full border border-black/10 bg-stone-950 px-3 py-2 text-xs font-medium text-white shadow-lg dark:border-white/10 dark:bg-white dark:text-black">
+                    <ChevronDown className="size-4" />
+                    {unreadCount} 条新消息
+                </button>
+            ) : null}
+
             <form onSubmit={(event) => void submit(event)} className="shrink-0 border-t border-black/10 bg-white/72 p-3 backdrop-blur-xl dark:border-white/10 dark:bg-black/72">
+                {attachments.length ? (
+                    <div className="mx-auto mb-2 flex max-w-3xl gap-2 overflow-x-auto">
+                        {attachments.map((item, index) => (
+                            <div key={`${item.name}-${index}`} className="relative size-16 shrink-0 overflow-hidden rounded-xl border border-black/10 bg-white dark:border-white/10 dark:bg-white/[0.06]">
+                                {item.dataUrl ? <img src={item.dataUrl} alt={item.name || "attachment"} className="size-full object-cover" /> : null}
+                                <button type="button" className="absolute right-1 top-1 grid size-5 place-items-center rounded-full bg-black/70 text-white" onClick={() => setAttachments((items) => items.filter((_, itemIndex) => itemIndex !== index))} aria-label="移除图片">
+                                    <X className="size-3" />
+                                </button>
+                            </div>
+                        ))}
+                    </div>
+                ) : null}
                 <div className="mx-auto flex max-w-3xl items-end gap-2 rounded-3xl border border-black/10 bg-[#f9f8f4] p-2 shadow-[0_12px_34px_rgba(23,21,19,.10)] dark:border-white/10 dark:bg-white/[0.06]">
+                    <input ref={fileInputRef} type="file" accept="image/*" multiple className="hidden" onChange={(event) => void pickImages(event)} />
+                    <button type="button" className="grid size-10 shrink-0 place-items-center rounded-2xl text-stone-500 transition hover:text-stone-950 dark:text-stone-300 dark:hover:text-white" onClick={() => fileInputRef.current?.click()} aria-label="添加图片">
+                        <ImagePlus className="size-4" />
+                    </button>
                     <textarea
                         value={input}
                         onChange={(event) => setInput(event.target.value)}
@@ -729,13 +923,63 @@ export default function MobileAgentPage() {
                         }}
                         rows={1}
                         placeholder={connected ? "让 Codex 继续做项目任务..." : "可以先输入，发送时会尝试连接电脑 Agent"}
-                        className="max-h-36 min-h-10 flex-1 bg-transparent px-3 py-2 text-[16px] leading-6 outline-none placeholder:text-stone-400"
+                        className="max-h-36 min-h-10 flex-1 bg-transparent px-1 py-2 text-[16px] leading-6 outline-none placeholder:text-stone-400"
                     />
                     <button type="submit" disabled={!canSend} className="grid size-10 shrink-0 place-items-center rounded-2xl bg-stone-950 text-white transition enabled:hover:scale-[1.03] disabled:opacity-35 dark:bg-white dark:text-black" aria-label="发送">
                         {sending ? <LoaderCircle className="size-4 animate-spin" /> : <SendHorizontal className="size-4" />}
                     </button>
                 </div>
             </form>
+
+            {threadsOpen ? (
+                <div className="fixed inset-0 z-50 bg-black/35 backdrop-blur-sm" onClick={() => setThreadsOpen(false)}>
+                    <section className="absolute bottom-0 left-0 right-0 max-h-[88vh] overflow-y-auto rounded-t-[1.75rem] border border-black/10 bg-[#f7f5ef] p-5 shadow-2xl sm:bottom-auto sm:right-auto sm:top-0 sm:h-full sm:w-[430px] sm:rounded-none dark:border-white/10 dark:bg-[#101010]" onClick={(event) => event.stopPropagation()}>
+                        <div className="flex items-center justify-between">
+                            <h2 className="text-lg font-semibold">选择会话</h2>
+                            <button type="button" className="grid size-9 place-items-center text-stone-500 transition hover:text-stone-950 dark:hover:text-white" onClick={() => setThreadsOpen(false)} aria-label="关闭">
+                                <X className="size-4" />
+                            </button>
+                        </div>
+                        <div className="mt-4 flex gap-2">
+                            <input value={threadSearch} onChange={(event) => setThreadSearch(event.target.value)} placeholder="搜索当前工作区会话" className="h-11 min-w-0 flex-1 rounded-xl border border-black/10 bg-white px-3 outline-none focus:border-stone-500 dark:border-white/10 dark:bg-white/[0.06]" />
+                            <button type="button" className="grid size-11 place-items-center rounded-xl border border-black/10 bg-white text-stone-600 disabled:opacity-45 dark:border-white/10 dark:bg-white/[0.06] dark:text-stone-300" onClick={() => void refreshThreads()} disabled={threadsLoading || !settings.agentUrl.trim() || !settings.token.trim()} aria-label="刷新会话">
+                                <RefreshCcw className={`size-4 ${threadsLoading ? "animate-spin" : ""}`} />
+                            </button>
+                        </div>
+                        <div className="mt-3 grid grid-cols-2 gap-2">
+                            <button type="button" className="inline-flex h-11 items-center justify-center gap-2 rounded-xl border border-black/10 bg-white text-sm font-medium disabled:opacity-45 dark:border-white/10 dark:bg-white/[0.06]" onClick={() => void connect()}>
+                                <PlugZap className="size-4" />
+                                连接
+                            </button>
+                            <button type="button" className="inline-flex h-11 items-center justify-center gap-2 rounded-xl border border-black/10 bg-white text-sm font-medium disabled:opacity-45 dark:border-white/10 dark:bg-white/[0.06]" onClick={() => void newThread()} disabled={!connected}>
+                                <RotateCcw className="size-4" />
+                                新对话
+                            </button>
+                        </div>
+                        {threadError ? <div className="mt-3 rounded-xl border border-red-500/20 bg-red-500/10 px-3 py-2 text-xs leading-5 text-red-800 dark:text-red-100">{threadError}</div> : null}
+                        <div className="mt-4 space-y-2">
+                            {threads.map((thread) => (
+                                <button
+                                    key={thread.id}
+                                    type="button"
+                                    className={[
+                                        "block w-full rounded-2xl border px-3 py-3 text-left transition",
+                                        thread.id === activeThreadId ? "border-stone-950 bg-stone-950 text-white dark:border-white dark:bg-white dark:text-black" : "border-black/10 bg-white/70 hover:bg-white dark:border-white/10 dark:bg-white/[0.05] dark:hover:bg-white/[0.08]",
+                                    ].join(" ")}
+                                    onClick={() => void selectThread(thread)}
+                                >
+                                    <div className="line-clamp-2 text-sm font-medium leading-5">{threadTitle(thread)}</div>
+                                    <div className="mt-1 flex items-center justify-between gap-2 text-xs opacity-60">
+                                        <span className="truncate">{thread.cwd || workspace?.workspacePath || "workspace"}</span>
+                                        <span className="shrink-0">{formatThreadTime(thread.updatedAt || thread.createdAt)}</span>
+                                    </div>
+                                </button>
+                            ))}
+                            {!threads.length ? <div className="rounded-2xl bg-black/[0.04] px-3 py-4 text-center text-xs leading-5 text-stone-500 dark:bg-white/[0.05] dark:text-stone-400">连接后点击刷新，会列出当前 Workspace 下的 Codex 会话。</div> : null}
+                        </div>
+                    </section>
+                </div>
+            ) : null}
 
             {settingsOpen ? (
                 <div className="fixed inset-0 z-50 bg-black/35 backdrop-blur-sm" onClick={() => setSettingsOpen(false)}>
@@ -778,6 +1022,24 @@ export default function MobileAgentPage() {
                             </label>
 
                             <div className="rounded-2xl border border-black/10 bg-white/60 p-3 dark:border-white/10 dark:bg-white/[0.05]">
+                                <div className="flex items-center gap-2 text-sm font-medium">
+                                    <Settings2 className="size-4" />
+                                    模型与强度
+                                </div>
+                                <p className="mt-1 text-xs leading-5 text-stone-500 dark:text-stone-400">当前本机 agent 后端还不接收 model / effort 参数，所以这里先只保留配置位，实际仍沿用电脑 Codex 默认设置。</p>
+                                <div className="mt-3 grid grid-cols-2 gap-2">
+                                    <input value={settings.model} onChange={(event) => updateSettings({ model: event.target.value })} placeholder="模型，待后端接入" disabled className="h-11 rounded-xl border border-black/10 bg-white/60 px-3 text-sm outline-none disabled:opacity-55 dark:border-white/10 dark:bg-white/[0.06]" />
+                                    <select value={settings.effort} onChange={(event) => updateSettings({ effort: event.target.value })} disabled className="h-11 rounded-xl border border-black/10 bg-white/60 px-3 text-sm outline-none disabled:opacity-55 dark:border-white/10 dark:bg-white/[0.06]">
+                                        <option value="">强度，待后端接入</option>
+                                        <option value="low">low</option>
+                                        <option value="medium">medium</option>
+                                        <option value="high">high</option>
+                                        <option value="xhigh">xhigh</option>
+                                    </select>
+                                </div>
+                            </div>
+
+                            <div className="rounded-2xl border border-black/10 bg-white/60 p-3 dark:border-white/10 dark:bg-white/[0.05]">
                                 <div className="flex items-center justify-between gap-3">
                                     <div>
                                         <div className="flex items-center gap-2 text-sm font-medium">
@@ -790,11 +1052,7 @@ export default function MobileAgentPage() {
                                         <RefreshCcw className={`size-4 ${reposLoading ? "animate-spin" : ""}`} />
                                     </button>
                                 </div>
-                                <select
-                                    value={settings.gitRepoPath}
-                                    onChange={(event) => updateSettings({ gitRepoPath: event.target.value })}
-                                    className="mt-3 h-11 w-full rounded-xl border border-black/10 bg-white px-3 text-sm outline-none focus:border-stone-500 dark:border-white/10 dark:bg-[#151515]"
-                                >
+                                <select value={settings.gitRepoPath} onChange={(event) => updateSettings({ gitRepoPath: event.target.value })} className="mt-3 h-11 w-full rounded-xl border border-black/10 bg-white px-3 text-sm outline-none focus:border-stone-500 dark:border-white/10 dark:bg-[#151515]">
                                     <option value="">选择要推送的仓库</option>
                                     {repos.map((repo) => (
                                         <option key={repo.repoPath} value={repo.repoPath}>

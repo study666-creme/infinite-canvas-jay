@@ -283,6 +283,10 @@ function normalizeQueue(items: QueuedTask[]) {
         .map((item) => ({ ...item, attachments: item.attachments || [], status: item.status === "running" ? "queued" : item.status }));
 }
 
+function isAgentRouteNotFound(message: string) {
+    return /\b404\b/i.test(message) || /\bnot found\b/i.test(message);
+}
+
 function normalizePendingGuide(value: PendingGuide | null) {
     if (!value?.text?.trim()) return null;
     return { ...value, text: value.text.trim(), attachments: value.attachments || [] };
@@ -759,8 +763,15 @@ export default function MobileAgentPage() {
             return nextThreads;
         } catch (error) {
             const message = error instanceof Error ? error.message : String(error);
-            setThreadError(message);
-            if (!quiet) pushMessage({ id: createId(), role: "error", title: "会话读取失败", text: message });
+            const fallbackMessage = isAgentRouteNotFound(message)
+                ? "当前电脑 Agent 暂不支持读取会话列表。可以先用设置里的 Codex Thread ID 连接指定会话；电脑端 agent 更新并重启后，会话列表会恢复。"
+                : message;
+            if (!quiet) {
+                setThreadError(fallbackMessage);
+                pushMessage({ id: createId(), role: "error", title: "会话读取失败", text: fallbackMessage });
+            } else {
+                setThreadError("");
+            }
             return threads;
         } finally {
             setThreadsLoading(false);
@@ -786,8 +797,15 @@ export default function MobileAgentPage() {
             return discoveredProjects;
         } catch (error) {
             const message = error instanceof Error ? error.message : String(error);
-            setThreadError(message);
-            if (!quiet) pushMessage({ id: createId(), role: "error", title: "项目发现失败", text: message });
+            const fallbackMessage = isAgentRouteNotFound(message)
+                ? "当前电脑 Agent 暂不支持自动发现项目。可以点“新增”手动添加 Workspace；电脑端 agent 更新并重启后，“发现”会自动列出项目。"
+                : message;
+            if (!quiet) {
+                setThreadError(fallbackMessage);
+                pushMessage({ id: createId(), role: "error", title: "项目发现失败", text: fallbackMessage });
+            } else {
+                setThreadError("");
+            }
             return projects;
         } finally {
             setProjectsLoading(false);

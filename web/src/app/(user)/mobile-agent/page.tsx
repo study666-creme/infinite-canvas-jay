@@ -43,7 +43,7 @@ const queueKey = "kazang-mobile-codex:task-queue";
 const pendingRunMaxAge = 1000 * 60 * 60 * 12;
 const legacyDefaultWorkspacePath = "D:\\canvas\\infinite-canvas";
 const queueGuides = ["继续修复并验证", "跑测试并汇报结果", "提交并推送当前项目", "整理当前进度和下一步", "检查线上部署状态"];
-const mobileAgentUiVersion = "队列版 5 2026-07-09";
+const mobileAgentUiVersion = "队列版 6 2026-07-09";
 const defaultSettings: Settings = {
     agentUrl: "",
     token: "",
@@ -262,6 +262,9 @@ export default function MobileAgentPage() {
     const eventSourceRef = useRef<EventSource | null>(null);
     const pollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const statusTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const autoSyncTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+    const autoSyncInFlightRef = useRef(false);
+    const lastAutoSyncAtRef = useRef(0);
     const pendingPromptRef = useRef("");
     const activeQueueTaskIdRef = useRef("");
     const queuedTasksRef = useRef<QueuedTask[]>([]);
@@ -297,6 +300,7 @@ export default function MobileAgentPage() {
             eventSourceRef.current?.close();
             stopThreadPoll();
             if (statusTimerRef.current) clearTimeout(statusTimerRef.current);
+            if (autoSyncTimerRef.current) clearInterval(autoSyncTimerRef.current);
         };
     }, []);
 
@@ -331,21 +335,25 @@ export default function MobileAgentPage() {
 
     useEffect(() => {
         if (!hydrated) return;
-        const resume = () => {
+        const resume = (force = false) => {
             if (document.visibilityState === "hidden") return;
-            void resumeThreadAfterInterruption();
+            void autoSyncFromAgent(force ? "foreground" : "interval");
         };
-        const handleVisibility = () => resume();
-        window.addEventListener("focus", resume);
-        window.addEventListener("online", resume);
+        const handleFocus = () => resume(true);
+        const handleVisibility = () => resume(true);
+        window.addEventListener("focus", handleFocus);
+        window.addEventListener("online", handleFocus);
         document.addEventListener("visibilitychange", handleVisibility);
-        resume();
+        resume(true);
+        autoSyncTimerRef.current = setInterval(() => resume(false), sending || runStatus ? 5000 : 15000);
         return () => {
-            window.removeEventListener("focus", resume);
-            window.removeEventListener("online", resume);
+            window.removeEventListener("focus", handleFocus);
+            window.removeEventListener("online", handleFocus);
             document.removeEventListener("visibilitychange", handleVisibility);
+            if (autoSyncTimerRef.current) clearInterval(autoSyncTimerRef.current);
+            autoSyncTimerRef.current = null;
         };
-    }, [hydrated, activeThreadId, settings.agentUrl, settings.token, settings.canvasId, settings.threadId]);
+    }, [hydrated, activeThreadId, settings.agentUrl, settings.token, settings.canvasId, settings.threadId, sending, runStatus]);
 
     const setTemporaryStatus = (text: string, autoClear = false) => {
         setRunStatus(text);
@@ -478,13 +486,34 @@ export default function MobileAgentPage() {
         return index >= 0 && items.slice(index + 1).some((item) => item.role === "assistant" || item.role === "error");
     }
 
-    function applyThreadMessages(items: MobileMessage[] | undefined, pendingPrompt = "") {
+    function applyThreadMessages(items: MobileMessage[] | undefined, pendingPrompt = "", options: { requirePromptMatch?: boolean } = {}) {
         if (!items?.length) return [];
-        if (pendingPrompt && promptIndex(items, pendingPrompt) < 0) return items;
+        if (pendingPrompt && options.requirePromptMatch && promptIndex(items, pendingPrompt) < 0) return items;
         atBottomRef.current = true;
         setUnreadCount(0);
         setMessages(items);
         return items;
+    }
+
+    async function autoSyncFromAgent(reason: "foreground" | "interval" | "offline" = "interval") {
+        const currentSettings = settingsRef.current;
+        if (!currentSettings.agentUrl.trim() || !currentSettings.token.trim()) return;
+        if (typeof document !== "undefined" && document.visibilityState === "hidden") return;
+        if (autoSyncInFlightRef.current) return;
+        const pendingRun = readPendingRun();
+        const activeWork = Boolean(pendingRun || pendingPromptRef.current || sending || runStatus || connectionStatus === "offline");
+        const minInterval = reason === "foreground" ? 1500 : activeWork ? 4500 : 14000;
+        const now = Date.now();
+        if (now - lastAutoSyncAtRef.current < minInterval) return;
+        lastAutoSyncAtRef.current = now;
+        autoSyncInFlightRef.current = true;
+        try {
+            if (activeWork) setTemporaryStatus(pendingRun ? "正在自动同步后台执行结果..." : runStatus || "正在自动同步 Codex 状态...");
+            await connect({ quiet: true, silent: true, syncOnly: true });
+            await resumeThreadAfterInterruption();
+        } finally {
+            autoSyncInFlightRef.current = false;
+        }
     }
 
     const agentFetch = async <T,>(targetPath: string, init?: RequestInit) => {
@@ -665,12 +694,14 @@ export default function MobileAgentPage() {
         }
     };
 
-    const connect = async (options: { quiet?: boolean } = {}) => {
+    const connect = async (options: { quiet?: boolean; silent?: boolean; syncOnly?: boolean } = {}) => {
         eventSourceRef.current?.close();
-        setConnecting(true);
-        setConnected(false);
-        setConnectionStatus("connecting");
-        setConnectionMessage("正在连接电脑 Agent...");
+        if (!options.silent) {
+            setConnecting(true);
+            setConnected(false);
+            setConnectionStatus("connecting");
+            setConnectionMessage("正在连接电脑 Agent...");
+        }
         if (!options.quiet) pushMessage({ id: createId(), role: "status", text: "正在连接电脑 Agent..." });
         try {
             const agentEndpoint = validateAgentUrl(settingsRef.current.agentUrl);
@@ -679,7 +710,7 @@ export default function MobileAgentPage() {
                 updateSettings({ agentUrl: agentEndpoint });
             }
             const canvasId = normalizeCanvasId(settingsRef.current.canvasId);
-            const threadId = normalizeThreadId(settingsRef.current.threadId);
+            const threadId = normalizeThreadId(settingsRef.current.threadId) || activeThreadIdRef.current;
             if (settingsRef.current.workspacePath.trim()) {
                 const data = await agentFetch<{ workspace?: Workspace }>("/agent/codex/workspace", {
                     method: "POST",
@@ -706,10 +737,12 @@ export default function MobileAgentPage() {
             setConnected(true);
             setConnecting(false);
             setConnectionStatus("connected");
-            setConnectionMessage("已连接电脑 Codex");
+            if (!options.silent) setConnectionMessage("已连接电脑 Codex");
             if (!options.quiet) pushMessage({ id: createId(), role: "status", text: "已连接电脑 Codex" });
-            void refreshGitRepos(true);
-            void refreshThreads(true);
+            if (!options.syncOnly) {
+                void refreshGitRepos(true);
+                void refreshThreads(true);
+            }
 
             const source = new EventSource(withToken(agentEndpoint, `/events?clientId=mobile-codex-${Date.now()}`, settingsRef.current.token));
             eventSourceRef.current = source;
@@ -717,7 +750,7 @@ export default function MobileAgentPage() {
                 setConnected(true);
                 setConnecting(false);
                 setConnectionStatus("connected");
-                setConnectionMessage("实时通道已连接");
+                if (!options.silent) setConnectionMessage("实时通道已连接");
             });
             source.addEventListener("agent_event", (event) => {
                 const data = parseEventData<AgentEvent>(event);
@@ -746,7 +779,7 @@ export default function MobileAgentPage() {
             source.onerror = () => {
                 setConnecting(false);
                 setConnectionStatus("offline");
-                setConnectionMessage("实时通道断开；发送和同步仍会尝试通过 HTTP 继续");
+                if (!options.silent) setConnectionMessage("实时通道断开；发送和同步仍会尝试通过 HTTP 继续");
             };
             return true;
         } catch (error) {
@@ -754,8 +787,10 @@ export default function MobileAgentPage() {
             setConnected(false);
             const message = error instanceof Error ? error.message : String(error);
             setConnectionStatus("error");
-            setConnectionMessage(message);
-            pushMessage({ id: createId(), role: "error", title: "连接失败", text: message });
+            if (!options.silent) {
+                setConnectionMessage(message);
+                pushMessage({ id: createId(), role: "error", title: "连接失败", text: message });
+            }
             return false;
         }
     };

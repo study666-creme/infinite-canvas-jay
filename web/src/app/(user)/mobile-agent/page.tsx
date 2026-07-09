@@ -45,7 +45,6 @@ const activeProjectKey = "kazang-mobile-codex:active-project";
 const pendingRunMaxAge = 1000 * 60 * 60 * 12;
 const legacyDefaultWorkspacePath = "D:\\canvas\\infinite-canvas";
 const queueGuides = ["继续修复并验证", "跑测试并汇报结果", "提交并推送当前项目", "整理当前进度和下一步", "检查线上部署状态"];
-const mobileAgentUiVersion = "队列版 7 2026-07-09";
 const projectPresets: ProjectPreset[] = [
     { id: "canvas", label: "画布", canvasId: "canvas", workspacePath: "D:\\canvas", threadId: "019f3789-5816-7230-a4af-f4fa992adb6e", gitRepoPath: "D:\\canvas\\infinite-canvas" },
     { id: "agent", label: "agent", canvasId: "agent", workspacePath: "C:\\Users\\Jay\\Documents\\agent", threadId: "019f419a-e8fb-7ff3-a7ef-2fe6f58a0990", gitRepoPath: "C:\\Users\\Jay\\Documents\\agent" },
@@ -1132,16 +1131,15 @@ export default function MobileAgentPage() {
 
     return (
         <main className="flex h-full flex-col bg-[#f5f3ee] text-stone-950 dark:bg-[#070707] dark:text-stone-100">
-            <header className="flex shrink-0 items-center justify-between border-b border-black/10 bg-white/60 px-4 py-3 backdrop-blur-xl dark:border-white/10 dark:bg-white/[0.04]">
-                <div className="min-w-0">
-                    <div className="flex items-center gap-2 text-base font-semibold leading-6">
-                        <TerminalSquare className="size-4" />
-                        移动 Codex
-                        <span className="rounded-full border border-black/10 bg-black/[0.04] px-2 py-0.5 text-[11px] font-medium leading-4 text-stone-500 dark:border-white/10 dark:bg-white/[0.06] dark:text-stone-400">{mobileAgentUiVersion}</span>
+            <header className="flex shrink-0 items-center justify-between gap-3 border-b border-black/10 bg-white/60 px-4 py-3 backdrop-blur-xl dark:border-white/10 dark:bg-white/[0.04]">
+                <div className="min-w-0 flex-1">
+                    <div className="flex min-w-0 items-center gap-2 text-base font-semibold leading-6">
+                        <TerminalSquare className="size-4 shrink-0" />
+                        <span className="truncate">移动 Codex</span>
                     </div>
                     <div className="truncate text-xs text-stone-500 dark:text-stone-400">{activeProject ? `${activeProject.label} · ${workspace?.workspacePath || activeProject.workspacePath}` : workspace?.workspacePath || "未连接工作目录"}</div>
                 </div>
-                <div className="flex items-center gap-1">
+                <div className="flex shrink-0 items-center gap-1">
                     <button type="button" className="grid size-9 place-items-center rounded-xl text-stone-500 transition hover:bg-black/[0.04] hover:text-stone-950 dark:text-stone-400 dark:hover:bg-sky-400/10 dark:hover:text-sky-100" onClick={() => { setThreadsOpen(true); void refreshThreads(true); }} aria-label="会话" title="会话">
                         <MessageSquareText className="size-4" />
                     </button>

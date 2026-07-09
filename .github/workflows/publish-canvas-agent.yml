@@ -48,8 +48,20 @@ jobs:
             echo "should_publish=true" >> "$GITHUB_OUTPUT"
           fi
 
+      - name: Check npm token
+        id: npm-token
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          if [ -n "$NODE_AUTH_TOKEN" ]; then
+            echo "has_token=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_token=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::NPM_TOKEN is not configured; skipping npm publish."
+          fi
+
       - name: Publish to npm
-        if: steps.package.outputs.should_publish == 'true'
+        if: steps.package.outputs.should_publish == 'true' && steps.npm-token.outputs.has_token == 'true'
         run: npm publish --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
@@ -57,3 +69,7 @@ jobs:
       - name: Skip existing version
         if: steps.package.outputs.should_publish != 'true'
         run: echo "${{ steps.package.outputs.name }}@${{ steps.package.outputs.version }} already exists on npm, skipping publish."
+
+      - name: Skip missing token
+        if: steps.package.outputs.should_publish == 'true' && steps.npm-token.outputs.has_token != 'true'
+        run: echo "NPM_TOKEN is missing, so ${{ steps.package.outputs.name }}@${{ steps.package.outputs.version }} was not published."

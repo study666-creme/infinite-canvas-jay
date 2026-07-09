@@ -48,7 +48,6 @@ const activeProjectKey = "kazang-mobile-codex:active-project";
 const projectsKey = "kazang-mobile-codex:projects";
 const pendingRunMaxAge = 1000 * 60 * 60 * 12;
 const legacyDefaultWorkspacePath = "D:\\canvas\\infinite-canvas";
-const queueGuides = ["继续修复并验证", "跑测试并汇报结果", "提交并推送当前项目", "整理当前进度和下一步", "检查线上部署状态"];
 const projectPresets: ProjectPreset[] = [];
 const defaultSettings: Settings = {
     agentUrl: "",
@@ -620,18 +619,6 @@ export default function MobileAgentPage() {
             queuedTasksRef.current = next;
             return next;
         });
-    }
-
-    function useQueueGuide(guide: string) {
-        if (pendingGuideRef.current) {
-            confirmPendingGuide(guide);
-            return;
-        }
-        if (sending || pendingPromptRef.current || activeQueueTaskIdRef.current) {
-            enqueueTask(guide);
-            return;
-        }
-        setInput((value) => (value.trim() ? `${value.trim()}\n${guide}` : guide));
     }
 
     function clearFinishedQueue() {
@@ -1466,23 +1453,9 @@ export default function MobileAgentPage() {
                                         <CheckCircle2 className="size-3.5" />
                                         作为引导发送
                                     </button>
-                                    <span className="rounded-full border border-black/10 bg-white/55 px-3 py-1.5 text-xs text-stone-500 dark:border-white/10 dark:bg-white/[0.06] dark:text-stone-300">也可以点下方引导词后再发送</span>
                                 </div>
                             </div>
                         ) : null}
-
-                        <div className="mt-3 flex flex-wrap gap-2">
-                            {queueGuides.map((guide) => (
-                                <button
-                                    key={guide}
-                                    type="button"
-                                    className="rounded-full border border-black/10 bg-white/70 px-3 py-1.5 text-xs text-stone-700 transition hover:border-sky-400/40 hover:bg-sky-500/10 dark:border-white/10 dark:bg-white/[0.06] dark:text-stone-200 dark:hover:bg-sky-400/10"
-                                    onClick={() => useQueueGuide(guide)}
-                                >
-                                    {guide}
-                                </button>
-                            ))}
-                        </div>
 
                         {visibleQueueTasks.length ? (
                             <div className="mt-3 space-y-2">

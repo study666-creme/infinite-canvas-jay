@@ -21,6 +21,16 @@ type GitRepoInfo = {
     warnings: string[];
     pushBlocked: boolean;
 };
+type CodexWorkspaceProject = {
+    id: string;
+    label: string;
+    canvasId: string;
+    workspacePath: string;
+    threadId: string;
+    threadCount: number;
+    updatedAt: number;
+    source: "saved" | "discovered";
+};
 
 export function startHttpServer() {
     const config = loadConfig(true);
@@ -69,6 +79,11 @@ export function startHttpServer() {
         const workspace = ensureCanvasWorkspace(config, String(req.query.canvasId || ""));
         const result = await listCodexThreads(emit, { cwd: workspace.workspacePath, searchTerm: String(req.query.searchTerm || "") });
         res.json({ ok: true, workspace, ...result });
+    }));
+    app.get("/agent/codex/workspaces", route(async (req, res) => {
+        const result = await listCodexThreads(emit, { searchTerm: String(req.query.searchTerm || ""), limit: Number(req.query.limit || 160) || 160 });
+        const projects = codexWorkspaceProjects(config, result.data);
+        res.json({ ok: true, projects, data: result.data, nextCursor: result.nextCursor, backwardsCursor: result.backwardsCursor });
     }));
     app.post("/agent/codex/threads/new", route(async (req, res) => {
         const workspace = ensureCanvasWorkspace(config, String(req.body?.canvasId || ""));
@@ -182,6 +197,73 @@ function lanUrls(port: number) {
         .flat()
         .filter((item): item is NetworkInterfaceInfo => Boolean(item && item.family === "IPv4" && !item.internal))
         .map((item) => `http://${item.address}:${port}`);
+}
+
+function codexWorkspaceProjects(config: CanvasAgentConfig, threads: unknown[]) {
+    const projects = new Map<string, CodexWorkspaceProject>();
+    Object.entries(config.canvases || {}).forEach(([canvasId, workspace]) => {
+        if (!workspace.workspacePath) return;
+        const workspacePath = path.resolve(workspace.workspacePath);
+        const key = repoKey(workspacePath);
+        projects.set(key, {
+            id: canvasId,
+            label: workspaceLabel(canvasId, workspacePath),
+            canvasId,
+            workspacePath,
+            threadId: workspace.activeThreadId || "",
+            threadCount: 0,
+            updatedAt: 0,
+            source: "saved",
+        });
+    });
+    threads.forEach((thread) => {
+        const cwd = String(recordField(thread, "cwd") || "");
+        if (!cwd) return;
+        const workspacePath = path.resolve(cwd);
+        const key = repoKey(workspacePath);
+        const updatedAt = Number(recordField(thread, "updatedAt") || recordField(thread, "createdAt") || 0);
+        const threadId = String(recordField(thread, "id") || "");
+        const existing = projects.get(key);
+        if (existing) {
+            existing.threadCount += 1;
+            if (updatedAt > existing.updatedAt) {
+                existing.updatedAt = updatedAt;
+                if (!existing.threadId || existing.source === "discovered") existing.threadId = threadId;
+            }
+            return;
+        }
+        const canvasId = workspaceCanvasId(workspacePath);
+        projects.set(key, {
+            id: canvasId,
+            label: workspaceLabel("", workspacePath),
+            canvasId,
+            workspacePath,
+            threadId,
+            threadCount: 1,
+            updatedAt,
+            source: "discovered",
+        });
+    });
+    return [...projects.values()].sort((a, b) => {
+        if (a.source !== b.source) return a.source === "saved" ? -1 : 1;
+        return (b.updatedAt || 0) - (a.updatedAt || 0) || a.label.localeCompare(b.label);
+    });
+}
+
+function workspaceCanvasId(workspacePath: string) {
+    const basename = path.basename(workspacePath).replace(/[^a-zA-Z0-9._-]/g, "-").slice(0, 32) || "workspace";
+    const hash = Buffer.from(path.resolve(workspacePath).toLowerCase()).toString("base64url").slice(0, 18);
+    return `${basename}-${hash}`;
+}
+
+function workspaceLabel(canvasId: string, workspacePath: string) {
+    const name = path.basename(workspacePath) || workspacePath;
+    if (canvasId && !canvasId.startsWith("workspace-") && canvasId !== "default") return canvasId;
+    return name;
+}
+
+function recordField(value: unknown, key: string) {
+    return value && typeof value === "object" ? (value as Record<string, unknown>)[key] : undefined;
 }
 
 function safeGitRef(value: string, fallback: string) {

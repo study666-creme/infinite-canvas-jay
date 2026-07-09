@@ -47,12 +47,7 @@ const projectsKey = "kazang-mobile-codex:projects";
 const pendingRunMaxAge = 1000 * 60 * 60 * 12;
 const legacyDefaultWorkspacePath = "D:\\canvas\\infinite-canvas";
 const queueGuides = ["继续修复并验证", "跑测试并汇报结果", "提交并推送当前项目", "整理当前进度和下一步", "检查线上部署状态"];
-const projectPresets: ProjectPreset[] = [
-    { id: "canvas", label: "画布", canvasId: "canvas", workspacePath: "D:\\canvas", threadId: "019f3789-5816-7230-a4af-f4fa992adb6e", gitRepoPath: "D:\\canvas\\infinite-canvas" },
-    { id: "agent", label: "agent", canvasId: "agent", workspacePath: "C:\\Users\\Jay\\Documents\\agent", threadId: "019f419a-e8fb-7ff3-a7ef-2fe6f58a0990", gitRepoPath: "C:\\Users\\Jay\\Documents\\agent" },
-    { id: "prompt-hub", label: "提示词仓库", canvasId: "prompt-hub", workspacePath: "D:\\prompt-hub", threadId: "019f3229-40ed-7683-b491-ef5d2d3dab34", gitRepoPath: "D:\\prompt-hub" },
-    { id: "new-api", label: "New API", canvasId: "new-api", workspacePath: "C:\\Users\\Jay\\Documents\\New API", threadId: "019f3caf-ca8c-7190-b826-0bf303dc025b", gitRepoPath: "C:\\Users\\Jay\\Documents\\New API" },
-];
+const projectPresets: ProjectPreset[] = [];
 const defaultSettings: Settings = {
     agentUrl: "",
     token: "",
@@ -216,6 +211,30 @@ function normalizeProjectList(items: ProjectPreset[]) {
         });
 }
 
+function mergeProjectLists(current: ProjectPreset[], incoming: ProjectPreset[]) {
+    const next = normalizeProjectList(current);
+    for (const project of normalizeProjectList(incoming)) {
+        const index = next.findIndex(
+            (item) =>
+                item.id === project.id ||
+                item.canvasId === project.canvasId ||
+                (item.workspacePath && project.workspacePath && samePath(item.workspacePath, project.workspacePath)) ||
+                (item.threadId && project.threadId && item.threadId === project.threadId),
+        );
+        if (index >= 0) {
+            next[index] = {
+                ...project,
+                ...next[index],
+                threadId: next[index].threadId || project.threadId,
+                gitRepoPath: next[index].gitRepoPath || project.gitRepoPath,
+            };
+        } else {
+            next.push(project);
+        }
+    }
+    return normalizeProjectList(next);
+}
+
 function projectCanvasIdFromDraft(draft: ProjectDraft, id: string) {
     return normalizeCanvasId(draft.canvasId || draft.threadId || id);
 }
@@ -299,6 +318,7 @@ export default function MobileAgentPage() {
     const [settingsOpen, setSettingsOpen] = useState(false);
     const [threadsOpen, setThreadsOpen] = useState(false);
     const [projects, setProjects] = useState<ProjectPreset[]>(projectPresets);
+    const [projectsLoading, setProjectsLoading] = useState(false);
     const [activeProjectId, setActiveProjectId] = useState("");
     const [projectFormOpen, setProjectFormOpen] = useState(false);
     const [editingProjectId, setEditingProjectId] = useState("");
@@ -703,6 +723,33 @@ export default function MobileAgentPage() {
             return threads;
         } finally {
             setThreadsLoading(false);
+        }
+    };
+
+    const refreshWorkspaceProjects = async (quiet = false) => {
+        if (!settingsRef.current.agentUrl.trim() || !settingsRef.current.token.trim()) {
+            if (!quiet) setThreadError("请先填写 Agent URL 和 Token。");
+            return projects;
+        }
+        setProjectsLoading(true);
+        setThreadError("");
+        try {
+            const query = new URLSearchParams();
+            if (threadSearch.trim()) query.set("searchTerm", threadSearch.trim());
+            const data = await agentFetch<{ projects?: ProjectPreset[]; data?: ThreadSummary[] }>(`/agent/codex/workspaces?${query.toString()}`);
+            const discoveredProjects = normalizeProjectList(data.projects || []);
+            const discoveredThreads = data.data || [];
+            setThreads(discoveredThreads);
+            setProjects((items) => mergeProjectLists(items, discoveredProjects));
+            if (!quiet) pushMessage({ id: createId(), role: "status", text: discoveredProjects.length ? `已从电脑发现 ${discoveredProjects.length} 个 Codex 工作区。` : "没有发现新的 Codex 工作区。" });
+            return discoveredProjects;
+        } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            setThreadError(message);
+            if (!quiet) pushMessage({ id: createId(), role: "error", title: "项目发现失败", text: message });
+            return projects;
+        } finally {
+            setProjectsLoading(false);
         }
     };
 
@@ -1232,7 +1279,7 @@ export default function MobileAgentPage() {
     return (
         <main className="flex h-full flex-col bg-[#f5f3ee] text-stone-950 dark:bg-[#070707] dark:text-stone-100">
             <header className="flex shrink-0 items-center justify-between gap-3 border-b border-black/10 bg-white/60 px-4 py-3 backdrop-blur-xl dark:border-white/10 dark:bg-white/[0.04]">
-                <button type="button" className="grid size-9 shrink-0 place-items-center rounded-xl text-stone-500 transition hover:bg-black/[0.04] hover:text-stone-950 dark:text-stone-400 dark:hover:bg-sky-400/10 dark:hover:text-sky-100" onClick={() => { setThreadsOpen(true); void refreshThreads(true); }} aria-label="打开侧边栏" title="打开侧边栏">
+                <button type="button" className="grid size-9 shrink-0 place-items-center rounded-xl text-stone-500 transition hover:bg-black/[0.04] hover:text-stone-950 dark:text-stone-400 dark:hover:bg-sky-400/10 dark:hover:text-sky-100" onClick={() => { setThreadsOpen(true); void refreshWorkspaceProjects(true); void refreshThreads(true); }} aria-label="打开侧边栏" title="打开侧边栏">
                     <Menu className="size-4" />
                 </button>
                 <div className="min-w-0 flex-1">
@@ -1462,10 +1509,14 @@ export default function MobileAgentPage() {
                                     <RefreshCcw className={`size-4 ${threadsLoading ? "animate-spin" : ""}`} />
                                 </button>
                             </div>
-                            <div className="mt-3 grid grid-cols-2 gap-2">
+                            <div className="mt-3 grid grid-cols-3 gap-2">
+                                <button type="button" className="inline-flex h-11 items-center justify-center gap-2 rounded-xl border border-black/10 bg-white text-sm font-medium disabled:opacity-45 dark:border-white/10 dark:bg-[#181818] dark:text-stone-100" onClick={() => void refreshWorkspaceProjects()} disabled={projectsLoading || !settings.agentUrl.trim() || !settings.token.trim()}>
+                                    <RefreshCcw className={`size-4 ${projectsLoading ? "animate-spin" : ""}`} />
+                                    发现
+                                </button>
                                 <button type="button" className="inline-flex h-11 items-center justify-center gap-2 rounded-xl border border-black/10 bg-white text-sm font-medium disabled:opacity-45 dark:border-white/10 dark:bg-[#181818] dark:text-stone-100" onClick={() => void connect()}>
                                     <PlugZap className="size-4" />
-                                    连接当前项目
+                                    连接
                                 </button>
                                 <button type="button" className="inline-flex h-11 items-center justify-center gap-2 rounded-xl border border-black/10 bg-white text-sm font-medium disabled:opacity-45 dark:border-white/10 dark:bg-[#181818] dark:text-stone-100" onClick={() => void newThread()} disabled={!connected}>
                                     <RotateCcw className="size-4" />

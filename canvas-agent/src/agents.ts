@@ -60,17 +60,19 @@ export async function resumeCodexThread(emit: AgentEmit, threadId: string, cwd?:
     return { thread, messages: threadMessages(thread) };
 }
 
-export async function listCodexThreads(emit: AgentEmit, options: { cwd: string; searchTerm?: string; limit?: number }) {
+export async function listCodexThreads(emit: AgentEmit, options: { cwd?: string; searchTerm?: string; limit?: number }) {
     codexApp ||= await CodexAppClient.start(emit);
     const result = await codexApp.listThreads({
         limit: options.limit || 40,
         sortKey: "updated_at",
         sortDirection: "desc",
         sourceKinds: ["cli", "vscode", "appServer", "exec"],
-        cwd: options.cwd,
+        ...(options.cwd ? { cwd: options.cwd } : {}),
         ...(options.searchTerm ? { searchTerm: options.searchTerm } : {}),
     });
-    const data = Array.isArray(field(result, "data")) ? (field(result, "data") as unknown[]).map(summarizeCodexThread).filter((thread) => threadInWorkspace(thread, options.cwd)) : [];
+    const data = Array.isArray(field(result, "data"))
+        ? (field(result, "data") as unknown[]).map(summarizeCodexThread).filter((thread) => !options.cwd || threadInWorkspace(thread, options.cwd))
+        : [];
     return { data, nextCursor: field(result, "nextCursor") || null, backwardsCursor: field(result, "backwardsCursor") || null };
 }
 

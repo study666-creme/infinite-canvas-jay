@@ -43,7 +43,7 @@ const queueKey = "kazang-mobile-codex:task-queue";
 const pendingRunMaxAge = 1000 * 60 * 60 * 12;
 const legacyDefaultWorkspacePath = "D:\\canvas\\infinite-canvas";
 const queueGuides = ["继续修复并验证", "跑测试并汇报结果", "提交并推送当前项目", "整理当前进度和下一步", "检查线上部署状态"];
-const mobileAgentUiVersion = "队列版 2 2026-07-09";
+const mobileAgentUiVersion = "队列版 3 2026-07-09";
 const defaultSettings: Settings = {
     agentUrl: "",
     token: "",
@@ -1032,7 +1032,7 @@ export default function MobileAgentPage() {
             </div>
 
             {unreadCount > 0 ? (
-                <button type="button" onClick={scrollToLatest} className="fixed bottom-24 left-1/2 z-20 inline-flex -translate-x-1/2 items-center gap-1 rounded-full border border-black/10 bg-stone-950 px-3 py-2 text-xs font-medium text-white shadow-lg dark:border-white/10 dark:bg-white dark:text-black">
+                <button type="button" onClick={scrollToLatest} className="fixed bottom-24 left-1/2 z-20 inline-flex -translate-x-1/2 items-center gap-1 rounded-full border border-sky-300/35 bg-[#0A84FF] px-3 py-2 text-xs font-semibold text-white shadow-[0_10px_30px_rgba(10,132,255,.38)] transition active:scale-95 dark:border-sky-300/25 dark:bg-[#0A84FF] dark:text-white">
                     <ChevronDown className="size-4" />
                     {unreadCount} 条新消息
                 </button>
@@ -1072,7 +1072,7 @@ export default function MobileAgentPage() {
                     <button
                         type="button"
                         disabled={!canSend}
-                        className="grid size-10 shrink-0 place-items-center rounded-2xl bg-stone-950 text-white transition enabled:hover:scale-[1.03] disabled:opacity-35 dark:bg-white dark:text-black"
+                        className="grid size-10 shrink-0 place-items-center rounded-2xl bg-[#0A84FF] text-white shadow-[0_8px_24px_rgba(10,132,255,.32)] transition enabled:hover:scale-[1.03] enabled:active:scale-95 disabled:bg-stone-300 disabled:text-stone-500 disabled:shadow-none dark:bg-[#0A84FF] dark:text-white dark:disabled:bg-white/10 dark:disabled:text-white/35"
                         aria-label={sending ? "加入任务队列" : "发送"}
                         onClick={(event) => {
                             event.preventDefault();

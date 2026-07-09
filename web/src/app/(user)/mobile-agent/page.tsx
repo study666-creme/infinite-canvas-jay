@@ -43,7 +43,7 @@ const queueKey = "kazang-mobile-codex:task-queue";
 const pendingRunMaxAge = 1000 * 60 * 60 * 12;
 const legacyDefaultWorkspacePath = "D:\\canvas\\infinite-canvas";
 const queueGuides = ["继续修复并验证", "跑测试并汇报结果", "提交并推送当前项目", "整理当前进度和下一步", "检查线上部署状态"];
-const mobileAgentUiVersion = "队列版 4 2026-07-09";
+const mobileAgentUiVersion = "队列版 5 2026-07-09";
 const defaultSettings: Settings = {
     agentUrl: "",
     token: "",
@@ -952,17 +952,17 @@ export default function MobileAgentPage() {
                     <div className="truncate text-xs text-stone-500 dark:text-stone-400">{workspace?.workspacePath || "未连接工作目录"}</div>
                 </div>
                 <div className="flex items-center gap-1">
-                    <button type="button" className="relative grid size-9 place-items-center text-stone-500 transition hover:text-stone-950 dark:text-stone-400 dark:hover:text-white" onClick={() => setQueueOpen(true)} aria-label="任务队列" title="任务队列">
+                    <button type="button" className="relative grid size-9 place-items-center rounded-xl text-stone-500 transition hover:bg-black/[0.04] hover:text-stone-950 dark:text-stone-400 dark:hover:bg-sky-400/10 dark:hover:text-sky-100" onClick={() => setQueueOpen(true)} aria-label="任务队列" title="任务队列">
                         <ListTodo className="size-4" />
                         {activeQueueCount ? <span className="absolute right-0.5 top-0.5 min-w-4 rounded-full bg-sky-500 px-1 text-[10px] font-semibold leading-4 text-white">{activeQueueCount}</span> : null}
                     </button>
-                    <button type="button" className="grid size-9 place-items-center text-stone-500 transition hover:text-stone-950 dark:text-stone-400 dark:hover:text-white" onClick={() => { setThreadsOpen(true); void refreshThreads(true); }} aria-label="会话" title="会话">
+                    <button type="button" className="grid size-9 place-items-center rounded-xl text-stone-500 transition hover:bg-black/[0.04] hover:text-stone-950 dark:text-stone-400 dark:hover:bg-sky-400/10 dark:hover:text-sky-100" onClick={() => { setThreadsOpen(true); void refreshThreads(true); }} aria-label="会话" title="会话">
                         <MessageSquareText className="size-4" />
                     </button>
-                    <button type="button" className="grid size-9 place-items-center text-stone-500 transition hover:text-stone-950 dark:text-stone-400 dark:hover:text-white" onClick={() => void connect()} aria-label="连接" title="连接">
+                    <button type="button" className="grid size-9 place-items-center rounded-xl text-stone-500 transition hover:bg-black/[0.04] hover:text-stone-950 dark:text-stone-400 dark:hover:bg-sky-400/10 dark:hover:text-sky-100" onClick={() => void connect()} aria-label="连接" title="连接">
                         {connecting ? <LoaderCircle className="size-4 animate-spin" /> : connected ? <CheckCircle2 className="size-4" /> : <PlugZap className="size-4" />}
                     </button>
-                    <button type="button" className="grid size-9 place-items-center text-stone-500 transition hover:text-stone-950 dark:text-stone-400 dark:hover:text-white" onClick={() => setSettingsOpen(true)} aria-label="配置" title="配置">
+                    <button type="button" className="grid size-9 place-items-center rounded-xl text-stone-500 transition hover:bg-black/[0.04] hover:text-stone-950 dark:text-stone-400 dark:hover:bg-sky-400/10 dark:hover:text-sky-100" onClick={() => setSettingsOpen(true)} aria-label="配置" title="配置">
                         <Settings2 className="size-4" />
                     </button>
                 </div>
@@ -1055,7 +1055,7 @@ export default function MobileAgentPage() {
                 ) : null}
                 <div className="mx-auto flex max-w-3xl items-end gap-2 rounded-3xl border border-black/10 bg-[#f9f8f4] p-2 shadow-[0_12px_34px_rgba(23,21,19,.10)] dark:border-white/10 dark:bg-white/[0.06]">
                     <input ref={fileInputRef} type="file" accept="image/*" multiple className="hidden" onChange={(event) => void pickImages(event)} />
-                    <button type="button" className="grid size-10 shrink-0 place-items-center rounded-2xl text-stone-500 transition hover:text-stone-950 dark:text-stone-300 dark:hover:text-white" onClick={() => fileInputRef.current?.click()} aria-label="添加图片">
+                    <button type="button" className="grid size-10 shrink-0 place-items-center rounded-2xl text-stone-500 transition hover:bg-black/[0.04] hover:text-stone-950 dark:text-stone-300 dark:hover:bg-sky-400/10 dark:hover:text-sky-100" onClick={() => fileInputRef.current?.click()} aria-label="添加图片">
                         <ImagePlus className="size-4" />
                     </button>
                     <textarea
@@ -1094,7 +1094,7 @@ export default function MobileAgentPage() {
                                 <h2 className="text-lg font-semibold">任务队列</h2>
                                 <p className="mt-1 text-xs leading-5 text-stone-500 dark:text-stone-400">队列会按顺序发送到当前 Codex 会话；手机页面恢复后会继续同步并执行下一条。</p>
                             </div>
-                            <button type="button" className="grid size-9 shrink-0 place-items-center text-stone-500 transition hover:text-stone-950 dark:hover:text-white" onClick={() => setQueueOpen(false)} aria-label="关闭">
+                            <button type="button" className="grid size-9 shrink-0 place-items-center rounded-xl text-stone-500 transition hover:bg-black/[0.04] hover:text-stone-950 dark:hover:bg-sky-400/10 dark:hover:text-sky-100" onClick={() => setQueueOpen(false)} aria-label="关闭">
                                 <X className="size-4" />
                             </button>
                         </div>
@@ -1120,11 +1120,11 @@ export default function MobileAgentPage() {
                                 ))}
                             </div>
                             <div className="mt-4 flex items-center justify-between gap-2">
-                                <button type="button" className="inline-flex h-10 items-center justify-center gap-2 rounded-xl bg-stone-950 px-4 text-sm font-medium text-white disabled:opacity-40 dark:bg-white dark:text-black" disabled={!queueInput.trim()} onClick={addQueueTaskFromDrawer}>
+                                <button type="button" className="inline-flex h-10 items-center justify-center gap-2 rounded-xl bg-stone-950 px-4 text-sm font-medium text-white transition hover:bg-stone-800 disabled:opacity-40 dark:bg-[#0A84FF] dark:text-white dark:hover:bg-[#2F9BFF] dark:disabled:bg-white/10 dark:disabled:text-white/35" disabled={!queueInput.trim()} onClick={addQueueTaskFromDrawer}>
                                     <Plus className="size-4" />
                                     加入队列
                                 </button>
-                                <button type="button" className="inline-flex h-10 items-center justify-center gap-2 rounded-xl border border-black/10 bg-white/70 px-3 text-sm text-stone-600 transition hover:text-stone-950 disabled:opacity-40 dark:border-white/10 dark:bg-white/[0.06] dark:text-stone-300 dark:hover:text-white" onClick={clearFinishedQueue} disabled={!queuedTasks.some((item) => item.status === "done" || item.status === "failed")}>
+                                <button type="button" className="inline-flex h-10 items-center justify-center gap-2 rounded-xl border border-black/10 bg-white/70 px-3 text-sm text-stone-600 transition hover:bg-black/[0.04] hover:text-stone-950 disabled:opacity-40 dark:border-white/10 dark:bg-[#181818] dark:text-stone-300 dark:hover:bg-sky-400/10 dark:hover:text-sky-100" onClick={clearFinishedQueue} disabled={!queuedTasks.some((item) => item.status === "done" || item.status === "failed")}>
                                     <Trash2 className="size-4" />
                                     清理完成
                                 </button>
@@ -1158,7 +1158,7 @@ export default function MobileAgentPage() {
                                             <div className="mt-2 whitespace-pre-wrap break-words text-sm leading-6 text-stone-900 dark:text-stone-100">{task.text}</div>
                                             {task.error ? <div className="mt-2 text-xs leading-5 text-red-700 dark:text-red-200">{task.error}</div> : null}
                                         </div>
-                                        <button type="button" className="grid size-8 shrink-0 place-items-center rounded-xl text-stone-400 transition hover:bg-black/[0.04] hover:text-stone-900 disabled:opacity-30 dark:hover:bg-white/[0.08] dark:hover:text-white" onClick={() => removeQueueTask(task.id)} disabled={task.status === "running"} aria-label="删除队列任务">
+                                        <button type="button" className="grid size-8 shrink-0 place-items-center rounded-xl text-stone-400 transition hover:bg-black/[0.04] hover:text-stone-900 disabled:opacity-30 dark:hover:bg-red-400/10 dark:hover:text-red-100" onClick={() => removeQueueTask(task.id)} disabled={task.status === "running"} aria-label="删除队列任务">
                                             <Trash2 className="size-4" />
                                         </button>
                                     </div>
@@ -1178,7 +1178,7 @@ export default function MobileAgentPage() {
                                 <h2 className="text-lg font-semibold">选择会话</h2>
                                 <p className="mt-1 text-xs leading-5 text-stone-500 dark:text-stone-400">按工作目录分区显示；当前后端返回的是已连接 workspace 的会话。</p>
                             </div>
-                            <button type="button" className="grid size-9 place-items-center text-stone-500 transition hover:text-stone-950 dark:hover:text-white" onClick={() => setThreadsOpen(false)} aria-label="关闭">
+                            <button type="button" className="grid size-9 place-items-center rounded-xl text-stone-500 transition hover:bg-black/[0.04] hover:text-stone-950 dark:hover:bg-sky-400/10 dark:hover:text-sky-100" onClick={() => setThreadsOpen(false)} aria-label="关闭">
                                 <X className="size-4" />
                             </button>
                         </div>
@@ -1218,7 +1218,7 @@ export default function MobileAgentPage() {
                                                     "block w-full rounded-2xl border px-3 py-3 text-left transition",
                                                     thread.id === activeThreadId
                                                         ? "border-sky-500/45 bg-sky-500/12 text-stone-950 shadow-[0_10px_28px_rgba(14,165,233,.16)] dark:border-sky-400/45 dark:bg-[#0d2631] dark:text-stone-50"
-                                                        : "border-black/10 bg-white/70 text-stone-900 hover:bg-white dark:border-white/10 dark:bg-[#151515] dark:text-stone-100 dark:hover:bg-[#1d1d1d]",
+                                                        : "border-black/10 bg-white/70 text-stone-900 hover:border-sky-300/45 hover:bg-sky-50 dark:border-white/10 dark:bg-[#151515] dark:text-stone-100 dark:hover:border-sky-400/30 dark:hover:bg-sky-400/10",
                                                 ].join(" ")}
                                                 onClick={() => void selectThread(thread)}
                                             >
@@ -1243,7 +1243,7 @@ export default function MobileAgentPage() {
                     <section className="absolute bottom-0 left-0 right-0 max-h-[88vh] overflow-y-auto rounded-t-[1.75rem] border border-black/10 bg-[#f7f5ef] p-5 shadow-2xl sm:left-auto sm:top-0 sm:h-full sm:w-[430px] sm:rounded-none dark:border-white/10 dark:bg-[#101010]" onClick={(event) => event.stopPropagation()}>
                         <div className="flex items-center justify-between">
                             <h2 className="text-lg font-semibold">连接配置</h2>
-                            <button type="button" className="grid size-9 place-items-center text-stone-500 transition hover:text-stone-950 dark:hover:text-white" onClick={() => setSettingsOpen(false)} aria-label="关闭">
+                            <button type="button" className="grid size-9 place-items-center rounded-xl text-stone-500 transition hover:bg-black/[0.04] hover:text-stone-950 dark:hover:bg-sky-400/10 dark:hover:text-sky-100" onClick={() => setSettingsOpen(false)} aria-label="关闭">
                                 <X className="size-4" />
                             </button>
                         </div>
@@ -1339,19 +1339,19 @@ export default function MobileAgentPage() {
                         </div>
 
                         <div className="mt-6 grid grid-cols-2 gap-2">
-                            <button type="button" className="inline-flex h-11 items-center justify-center gap-2 rounded-xl border border-black/10 bg-white text-sm font-medium dark:border-white/10 dark:bg-white/[0.06]" onClick={() => void connect()}>
+                            <button type="button" className="inline-flex h-11 items-center justify-center gap-2 rounded-xl border border-black/10 bg-white text-sm font-medium transition hover:bg-sky-50 dark:border-white/10 dark:bg-[#181818] dark:text-stone-100 dark:hover:bg-sky-400/10" onClick={() => void connect()}>
                                 <PlugZap className="size-4" />
                                 连接
                             </button>
-                            <button type="button" className="inline-flex h-11 items-center justify-center gap-2 rounded-xl border border-black/10 bg-white text-sm font-medium disabled:opacity-45 dark:border-white/10 dark:bg-white/[0.06]" onClick={() => void newThread()} disabled={!connected}>
+                            <button type="button" className="inline-flex h-11 items-center justify-center gap-2 rounded-xl border border-black/10 bg-white text-sm font-medium transition hover:bg-sky-50 disabled:opacity-45 dark:border-white/10 dark:bg-[#181818] dark:text-stone-100 dark:hover:bg-sky-400/10" onClick={() => void newThread()} disabled={!connected}>
                                 <RotateCcw className="size-4" />
                                 新对话
                             </button>
-                            <button type="button" className="col-span-2 inline-flex h-11 items-center justify-center gap-2 rounded-xl border border-black/10 bg-white text-sm font-medium disabled:opacity-45 dark:border-white/10 dark:bg-white/[0.06]" onClick={() => void pushCurrentCommit()} disabled={pushing || !settings.agentUrl.trim() || !settings.token.trim()}>
+                            <button type="button" className="col-span-2 inline-flex h-11 items-center justify-center gap-2 rounded-xl border border-black/10 bg-white text-sm font-medium transition hover:bg-sky-50 disabled:opacity-45 dark:border-white/10 dark:bg-[#181818] dark:text-stone-100 dark:hover:bg-sky-400/10" onClick={() => void pushCurrentCommit()} disabled={pushing || !settings.agentUrl.trim() || !settings.token.trim()}>
                                 {pushing ? <LoaderCircle className="size-4 animate-spin" /> : <UploadCloud className="size-4" />}
                                 推送所选仓库已提交 HEAD
                             </button>
-                            <button type="button" className="col-span-2 inline-flex h-11 items-center justify-center gap-2 rounded-xl border border-black/10 bg-white text-sm font-medium dark:border-white/10 dark:bg-white/[0.06]" onClick={() => setMessages([])}>
+                            <button type="button" className="col-span-2 inline-flex h-11 items-center justify-center gap-2 rounded-xl border border-black/10 bg-white text-sm font-medium transition hover:bg-red-50 hover:text-red-700 dark:border-white/10 dark:bg-[#181818] dark:text-stone-100 dark:hover:bg-red-400/10 dark:hover:text-red-100" onClick={() => setMessages([])}>
                                 <Trash2 className="size-4" />
                                 清空消息
                             </button>

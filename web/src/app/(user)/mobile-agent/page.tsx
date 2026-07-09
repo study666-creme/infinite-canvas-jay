@@ -288,14 +288,13 @@ export default function MobileAgentPage() {
     const [threadSearch, setThreadSearch] = useState("");
     const [threadError, setThreadError] = useState("");
     const [attachments, setAttachments] = useState<AgentAttachment[]>([]);
-    const [queueOpen, setQueueOpen] = useState(false);
-    const [queueInput, setQueueInput] = useState("");
     const [queuedTasks, setQueuedTasks] = useState<QueuedTask[]>([]);
     const [runStatus, setRunStatus] = useState("");
     const [unreadCount, setUnreadCount] = useState(0);
     const eventSourceRef = useRef<EventSource | null>(null);
     const pollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const statusTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const completionFallbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const autoSyncTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
     const autoSyncInFlightRef = useRef(false);
     const lastAutoSyncAtRef = useRef(0);
@@ -310,6 +309,7 @@ export default function MobileAgentPage() {
 
     const canSend = useMemo(() => Boolean(input.trim() || attachments.length), [attachments.length, input]);
     const activeQueueCount = useMemo(() => queueTaskCount(queuedTasks), [queuedTasks]);
+    const visibleQueueTasks = useMemo(() => queuedTasks.filter((task) => task.status !== "done"), [queuedTasks]);
     const selectedRepo = useMemo(() => repos.find((repo) => samePath(repo.repoPath, settings.gitRepoPath)) || null, [repos, settings.gitRepoPath]);
     const detectedProject = useMemo(() => findProjectPreset(settings, workspace), [settings.canvasId, settings.threadId, settings.workspacePath, workspace]);
     const activeProject = useMemo(() => detectedProject || projectPresets.find((project) => project.id === activeProjectId) || null, [activeProjectId, detectedProject]);
@@ -350,6 +350,7 @@ export default function MobileAgentPage() {
             eventSourceRef.current?.close();
             stopThreadPoll();
             if (statusTimerRef.current) clearTimeout(statusTimerRef.current);
+            if (completionFallbackTimerRef.current) clearTimeout(completionFallbackTimerRef.current);
             if (autoSyncTimerRef.current) clearInterval(autoSyncTimerRef.current);
         };
     }, []);
@@ -463,11 +464,18 @@ export default function MobileAgentPage() {
         pollTimerRef.current = null;
     }
 
+    function stopCompletionFallback() {
+        if (!completionFallbackTimerRef.current) return;
+        clearTimeout(completionFallbackTimerRef.current);
+        completionFallbackTimerRef.current = null;
+    }
+
     function finishCurrentTurn(statusText = "本轮完成", autoClear = true) {
         pendingPromptRef.current = "";
         setSending(false);
         clearPendingRun();
         stopThreadPoll();
+        stopCompletionFallback();
         markActiveQueueTask("done");
         setTemporaryStatus(statusText, autoClear);
         window.setTimeout(() => void runNextQueuedTask(), 350);
@@ -477,6 +485,7 @@ export default function MobileAgentPage() {
         pendingPromptRef.current = "";
         setSending(false);
         stopThreadPoll();
+        stopCompletionFallback();
         setTemporaryStatus("");
         markActiveQueueTask("failed", errorText);
         window.setTimeout(() => void runNextQueuedTask(), 350);
@@ -495,16 +504,8 @@ export default function MobileAgentPage() {
             queuedTasksRef.current = next;
             return next;
         });
-        pushMessage({ id: createId(), role: "status", text: `已加入任务队列：${task.text}` });
         window.setTimeout(() => void runNextQueuedTask(), 100);
         return task;
-    }
-
-    function addQueueTaskFromDrawer() {
-        const text = queueInput.trim();
-        if (!text) return;
-        enqueueTask(text);
-        setQueueInput("");
     }
 
     function removeQueueTask(id: string) {
@@ -513,6 +514,14 @@ export default function MobileAgentPage() {
             queuedTasksRef.current = next;
             return next;
         });
+    }
+
+    function useQueueGuide(guide: string) {
+        if (sending || pendingPromptRef.current || activeQueueTaskIdRef.current) {
+            enqueueTask(guide);
+            return;
+        }
+        setInput((value) => (value.trim() ? `${value.trim()}\n${guide}` : guide));
     }
 
     function clearFinishedQueue() {
@@ -556,13 +565,43 @@ export default function MobileAgentPage() {
         return index >= 0 && items.slice(index + 1).some((item) => item.role === "assistant" || item.role === "error");
     }
 
-    function applyThreadMessages(items: MobileMessage[] | undefined, pendingPrompt = "", options: { requirePromptMatch?: boolean } = {}) {
+    function hasTurnCompletion(items: MobileMessage[], prompt: string) {
+        if (!prompt.trim()) return items.some((item) => item.role === "assistant" || item.role === "error");
+        if (hasReplyAfterPrompt(items, prompt)) return true;
+        const lastUserIndex = items.findLastIndex((item) => item.role === "user");
+        return items.slice(Math.max(0, lastUserIndex + 1)).some((item) => item.role === "assistant" || item.role === "error");
+    }
+
+    function applyThreadMessages(items: MobileMessage[] | undefined, pendingPrompt = "", options: { requirePromptMatch?: boolean; forceScroll?: boolean } = {}) {
         if (!items?.length) return [];
         if (pendingPrompt && options.requirePromptMatch && promptIndex(items, pendingPrompt) < 0) return items;
-        atBottomRef.current = true;
-        setUnreadCount(0);
+        if (options.forceScroll) {
+            atBottomRef.current = true;
+            setUnreadCount(0);
+        }
         setMessages(items);
         return items;
+    }
+
+    function scheduleCompletionFallback() {
+        stopCompletionFallback();
+        completionFallbackTimerRef.current = setTimeout(() => {
+            const threadId = activeThreadIdRef.current || normalizeThreadId(settingsRef.current.threadId);
+            const canvasId = normalizeCanvasId(settingsRef.current.canvasId);
+            const prompt = pendingPromptRef.current;
+            if (!threadId || !prompt) {
+                finishCurrentTurn("本轮完成", true);
+                return;
+            }
+            void refreshThreadMessages(threadId, canvasId, prompt)
+                .then((items) => {
+                    if (items.length) finishCurrentTurn("本轮完成", true);
+                    else finishCurrentTurn("本轮完成", true);
+                })
+                .catch(() => {
+                    finishCurrentTurn("本轮完成", true);
+                });
+        }, 7000);
     }
 
     async function autoSyncFromAgent(reason: "foreground" | "interval" | "offline" = "interval") {
@@ -598,13 +637,13 @@ export default function MobileAgentPage() {
         return payload;
     };
 
-    const refreshThreadMessages = async (threadId: string, canvasId: string, pendingPrompt = "") => {
+    const refreshThreadMessages = async (threadId: string, canvasId: string, pendingPrompt = "", options: { forceScroll?: boolean } = {}) => {
         const data = await agentFetch<{ workspace?: Workspace; messages?: MobileMessage[] }>(`/agent/codex/threads/${encodeURIComponent(threadId)}?canvasId=${encodeURIComponent(canvasId)}`);
         if (data.workspace) {
             setWorkspace(data.workspace);
             setActiveThreadId(data.workspace.activeThreadId || threadId);
         }
-        return applyThreadMessages(data.messages, pendingPrompt);
+        return applyThreadMessages(data.messages, pendingPrompt, options);
     };
 
     const refreshThreads = async (quiet = false) => {
@@ -663,7 +702,7 @@ export default function MobileAgentPage() {
             attempts += 1;
             try {
                 const items = await refreshThreadMessages(threadId, canvasId, prompt);
-                if (hasReplyAfterPrompt(items, prompt)) {
+                if (hasTurnCompletion(items, prompt)) {
                     finishCurrentTurn("本轮完成", true);
                     return;
                 }
@@ -700,7 +739,7 @@ export default function MobileAgentPage() {
             }
             try {
                 const items = await refreshThreadMessages(pendingRun.threadId, pendingRun.canvasId, pendingRun.prompt);
-                if (hasReplyAfterPrompt(items, pendingRun.prompt)) {
+                if (hasTurnCompletion(items, pendingRun.prompt)) {
                     finishCurrentTurn("已同步最新结果", true);
                     return;
                 }
@@ -735,6 +774,7 @@ export default function MobileAgentPage() {
                 setTemporaryStatus("本轮完成", true);
             } else {
                 setTemporaryStatus("本轮完成，正在同步记录...");
+                scheduleCompletionFallback();
             }
             upsertStreamMessage({ id: `done-${Date.now()}`, role: "status", text: pendingPromptRef.current ? "本轮完成，正在同步记录..." : "本轮完成" });
             return;
@@ -803,7 +843,7 @@ export default function MobileAgentPage() {
                 });
                 setWorkspace(resumed.workspace || data.workspace || null);
                 setActiveThreadId(threadId);
-                if (resumed.messages?.length) applyThreadMessages(resumed.messages);
+                if (resumed.messages?.length) applyThreadMessages(resumed.messages, "", { forceScroll: !options.syncOnly });
             }
 
             setConnected(true);
@@ -843,8 +883,10 @@ export default function MobileAgentPage() {
                     return;
                 }
                 void refreshThreadMessages(threadId, canvasId, pendingPrompt).then((items) => {
-                    if (!pendingPrompt || hasReplyAfterPrompt(items, pendingPrompt)) {
+                    if (!pendingPrompt || hasTurnCompletion(items, pendingPrompt)) {
                         finishCurrentTurn("本轮完成", true);
+                    } else {
+                        scheduleCompletionFallback();
                     }
                 });
             });
@@ -920,7 +962,7 @@ export default function MobileAgentPage() {
             setWorkspace(data.workspace || workspace);
             setActiveThreadId(thread.id);
             updateSettings({ threadId: thread.id });
-            if (data.messages?.length) applyThreadMessages(data.messages);
+            if (data.messages?.length) applyThreadMessages(data.messages, "", { forceScroll: true });
             else setMessages([]);
             setThreadsOpen(false);
             setTemporaryStatus("会话已切换", true);
@@ -1100,10 +1142,6 @@ export default function MobileAgentPage() {
                     <div className="truncate text-xs text-stone-500 dark:text-stone-400">{activeProject ? `${activeProject.label} · ${workspace?.workspacePath || activeProject.workspacePath}` : workspace?.workspacePath || "未连接工作目录"}</div>
                 </div>
                 <div className="flex items-center gap-1">
-                    <button type="button" className="relative grid size-9 place-items-center rounded-xl text-stone-500 transition hover:bg-black/[0.04] hover:text-stone-950 dark:text-stone-400 dark:hover:bg-sky-400/10 dark:hover:text-sky-100" onClick={() => setQueueOpen(true)} aria-label="任务队列" title="任务队列">
-                        <ListTodo className="size-4" />
-                        {activeQueueCount ? <span className="absolute right-0.5 top-0.5 min-w-4 rounded-full bg-sky-500 px-1 text-[10px] font-semibold leading-4 text-white">{activeQueueCount}</span> : null}
-                    </button>
                     <button type="button" className="grid size-9 place-items-center rounded-xl text-stone-500 transition hover:bg-black/[0.04] hover:text-stone-950 dark:text-stone-400 dark:hover:bg-sky-400/10 dark:hover:text-sky-100" onClick={() => { setThreadsOpen(true); void refreshThreads(true); }} aria-label="会话" title="会话">
                         <MessageSquareText className="size-4" />
                     </button>
@@ -1189,6 +1227,74 @@ export default function MobileAgentPage() {
             ) : null}
 
             <form onSubmit={(event) => void submit(event)} className="shrink-0 border-t border-black/10 bg-white/72 p-3 backdrop-blur-xl dark:border-white/10 dark:bg-black/72">
+                {sending || runStatus || visibleQueueTasks.length ? (
+                    <div className="mx-auto mb-2 max-w-3xl rounded-2xl border border-black/10 bg-[#f9f8f4]/92 p-3 shadow-[0_10px_28px_rgba(23,21,19,.08)] dark:border-white/10 dark:bg-white/[0.06]">
+                        <div className="flex items-start justify-between gap-3">
+                            <div className="flex min-w-0 items-center gap-2 text-sm font-medium">
+                                {sending || runStatus ? <LoaderCircle className="size-4 shrink-0 animate-spin text-sky-500" /> : <ListTodo className="size-4 shrink-0 text-stone-500 dark:text-stone-300" />}
+                                <span className="truncate">{sending || runStatus ? runStatus || "Codex 后台执行中" : activeQueueCount ? `${activeQueueCount} 条任务排队中` : "任务队列"}</span>
+                            </div>
+                            {queuedTasks.some((task) => task.status === "done" || task.status === "failed") ? (
+                                <button type="button" className="shrink-0 text-xs font-medium text-stone-500 transition hover:text-stone-950 dark:text-stone-400 dark:hover:text-stone-100" onClick={clearFinishedQueue}>
+                                    清理
+                                </button>
+                            ) : null}
+                        </div>
+
+                        <div className="mt-3 flex flex-wrap gap-2">
+                            {queueGuides.map((guide) => (
+                                <button
+                                    key={guide}
+                                    type="button"
+                                    className="rounded-full border border-black/10 bg-white/70 px-3 py-1.5 text-xs text-stone-700 transition hover:border-sky-400/40 hover:bg-sky-500/10 dark:border-white/10 dark:bg-white/[0.06] dark:text-stone-200 dark:hover:bg-sky-400/10"
+                                    onClick={() => useQueueGuide(guide)}
+                                >
+                                    {guide}
+                                </button>
+                            ))}
+                        </div>
+
+                        {visibleQueueTasks.length ? (
+                            <div className="mt-3 space-y-2">
+                                {visibleQueueTasks.map((task, index) => (
+                                    <div key={task.id} className="flex items-start gap-2 rounded-xl border border-black/10 bg-white/70 px-3 py-2.5 dark:border-white/10 dark:bg-black/20">
+                                        <div className="min-w-0 flex-1">
+                                            <div className="flex flex-wrap items-center gap-2 text-[11px] text-stone-500 dark:text-stone-400">
+                                                {task.status === "running" ? <LoaderCircle className="size-3.5 animate-spin text-sky-500" /> : <Clock3 className="size-3.5" />}
+                                                <span>#{index + 1}</span>
+                                                <span
+                                                    className={[
+                                                        "rounded-full px-2 py-0.5",
+                                                        task.status === "running"
+                                                            ? "bg-sky-500/12 text-sky-700 dark:text-sky-200"
+                                                            : task.status === "failed"
+                                                              ? "bg-red-500/12 text-red-700 dark:text-red-200"
+                                                              : "bg-black/[0.05] text-stone-600 dark:bg-white/[0.08] dark:text-stone-300",
+                                                    ].join(" ")}
+                                                >
+                                                    {task.status === "running" ? "执行中" : task.status === "failed" ? "失败" : "待执行"}
+                                                </span>
+                                                {task.attachments.length ? <span>{task.attachments.length} 张图</span> : null}
+                                            </div>
+                                            <div className="mt-1 line-clamp-2 break-words text-sm leading-5 text-stone-900 dark:text-stone-100">{task.text}</div>
+                                            {task.error ? <div className="mt-1 text-xs leading-5 text-red-700 dark:text-red-200">{task.error}</div> : null}
+                                        </div>
+                                        <button
+                                            type="button"
+                                            className="grid size-8 shrink-0 place-items-center rounded-xl text-stone-400 transition hover:bg-black/[0.04] hover:text-red-600 disabled:cursor-not-allowed disabled:opacity-30 dark:hover:bg-red-400/10 dark:hover:text-red-100"
+                                            onClick={() => removeQueueTask(task.id)}
+                                            disabled={task.status === "running"}
+                                            aria-label={task.status === "running" ? "运行中不能取消" : "取消排队任务"}
+                                            title={task.status === "running" ? "运行中不能从手机中止" : "取消排队"}
+                                        >
+                                            <X className="size-4" />
+                                        </button>
+                                    </div>
+                                ))}
+                            </div>
+                        ) : null}
+                    </div>
+                ) : null}
                 {attachments.length ? (
                     <div className="mx-auto mb-2 flex max-w-3xl gap-2 overflow-x-auto">
                         {attachments.map((item, index) => (
@@ -1233,90 +1339,6 @@ export default function MobileAgentPage() {
                     </button>
                 </div>
             </form>
-
-            {queueOpen ? (
-                <div className="fixed inset-0 z-50 bg-black/35 backdrop-blur-sm" onClick={() => setQueueOpen(false)}>
-                    <section className="absolute bottom-0 left-0 right-0 max-h-[88vh] overflow-y-auto rounded-t-[1.75rem] border border-black/10 bg-[#f7f5ef] p-5 shadow-2xl sm:left-auto sm:top-0 sm:h-full sm:w-[430px] sm:rounded-none dark:border-white/10 dark:bg-[#101010]" onClick={(event) => event.stopPropagation()}>
-                        <div className="flex items-center justify-between gap-3">
-                            <div>
-                                <h2 className="text-lg font-semibold">任务队列</h2>
-                                <p className="mt-1 text-xs leading-5 text-stone-500 dark:text-stone-400">队列会按顺序发送到当前 Codex 会话；手机页面恢复后会继续同步并执行下一条。</p>
-                            </div>
-                            <button type="button" className="grid size-9 shrink-0 place-items-center rounded-xl text-stone-500 transition hover:bg-black/[0.04] hover:text-stone-950 dark:hover:bg-sky-400/10 dark:hover:text-sky-100" onClick={() => setQueueOpen(false)} aria-label="关闭">
-                                <X className="size-4" />
-                            </button>
-                        </div>
-
-                        <div className="mt-4 rounded-2xl border border-black/10 bg-white/65 p-3 dark:border-white/10 dark:bg-white/[0.05]">
-                            <textarea
-                                value={queueInput}
-                                onChange={(event) => setQueueInput(event.target.value)}
-                                rows={4}
-                                placeholder="写下一条要排队执行的任务..."
-                                className="min-h-28 w-full resize-none bg-transparent text-[15px] leading-6 outline-none placeholder:text-stone-400 dark:text-stone-100"
-                            />
-                            <div className="mt-3 flex flex-wrap gap-2">
-                                {queueGuides.map((guide) => (
-                                    <button
-                                        key={guide}
-                                        type="button"
-                                        className="rounded-full border border-black/10 bg-white/70 px-3 py-1.5 text-xs text-stone-700 transition hover:border-sky-400/40 hover:bg-sky-500/10 dark:border-white/10 dark:bg-white/[0.06] dark:text-stone-200 dark:hover:bg-sky-400/10"
-                                        onClick={() => setQueueInput((value) => (value.trim() ? `${value.trim()}\n${guide}` : guide))}
-                                    >
-                                        {guide}
-                                    </button>
-                                ))}
-                            </div>
-                            <div className="mt-4 flex items-center justify-between gap-2">
-                                <button type="button" className="inline-flex h-10 items-center justify-center gap-2 rounded-xl bg-stone-950 px-4 text-sm font-medium text-white transition hover:bg-stone-800 disabled:opacity-40 dark:bg-[#0A84FF] dark:text-white dark:hover:bg-[#2F9BFF] dark:disabled:bg-white/10 dark:disabled:text-white/35" disabled={!queueInput.trim()} onClick={addQueueTaskFromDrawer}>
-                                    <Plus className="size-4" />
-                                    加入队列
-                                </button>
-                                <button type="button" className="inline-flex h-10 items-center justify-center gap-2 rounded-xl border border-black/10 bg-white/70 px-3 text-sm text-stone-600 transition hover:bg-black/[0.04] hover:text-stone-950 disabled:opacity-40 dark:border-white/10 dark:bg-[#181818] dark:text-stone-300 dark:hover:bg-sky-400/10 dark:hover:text-sky-100" onClick={clearFinishedQueue} disabled={!queuedTasks.some((item) => item.status === "done" || item.status === "failed")}>
-                                    <Trash2 className="size-4" />
-                                    清理完成
-                                </button>
-                            </div>
-                        </div>
-
-                        <div className="mt-4 space-y-2">
-                            {queuedTasks.map((task, index) => (
-                                <div key={task.id} className="rounded-2xl border border-black/10 bg-white/70 px-3 py-3 text-left dark:border-white/10 dark:bg-white/[0.05]">
-                                    <div className="flex items-start justify-between gap-3">
-                                        <div className="min-w-0 flex-1">
-                                            <div className="flex items-center gap-2 text-xs text-stone-500 dark:text-stone-400">
-                                                {task.status === "running" ? <LoaderCircle className="size-3.5 animate-spin" /> : <Clock3 className="size-3.5" />}
-                                                <span>#{index + 1}</span>
-                                                <span
-                                                    className={[
-                                                        "rounded-full px-2 py-0.5",
-                                                        task.status === "running"
-                                                            ? "bg-sky-500/12 text-sky-700 dark:text-sky-200"
-                                                            : task.status === "failed"
-                                                              ? "bg-red-500/12 text-red-700 dark:text-red-200"
-                                                              : task.status === "done"
-                                                                ? "bg-emerald-500/12 text-emerald-700 dark:text-emerald-200"
-                                                                : "bg-black/[0.05] text-stone-600 dark:bg-white/[0.08] dark:text-stone-300",
-                                                    ].join(" ")}
-                                                >
-                                                    {task.status === "running" ? "执行中" : task.status === "failed" ? "失败" : task.status === "done" ? "完成" : "待执行"}
-                                                </span>
-                                                {task.attachments.length ? <span>{task.attachments.length} 张图</span> : null}
-                                            </div>
-                                            <div className="mt-2 whitespace-pre-wrap break-words text-sm leading-6 text-stone-900 dark:text-stone-100">{task.text}</div>
-                                            {task.error ? <div className="mt-2 text-xs leading-5 text-red-700 dark:text-red-200">{task.error}</div> : null}
-                                        </div>
-                                        <button type="button" className="grid size-8 shrink-0 place-items-center rounded-xl text-stone-400 transition hover:bg-black/[0.04] hover:text-stone-900 disabled:opacity-30 dark:hover:bg-red-400/10 dark:hover:text-red-100" onClick={() => removeQueueTask(task.id)} disabled={task.status === "running"} aria-label="删除队列任务">
-                                            <Trash2 className="size-4" />
-                                        </button>
-                                    </div>
-                                </div>
-                            ))}
-                            {!queuedTasks.length ? <div className="rounded-2xl bg-black/[0.04] px-3 py-5 text-center text-xs leading-5 text-stone-500 dark:bg-white/[0.05] dark:text-stone-400">暂无排队任务。当前任务运行时，也可以直接在底部输入框继续发送，内容会自动进入队列。</div> : null}
-                        </div>
-                    </section>
-                </div>
-            ) : null}
 
             {threadsOpen ? (
                 <div className="fixed inset-0 z-50 bg-black/35 backdrop-blur-sm" onClick={() => setThreadsOpen(false)}>

@@ -25,6 +25,7 @@ type CodexWorkspaceProject = {
     id: string;
     label: string;
     canvasId: string;
+    workspaceId: string;
     workspacePath: string;
     threadId: string;
     threadCount: number;
@@ -69,17 +70,17 @@ export function startHttpServer() {
     });
     app.post("/api/tools", route(async (req, res) => res.json({ ok: true, result: await session.callTool(req.body?.name, req.body?.input || {}) })));
     app.get("/agent/codex/workspace", (req, res) => {
-        const workspace = ensureCanvasWorkspace(config, String(req.query.canvasId || ""));
-        res.json({ ok: true, workspace });
+        const workspace = ensureCanvasWorkspace(config, requestWorkspaceId(req));
+        res.json({ ok: true, workspace: workspacePayload(workspace) });
     });
     app.post("/agent/codex/workspace", (req, res) => {
-        const workspace = updateCanvasWorkspace(config, String(req.body?.canvasId || ""), { workspacePath: String(req.body?.workspacePath || "") || undefined });
-        res.json({ ok: true, workspace });
+        const workspace = updateCanvasWorkspace(config, requestWorkspaceId(req), { workspacePath: String(req.body?.workspacePath || "") || undefined });
+        res.json({ ok: true, workspace: workspacePayload(workspace) });
     });
     app.get("/agent/codex/threads", route(async (req, res) => {
-        const workspace = ensureCanvasWorkspace(config, String(req.query.canvasId || ""));
+        const workspace = ensureCanvasWorkspace(config, requestWorkspaceId(req));
         const result = await listCodexThreads(emit, { cwd: workspace.workspacePath, searchTerm: String(req.query.searchTerm || "") });
-        res.json({ ok: true, workspace, ...result });
+        res.json({ ok: true, workspace: workspacePayload(workspace), ...result });
     }));
     app.get("/agent/codex/workspaces", route(async (req, res) => {
         const result = await listCodexThreads(emit, { searchTerm: String(req.query.searchTerm || ""), limit: Number(req.query.limit || 160) || 160 });
@@ -87,26 +88,26 @@ export function startHttpServer() {
         res.json({ ok: true, projects, data: result.data, nextCursor: result.nextCursor, backwardsCursor: result.backwardsCursor });
     }));
     app.post("/agent/codex/threads/new", route(async (req, res) => {
-        const workspace = ensureCanvasWorkspace(config, String(req.body?.canvasId || ""));
+        const workspace = ensureCanvasWorkspace(config, requestWorkspaceId(req));
         const thread = await startCodexThread(emit, workspace.workspacePath);
         const activeThreadId = String((thread as Record<string, unknown>).id || "");
         updateCanvasWorkspace(config, workspace.canvasId, { activeThreadId });
-        res.json({ ok: true, workspace: { ...workspace, activeThreadId }, thread: summarizeCodexThread(thread), messages: [] });
+        res.json({ ok: true, workspace: workspacePayload({ ...workspace, activeThreadId }), thread: summarizeCodexThread(thread), messages: [] });
     }));
     app.get("/agent/codex/threads/:threadId", route(async (req, res) => {
-        const workspace = ensureCanvasWorkspace(config, String(req.query.canvasId || ""));
+        const workspace = ensureCanvasWorkspace(config, requestWorkspaceId(req));
         const threadId = routeParam(req.params.threadId);
-        res.json({ ok: true, workspace, ...(await readCodexThread(emit, threadId, workspace.workspacePath)) });
+        res.json({ ok: true, workspace: workspacePayload(workspace), ...(await readCodexThread(emit, threadId, workspace.workspacePath)) });
     }));
     app.post("/agent/codex/threads/:threadId/resume", route(async (req, res) => {
-        const workspace = ensureCanvasWorkspace(config, String(req.body?.canvasId || ""));
+        const workspace = ensureCanvasWorkspace(config, requestWorkspaceId(req));
         const threadId = routeParam(req.params.threadId);
         const result = await resumeCodexThread(emit, threadId, workspace.workspacePath);
         updateCanvasWorkspace(config, workspace.canvasId, { activeThreadId: threadId });
-        res.json({ ok: true, workspace: { ...workspace, activeThreadId: threadId }, ...result });
+        res.json({ ok: true, workspace: workspacePayload({ ...workspace, activeThreadId: threadId }), ...result });
     }));
     app.post("/agent/codex/threads/:threadId/delete", route(async (req, res) => {
-        const workspace = ensureCanvasWorkspace(config, String(req.body?.canvasId || ""));
+        const workspace = ensureCanvasWorkspace(config, requestWorkspaceId(req));
         const threadId = routeParam(req.params.threadId);
         await archiveCodexThread(emit, threadId, workspace.workspacePath);
         if (workspace.activeThreadId === threadId) updateCanvasWorkspace(config, workspace.canvasId, { activeThreadId: undefined });
@@ -114,7 +115,7 @@ export function startHttpServer() {
     }));
     app.post("/agent/codex/turn", route(async (req, res) => {
         const attachments = Array.isArray(req.body?.attachments) ? (req.body.attachments as AgentAttachment[]) : [];
-        const workspace = ensureCanvasWorkspace(config, String(req.body?.canvasId || ""));
+        const workspace = ensureCanvasWorkspace(config, requestWorkspaceId(req));
         let threadId = String(req.body?.threadId || workspace.activeThreadId || "");
         if (!threadId) {
             const thread = await startCodexThread(emit, workspace.workspacePath);
@@ -124,23 +125,25 @@ export function startHttpServer() {
             await verifyCodexThreadWorkspace(emit, threadId, workspace.workspacePath);
             updateCanvasWorkspace(config, workspace.canvasId, { activeThreadId: threadId });
         }
-        void runCodexTurn(withAgentPrompt(String(req.body?.prompt || "")), emit, attachments, { threadId, cwd: workspace.workspacePath });
+        const prompt = String(req.body?.prompt || "");
+        const useCanvasAgentPrompt = req.body?.canvasAgent === true || req.body?.mode === "canvas";
+        void runCodexTurn(useCanvasAgentPrompt ? withAgentPrompt(prompt) : prompt, emit, attachments, { threadId, cwd: workspace.workspacePath });
         res.json({ ok: true, threadId });
     }));
     app.post("/agent/codex/turn/steer", route(async (req, res) => {
         const attachments = Array.isArray(req.body?.attachments) ? (req.body.attachments as AgentAttachment[]) : [];
-        const workspace = ensureCanvasWorkspace(config, String(req.body?.canvasId || ""));
+        const workspace = ensureCanvasWorkspace(config, requestWorkspaceId(req));
         const threadId = String(req.body?.threadId || workspace.activeThreadId || "");
         if (!threadId) throw new Error("没有可引导的 Codex 会话");
         await steerCodexTurn(String(req.body?.prompt || ""), emit, attachments, { threadId, cwd: workspace.workspacePath });
         res.json({ ok: true, threadId });
     }));
     app.get("/agent/git/repos", route(async (req, res) => {
-        const workspace = ensureCanvasWorkspace(config, String(req.query.canvasId || ""));
-        res.json({ ok: true, workspace, repos: discoverGitRepos(workspace.workspacePath) });
+        const workspace = ensureCanvasWorkspace(config, requestWorkspaceId(req));
+        res.json({ ok: true, workspace: workspacePayload(workspace), repos: discoverGitRepos(workspace.workspacePath) });
     }));
     app.post("/agent/git/push", route(async (req, res) => {
-        const workspace = ensureCanvasWorkspace(config, String(req.body?.canvasId || ""));
+        const workspace = ensureCanvasWorkspace(config, requestWorkspaceId(req));
         const repos = discoverGitRepos(workspace.workspacePath);
         const requestedRepoPath = String(req.body?.repoPath || "").trim();
         const defaultRepoPath = resolveGitWorkspace(workspace.workspacePath);
@@ -150,7 +153,7 @@ export function startHttpServer() {
         const remote = safeGitRef(String(req.body?.remote || repo.defaultRemote || "origin"), "origin");
         const branch = safeGitRef(String(req.body?.branch || repo.defaultBranch || "main"), "main");
         const result = await runGitPush(repo.repoPath, remote, branch);
-        res.json({ ok: true, workspace, repo, remote, branch, ...result });
+        res.json({ ok: true, workspace: workspacePayload(workspace), repo, remote, branch, ...result });
     }));
     app.post("/agent/claude/turn", (req, res) => {
         runClaudeTurn(withAgentPrompt(String(req.body?.prompt || "")), emit);
@@ -160,7 +163,7 @@ export function startHttpServer() {
     app.use((error: Error, _req: Request, res: Response, _next: NextFunction) => res.status(500).json({ ok: false, error: error.message }));
 
     app.listen(port, listenHost, () => {
-        console.log("Infinite Canvas Agent");
+        console.log("Codex Remote Bridge / Infinite Canvas Agent");
         console.log(`Local URL: ${config.url}`);
         if (listenHost === "0.0.0.0") lanUrls(port).forEach((url) => console.log(`LAN URL: ${url}`));
         console.log(`Connect token: ${config.token}`);
@@ -174,6 +177,19 @@ function route(handler: (req: Request, res: Response) => Promise<unknown>) {
 
 function routeParam(value: string | string[]) {
     return Array.isArray(value) ? value[0] || "" : value;
+}
+
+function requestWorkspaceId(req: Request) {
+    const body = req.body && typeof req.body === "object" ? (req.body as Record<string, unknown>) : {};
+    const queryWorkspaceId = typeof req.query.workspaceId === "string" ? req.query.workspaceId : "";
+    const queryCanvasId = typeof req.query.canvasId === "string" ? req.query.canvasId : "";
+    const bodyWorkspaceId = typeof body.workspaceId === "string" ? body.workspaceId : "";
+    const bodyCanvasId = typeof body.canvasId === "string" ? body.canvasId : "";
+    return bodyWorkspaceId || queryWorkspaceId || bodyCanvasId || queryCanvasId || "";
+}
+
+function workspacePayload<T extends { canvasId: string }>(workspace: T) {
+    return { ...workspace, workspaceId: workspace.canvasId };
 }
 
 function requestUrl(req: Request, config: CanvasAgentConfig) {
@@ -218,6 +234,7 @@ function codexWorkspaceProjects(config: CanvasAgentConfig, threads: unknown[]) {
             id: canvasId,
             label: workspaceLabel(canvasId, workspacePath),
             canvasId,
+            workspaceId: canvasId,
             workspacePath,
             threadId: workspace.activeThreadId || "",
             threadCount: 0,
@@ -246,6 +263,7 @@ function codexWorkspaceProjects(config: CanvasAgentConfig, threads: unknown[]) {
             id: canvasId,
             label: workspaceLabel("", workspacePath),
             canvasId,
+            workspaceId: canvasId,
             workspacePath,
             threadId,
             threadCount: 1,

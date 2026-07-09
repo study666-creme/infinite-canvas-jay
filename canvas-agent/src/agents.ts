@@ -151,7 +151,7 @@ class CodexAppClient {
             codexThreadId = "";
             emit("agent_log", { text: `Codex app-server exited: ${code ?? 0}` });
         });
-        await client.request("initialize", { clientInfo: { name: "canvas-agent", title: "Infinite Canvas Agent", version: VERSION }, capabilities: { experimentalApi: true, requestAttestation: false } });
+        await client.request("initialize", { clientInfo: { name: "codex-remote-bridge", title: "Codex Remote Bridge", version: VERSION }, capabilities: { experimentalApi: true, requestAttestation: false } });
         client.notify("initialized");
         return client;
     }
@@ -336,7 +336,7 @@ async function loadCodexThread(emit: AgentEmit, threadId: string, cwd: string | 
 
 function assertThreadWorkspace(thread: unknown, cwd?: string) {
     if (!cwd || threadInWorkspace(thread, cwd)) return;
-    throw new Error("该 Codex 会话不属于当前画布工作空间");
+    throw new Error("该 Codex 会话不属于当前工作区");
 }
 
 function threadInWorkspace(thread: unknown, cwd: string) {

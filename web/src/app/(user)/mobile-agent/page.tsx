@@ -6,7 +6,7 @@ import { CheckCircle2, ChevronDown, Clock3, Copy, FolderGit2, GitBranch, ImagePl
 type MessageRole = "user" | "assistant" | "tool" | "error" | "status";
 type MobileMessage = { id: string; role: MessageRole; title?: string; text: string; streamId?: string };
 type Settings = { agentUrl: string; token: string; canvasId: string; threadId: string; workspacePath: string; gitRepoPath: string; model: string; effort: string };
-type Workspace = { canvasId: string; workspacePath: string; activeThreadId?: string };
+type Workspace = { canvasId: string; workspaceId?: string; workspacePath: string; activeThreadId?: string };
 type AgentEvent = { type?: string; item?: Record<string, unknown>; usage?: unknown; message?: string };
 type PendingRun = { threadId: string; canvasId: string; prompt: string; startedAt: number };
 type ConnectionStatus = "idle" | "connecting" | "connected" | "offline" | "error";
@@ -36,7 +36,7 @@ type QueuedTaskStatus = "queued" | "running" | "done" | "failed";
 type QueuedTask = { id: string; text: string; attachments: AgentAttachment[]; createdAt: number; status: QueuedTaskStatus; error?: string };
 type PendingGuide = { id: string; text: string; attachments: AgentAttachment[]; createdAt: number };
 type ThreadGroup = { key: string; label: string; path: string; threads: ThreadSummary[] };
-type ProjectPreset = { id: string; label: string; canvasId: string; workspacePath: string; threadId: string; gitRepoPath?: string };
+type ProjectPreset = { id: string; label: string; canvasId: string; workspaceId?: string; workspacePath: string; threadId: string; gitRepoPath?: string };
 type ProjectDraft = { label: string; canvasId: string; workspacePath: string; threadId: string; gitRepoPath: string };
 
 const settingsKey = "kazang-mobile-codex:settings";
@@ -106,8 +106,8 @@ function sanitizeSettings(value: Partial<Settings>) {
 
 function validateAgentUrl(value: string) {
     const raw = value.trim();
-    if (!raw) throw new Error("请先填写 canvas-agent 的 HTTPS 服务地址。");
-    if (isCanvasWebUrl(raw)) throw new Error("Agent URL 填成了画布网页地址。这里要填 cloudflared / Tailscale / VPS 反代出来的 canvas-agent 地址。");
+    if (!raw) throw new Error("请先填写 Codex Remote Bridge 的 HTTPS 服务地址。");
+    if (isCanvasWebUrl(raw)) throw new Error("Agent URL 填成了网页地址。这里要填 cloudflared / Tailscale / VPS 反代出来的 Codex Remote Bridge 地址。");
     let url: URL;
     try {
         url = new URL(raw);
@@ -124,6 +124,14 @@ function normalizeCanvasId(value: string) {
     if (!raw) return "default";
     const match = raw.match(/(?:^|\/)canvas\/([^/?#]+)/i);
     return decodeURIComponent(match?.[1] || raw.replace(/^\/?canvas\//i, "")).trim() || "default";
+}
+
+function workspaceRequestBody(workspaceId: string, extra: Record<string, unknown> = {}) {
+    return { ...extra, workspaceId, canvasId: workspaceId };
+}
+
+function workspaceSearchParams(workspaceId: string, extra: Record<string, string> = {}) {
+    return new URLSearchParams({ workspaceId, canvasId: workspaceId, ...extra });
 }
 
 function normalizeThreadId(value: string) {
@@ -200,7 +208,8 @@ function normalizeProjectList(items: ProjectPreset[]) {
         .map((item) => ({
             id: String(item.id),
             label: String(item.label),
-            canvasId: normalizeCanvasId(item.canvasId || item.id),
+            canvasId: normalizeCanvasId(item.workspaceId || item.canvasId || item.id),
+            workspaceId: normalizeCanvasId(item.workspaceId || item.canvasId || item.id),
             workspacePath: item.workspacePath || "",
             threadId: normalizeThreadId(item.threadId || ""),
             gitRepoPath: item.gitRepoPath || "",
@@ -677,12 +686,11 @@ export default function MobileAgentPage() {
         try {
             await agentFetch<{ threadId?: string }>("/agent/codex/turn/steer", {
                 method: "POST",
-                body: JSON.stringify({
-                    canvasId: normalizeCanvasId(settingsRef.current.canvasId),
+                body: JSON.stringify(workspaceRequestBody(normalizeCanvasId(settingsRef.current.canvasId), {
                     threadId,
                     prompt: text,
                     attachments: draft.attachments || [],
-                }),
+                })),
             });
             clearPendingGuide(id);
             setTemporaryStatus("已引导对话", true);
@@ -827,7 +835,7 @@ export default function MobileAgentPage() {
     };
 
     const refreshThreadMessages = async (threadId: string, canvasId: string, pendingPrompt = "", options: { forceScroll?: boolean } = {}) => {
-        const data = await agentFetch<{ workspace?: Workspace; messages?: MobileMessage[] }>(`/agent/codex/threads/${encodeURIComponent(threadId)}?canvasId=${encodeURIComponent(canvasId)}`);
+        const data = await agentFetch<{ workspace?: Workspace; messages?: MobileMessage[] }>(`/agent/codex/threads/${encodeURIComponent(threadId)}?${workspaceSearchParams(canvasId).toString()}`);
         if (data.workspace) {
             setWorkspace(data.workspace);
             setActiveThreadId(data.workspace.activeThreadId || threadId);
@@ -841,7 +849,7 @@ export default function MobileAgentPage() {
         try {
             const data = await agentFetch<{ workspace?: Workspace; messages?: MobileMessage[] }>(`/agent/codex/threads/${encodeURIComponent(threadId)}/resume`, {
                 method: "POST",
-                body: JSON.stringify({ canvasId }),
+                body: JSON.stringify(workspaceRequestBody(canvasId)),
             });
             if (syncSeq !== threadSyncSeqRef.current) return false;
             setWorkspace(data.workspace || workspace);
@@ -869,7 +877,7 @@ export default function MobileAgentPage() {
         setThreadError("");
         try {
             const canvasId = normalizeCanvasId(settingsRef.current.canvasId);
-            const query = new URLSearchParams({ canvasId });
+            const query = workspaceSearchParams(canvasId);
             if (threadSearch.trim()) query.set("searchTerm", threadSearch.trim());
             const data = await agentFetch<{ workspace?: Workspace; data?: ThreadSummary[] }>(`/agent/codex/threads?${query.toString()}`);
             const nextThreads = data.data || [];
@@ -933,7 +941,8 @@ export default function MobileAgentPage() {
         setReposLoading(true);
         setRepoError("");
         try {
-            const data = await agentFetch<{ workspace?: Workspace; repos?: GitRepoInfo[] }>(`/agent/git/repos?canvasId=${encodeURIComponent(normalizeCanvasId(settingsRef.current.canvasId))}`);
+            const workspaceId = normalizeCanvasId(settingsRef.current.canvasId);
+            const data = await agentFetch<{ workspace?: Workspace; repos?: GitRepoInfo[] }>(`/agent/git/repos?${workspaceSearchParams(workspaceId).toString()}`);
             const nextRepos = data.repos || [];
             setRepos(nextRepos);
             if (data.workspace) setWorkspace(data.workspace);
@@ -1085,11 +1094,11 @@ export default function MobileAgentPage() {
             if (settingsRef.current.workspacePath.trim()) {
                 const data = await agentFetch<{ workspace?: Workspace }>("/agent/codex/workspace", {
                     method: "POST",
-                    body: JSON.stringify({ canvasId, workspacePath: settingsRef.current.workspacePath.trim() }),
+                    body: JSON.stringify(workspaceRequestBody(canvasId, { workspacePath: settingsRef.current.workspacePath.trim() })),
                 });
                 currentWorkspace = data.workspace || null;
             } else {
-                const data = await agentFetch<{ workspace?: Workspace }>(`/agent/codex/workspace?canvasId=${encodeURIComponent(canvasId)}`);
+                const data = await agentFetch<{ workspace?: Workspace }>(`/agent/codex/workspace?${workspaceSearchParams(canvasId).toString()}`);
                 currentWorkspace = data.workspace || null;
             }
             const nextThreadId = threadId || currentWorkspace?.activeThreadId || "";
@@ -1321,7 +1330,7 @@ export default function MobileAgentPage() {
         try {
             const data = await agentFetch<{ stdout?: string; stderr?: string; remote?: string; branch?: string; repo?: GitRepoInfo; repoPath?: string }>("/agent/git/push", {
                 method: "POST",
-                body: JSON.stringify({ canvasId: normalizeCanvasId(settingsRef.current.canvasId), repoPath: repo.repoPath, remote, branch }),
+                body: JSON.stringify(workspaceRequestBody(normalizeCanvasId(settingsRef.current.canvasId), { repoPath: repo.repoPath, remote, branch })),
             });
             pushMessage({ id: createId(), role: "tool", title: "Git push", text: data.stdout || data.stderr || `已推送 ${repoName(data.repo?.repoPath || repo.repoPath)} 到 ${data.remote || remote}/${data.branch || branch}` });
             setTemporaryStatus("推送完成", true);
@@ -1338,7 +1347,7 @@ export default function MobileAgentPage() {
         try {
             const data = await agentFetch<{ workspace?: Workspace; thread?: { id?: string }; messages?: MobileMessage[] }>("/agent/codex/threads/new", {
                 method: "POST",
-                body: JSON.stringify({ canvasId: normalizeCanvasId(settingsRef.current.canvasId) }),
+                body: JSON.stringify(workspaceRequestBody(normalizeCanvasId(settingsRef.current.canvasId))),
             });
             setWorkspace(data.workspace || workspace);
             setActiveThreadId(data.thread?.id || data.workspace?.activeThreadId || "");
@@ -1379,7 +1388,7 @@ export default function MobileAgentPage() {
             if (targetThreadId) writePendingRun({ threadId: targetThreadId, canvasId, prompt, startedAt: Date.now() });
             const data = await agentFetch<{ threadId?: string }>("/agent/codex/turn", {
                 method: "POST",
-                body: JSON.stringify({ prompt, canvasId, threadId: targetThreadId || undefined, attachments: currentAttachments }),
+                body: JSON.stringify(workspaceRequestBody(canvasId, { prompt, threadId: targetThreadId || undefined, attachments: currentAttachments })),
             });
             if (data.threadId) {
                 setActiveThreadId(data.threadId);
@@ -1456,7 +1465,7 @@ export default function MobileAgentPage() {
                 <div className="min-w-0 flex-1">
                     <div className="flex min-w-0 items-center gap-2 text-base font-semibold leading-6">
                         <TerminalSquare className="size-4 shrink-0" />
-                        <span className="truncate">移动 Codex</span>
+                        <span className="truncate">Codex Remote</span>
                     </div>
                     <div className="truncate text-xs text-stone-500 dark:text-stone-400">{activeProject ? `${activeProject.label} · ${workspace?.workspacePath || activeProject.workspacePath}` : workspace?.workspacePath || "未连接工作目录"}</div>
                 </div>
@@ -1538,7 +1547,7 @@ export default function MobileAgentPage() {
                             <div className="grid size-12 place-items-center rounded-2xl bg-stone-950 text-white shadow-sm dark:bg-white dark:text-black">
                                 <FolderGit2 className="size-5" />
                             </div>
-                            <h1 className="mt-5 text-2xl font-semibold">手机操作 Codex</h1>
+                            <h1 className="mt-5 text-2xl font-semibold">Codex Remote</h1>
                             <p className="mt-2 max-w-sm text-sm leading-6 text-stone-500 dark:text-stone-400">{connected ? "回复会显示在本页；电脑端窗口不一定实时同步。" : "连接电脑 Agent 后开始。"}</p>
                         </section>
                     )}
@@ -1792,7 +1801,7 @@ export default function MobileAgentPage() {
                                         </label>
                                         <div className="grid grid-cols-2 gap-2">
                                             <label className="block">
-                                                <span className="text-xs font-medium text-stone-500 dark:text-stone-400">Canvas ID</span>
+                                                <span className="text-xs font-medium text-stone-500 dark:text-stone-400">Workspace ID</span>
                                                 <input value={projectDraft.canvasId} onChange={(event) => setProjectDraft((value) => ({ ...value, canvasId: event.target.value }))} placeholder="自动" className="mt-1 h-10 w-full rounded-xl border border-black/10 bg-white px-3 text-sm outline-none focus:border-stone-500 dark:border-white/10 dark:bg-[#181818]" />
                                             </label>
                                             <label className="block">
@@ -1922,17 +1931,17 @@ export default function MobileAgentPage() {
 
                         <div className="mt-5 space-y-4">
                             <p className="rounded-2xl border border-amber-500/20 bg-amber-500/10 px-3 py-2 text-xs leading-5 text-amber-800 dark:text-amber-100">
-                                Agent URL 是电脑上 canvas-agent 的 HTTPS 服务地址，不是画布网页地址、New API 地址或创作 Agent API。不要把 17371 端口无鉴权裸露到公网。
+                                Agent URL 是电脑上 Codex Remote Bridge 的 HTTPS 服务地址，不是画布网页地址、New API 地址或创作 Agent API。不要把 17371 端口无鉴权裸露到公网。
                             </p>
                             <label className="block">
                                 <span className="text-sm font-medium">Agent URL</span>
-                                <input value={settings.agentUrl} onChange={(event) => updateSettings({ agentUrl: event.target.value })} placeholder="https://your-canvas-agent.example.com" className="mt-2 h-11 w-full rounded-xl border border-black/10 bg-white px-3 outline-none focus:border-stone-500 dark:border-white/10 dark:bg-white/[0.06]" />
-                                <span className="mt-1 block text-xs leading-5 text-stone-500 dark:text-stone-400">填 cloudflared / Tailscale / VPS 反代出的 canvas-agent 地址。</span>
+                                <input value={settings.agentUrl} onChange={(event) => updateSettings({ agentUrl: event.target.value })} placeholder="https://your-codex-bridge.example.com" className="mt-2 h-11 w-full rounded-xl border border-black/10 bg-white px-3 outline-none focus:border-stone-500 dark:border-white/10 dark:bg-white/[0.06]" />
+                                <span className="mt-1 block text-xs leading-5 text-stone-500 dark:text-stone-400">填 cloudflared / Tailscale / VPS 反代出的 Codex Remote Bridge 地址。</span>
                             </label>
                             <label className="block">
                                 <span className="text-sm font-medium">Token</span>
                                 <input value={settings.token} onChange={(event) => updateSettings({ token: event.target.value })} type="password" autoComplete="new-password" className="mt-2 h-11 w-full rounded-xl border border-black/10 bg-white px-3 outline-none focus:border-stone-500 dark:border-white/10 dark:bg-white/[0.06]" />
-                                <span className="mt-1 block text-xs leading-5 text-stone-500 dark:text-stone-400">canvas-agent 启动输出的 Connect token，不是 Codex API Key。</span>
+                                <span className="mt-1 block text-xs leading-5 text-stone-500 dark:text-stone-400">本机 Agent 启动输出的 Connect token，不是 Codex API Key。</span>
                             </label>
                             <label className="block">
                                 <span className="text-sm font-medium">Workspace</span>
@@ -1940,9 +1949,9 @@ export default function MobileAgentPage() {
                                 <span className="mt-1 block text-xs leading-5 text-stone-500 dark:text-stone-400">留空使用 agent 已保存的工作区。指定 Codex 会话时，Workspace 必须和该会话的 cwd 一致。</span>
                             </label>
                             <label className="block">
-                                <span className="text-sm font-medium">Canvas ID</span>
-                                <input value={settings.canvasId} onChange={(event) => updateSettings({ canvasId: event.target.value })} placeholder="/canvas/019f..." className="mt-2 h-11 w-full rounded-xl border border-black/10 bg-white px-3 outline-none focus:border-stone-500 dark:border-white/10 dark:bg-white/[0.06]" />
-                                <span className="mt-1 block text-xs leading-5 text-stone-500 dark:text-stone-400">只用于区分画布工作区，可填完整 /canvas/019...，不是 Codex 会话。</span>
+                                <span className="text-sm font-medium">Workspace ID</span>
+                                <input value={settings.canvasId} onChange={(event) => updateSettings({ canvasId: event.target.value })} placeholder="default 或项目名" className="mt-2 h-11 w-full rounded-xl border border-black/10 bg-white px-3 outline-none focus:border-stone-500 dark:border-white/10 dark:bg-white/[0.06]" />
+                                <span className="mt-1 block text-xs leading-5 text-stone-500 dark:text-stone-400">只用于区分本机项目分桶，不是 Codex 会话；旧版 /canvas/019... 仍可兼容。</span>
                             </label>
                             <label className="block">
                                 <span className="text-sm font-medium">Codex Thread ID</span>

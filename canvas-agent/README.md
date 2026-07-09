@@ -1,6 +1,11 @@
-# Infinite Canvas Agent
+# Codex Remote Bridge / Infinite Canvas Agent
 
-本地 Canvas Agent 用来连接画布网页和用户电脑上的 Codex / Claude Code。本地开发时优先连接 `http://localhost:3000`，不需要先使用线上站点。
+本地 Agent 有两层用途：
+
+- Codex Remote Bridge：让手机网页远程控制用户自己电脑上的 Codex，会话、引导、图片附件、git push 都走本机 bridge。
+- Infinite Canvas Agent：当画布需要 Codex 作为 Agent 大脑时，显式注入画布 MCP 和画布操作提示。
+
+独立开源时应优先把 Codex Remote Bridge 抽成通用能力，画布只作为可选 adapter。本地开发时优先连接 `http://localhost:3000`，不需要先使用线上站点。
 
 ## 启动
 
@@ -24,13 +29,13 @@ Local URL: http://127.0.0.1:17371
 Connect token: xxxxxx
 ```
 
-在画布右上角点击 `Agent`，填入地址和 token 后连接。
+在画布右上角点击 `Agent`，或打开 `/mobile-agent`，填入地址和 token 后连接。
 
 Codex app 插件会读取启动输出里的 Local URL 和 Connect token，并直接打开画布网页地址；Canvas Agent 不负责生成画布打开 URL。
 
 Canvas Agent 默认只监听 `127.0.0.1`。网页第一次带正确 token 连接后，Canvas Agent 会记录该网页 Origin；之后其他 Origin 不能复用这个本地 Agent，除非用户清理 `~/.infinite-canvas/canvas-agent.json` 里的 `origins`。
 
-远程使用线上画布时，请把 Canvas Agent 放在受保护的 HTTPS 地址后面（Tailscale/ZeroTier、Cloudflare Tunnel、VPS 反代均可），再在 `/mobile-agent` 填入 HTTPS Agent URL 和 Connect token。不要把 `17371` 无鉴权裸露到公网；卡藏登录只保护网页入口，Agent URL + token 仍是执行本机 Codex 的关键凭证。
+远程使用时，请把本机 Agent 放在受保护的 HTTPS 地址后面（Tailscale/ZeroTier、Cloudflare Tunnel、VPS 反代均可），再在 `/mobile-agent` 填入 HTTPS Agent URL 和 Connect token。不要把 `17371` 无鉴权裸露到公网；卡藏登录只保护网页入口，Agent URL + token 仍是执行本机 Codex 的关键凭证。
 
 重启后想保持手机端配置不变，可以固定 token 和公开地址：
 
@@ -44,7 +49,9 @@ npx -y @basketikun/canvas-agent
 
 `CANVAS_AGENT_TOKEN` 会覆盖并写入 `~/.infinite-canvas/canvas-agent.json`。`CANVAS_AGENT_PUBLIC_URL` 用于固定 `/config` 和启动输出里的 Agent URL；实际公网稳定性仍取决于 Cloudflare named tunnel、Tailscale Funnel 或自己的反代域名。
 
-`canvasId` 是 Canvas Agent 的工作区分桶 ID，用来保存 workspace、active Codex thread 和画布侧配置。它不是 Codex thread ID；如果只做独立 Codex 手机控制台，可以把它隐藏为默认值或在产品层改名为 `workspaceId`。
+`workspaceId` 是本机 Agent 的工作区分桶 ID，用来保存 workspace、active Codex thread 和项目侧配置。它不是 Codex thread ID。旧字段 `canvasId` 仍被接受，只为兼容画布历史调用。
+
+Codex Remote 的开源拆分和风险边界见仓库根目录 [CODEX-REMOTE-OPEN-SOURCE.md](../CODEX-REMOTE-OPEN-SOURCE.md)。
 
 ## 发布
 

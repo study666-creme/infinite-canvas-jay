@@ -13,7 +13,7 @@
 
 本项目保留 AGPL-3.0 许可证，详见 [LICENSE](LICENSE)。产品 UI 已使用「卡藏」品牌，但仓库层面的开源义务不能删除。线上部署时，请确保对应源码可访问。
 
-更完整的说明见 [OPEN-SOURCE.md](OPEN-SOURCE.md)。
+更完整的说明见 [OPEN-SOURCE.md](OPEN-SOURCE.md)。Codex Remote 独立开源、`workspaceId` 和 Codex 合规边界见 [CODEX-REMOTE-OPEN-SOURCE.md](CODEX-REMOTE-OPEN-SOURCE.md)。
 
 ## 快速开始
 
@@ -41,15 +41,15 @@ npm run build
 
 ## 登录与数据
 
-线上画布沿用卡片库的卡藏账号登录。未登录用户不能进入画布、资产、生成工作台或移动 Codex 控制页。
+线上画布沿用卡片库的卡藏账号登录。未登录用户不能进入画布、资产、生成工作台或 Codex Remote 控制页。
 
 - 画布项目、资产库、AI 渠道配置仍主要保存在当前浏览器本地；画布与资产会按卡藏用户 ID 分桶，避免同一设备换账号后混用。
 - 卡藏生图、卡片库读取、Prompt Hub 媒体代理会使用当前登录 token；未登录用户不能无成本调用这些线上代理接口。
-- 远程 Codex 不会运行在 Vercel 上。要让手机远程操作项目，需要把你自己的 `canvas-agent` 放在受保护的 HTTPS 地址后面，并使用 Connect token 连接。
+- 远程 Codex 不会运行在 Vercel 上。要让手机远程操作项目，需要把你自己的本机 Agent 放在受保护的 HTTPS 地址后面，并使用 Connect token 连接。
 
-## 手机操作 Codex
+## Codex Remote
 
-打开 `/mobile-agent` 可以把手机变成 Codex 控制台，连接电脑上的 `canvas-agent` 后继续让 Codex 读项目、改代码、跑命令和部署。
+打开 `/mobile-agent` 可以把手机变成 Codex Remote Console，连接电脑上的本机 Agent 后继续让 Codex 读项目、改代码、跑命令和部署。它是可独立拆出的自托管 Codex 控制台；画布需要 Codex 当 Agent 大脑时，应作为可选 adapter/MCP 能力接入。
 
 局域网使用示例：
 
@@ -60,7 +60,7 @@ cd D:\canvas\infinite-canvas\canvas-agent
 npm run dev
 ```
 
-启动后终端会输出 `Connect token` 和可访问地址。同局域网可填入 `http://电脑局域网IP:17371`。远程使用线上画布时，请通过 Cloudflare Tunnel、Tailscale Funnel、ZeroTier 内网地址或 VPS 反代提供 **HTTPS Agent URL**，再在 `/mobile-agent` 填入该地址、token 和工作目录。
+启动后终端会输出 `Connect token` 和可访问地址。同局域网可填入 `http://电脑局域网IP:17371`。远程使用时，请通过 Cloudflare Tunnel、Tailscale Funnel、ZeroTier 内网地址或 VPS 反代提供 **HTTPS Agent URL**，再在 `/mobile-agent` 填入该地址、token 和工作目录。
 
 想让重启后手机不用重新填 token / URL，可以固定启动参数：
 
@@ -73,7 +73,7 @@ cd D:\canvas\infinite-canvas\canvas-agent
 npm run dev
 ```
 
-`Canvas ID` 只是 `canvas-agent` 用来区分不同工作区配置的本地分桶 key：它会关联 workspace、active Codex thread 和本地消息缓存。它不是 Codex 会话 ID；真正指定 Codex 会话用 `Codex Thread ID`。
+`Workspace ID` 只是本机 Agent 用来区分不同工作区配置的本地分桶 key：它会关联 workspace、active Codex thread 和本地消息缓存。它不是 Codex 会话 ID；真正指定 Codex 会话用 `Codex Thread ID`。旧字段 `Canvas ID / canvasId` 仅为兼容画布历史调用保留。
 
 不要把 `17371` 端口无鉴权裸露到公网；任何拿到 Agent URL 和 token 的人都能让你的本机 Codex 执行项目任务。
 
@@ -85,7 +85,7 @@ npm run dev
 
 ```text
 web/             前端应用
-canvas-agent/    本地画布 Agent
+canvas-agent/    本地 Agent / Codex Remote Bridge
 plugins/         Codex 插件
 docs/            文档站
 scripts/         辅助脚本

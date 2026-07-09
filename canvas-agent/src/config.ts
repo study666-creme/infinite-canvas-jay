@@ -14,9 +14,11 @@ export type CanvasAgentConfig = { url: string; token: string; origins?: string[]
 
 export function loadConfig(create = false): CanvasAgentConfig {
     try {
-        return JSON.parse(fs.readFileSync(CONFIG_FILE, "utf8")) as CanvasAgentConfig;
+        const config = normalizeConfig(JSON.parse(fs.readFileSync(CONFIG_FILE, "utf8")) as CanvasAgentConfig);
+        if (create) saveConfig(config);
+        return config;
     } catch {
-        const config = { url: `http://127.0.0.1:${Number(process.env.PORT) || DEFAULT_PORT}`, token: crypto.randomBytes(18).toString("hex") };
+        const config = normalizeConfig({ url: `http://127.0.0.1:${Number(process.env.PORT) || DEFAULT_PORT}`, token: crypto.randomBytes(18).toString("hex") });
         if (create) saveConfig(config);
         return config;
     }
@@ -57,6 +59,16 @@ function resolveWorkspacePath(value: string) {
     if (value === "~") return os.homedir();
     if (value.startsWith("~/")) return path.join(os.homedir(), value.slice(2));
     return path.resolve(value);
+}
+
+function normalizeConfig(config: CanvasAgentConfig) {
+    const token = String(process.env.CANVAS_AGENT_TOKEN || "").trim();
+    const publicUrl = String(process.env.CANVAS_AGENT_PUBLIC_URL || process.env.CANVAS_AGENT_URL || "").trim();
+    if (!config.token) config.token = crypto.randomBytes(18).toString("hex");
+    if (token) config.token = token;
+    if (!config.url) config.url = `http://127.0.0.1:${Number(process.env.PORT) || DEFAULT_PORT}`;
+    if (publicUrl) config.url = publicUrl.replace(/\/+$/, "");
+    return config;
 }
 
 function safeSegment(value: string) {

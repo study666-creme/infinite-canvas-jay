@@ -30,6 +30,18 @@ export async function runCodexTurn(prompt: string, emit: AgentEmit, attachments:
     await codexQueue;
 }
 
+export async function steerCodexTurn(prompt: string, emit: AgentEmit, attachments: AgentAttachment[] = [], options: Required<Pick<CodexRunOptions, "threadId">> & Pick<CodexRunOptions, "cwd">) {
+    if (!prompt.trim()) throw new Error("引导内容不能为空");
+    let files: string[] = [];
+    try {
+        files = await writeAttachmentFiles(attachments);
+        codexApp ||= await CodexAppClient.start(emit);
+        await codexApp.steerTurn(options.threadId, prompt, files);
+    } finally {
+        await Promise.all(files.map((file) => fs.unlink(file).catch(() => undefined)));
+    }
+}
+
 async function runCodexTurnNow(prompt: string, emit: AgentEmit, attachments: AgentAttachment[], options: CodexRunOptions) {
     let files: string[] = [];
     try {
@@ -122,6 +134,7 @@ class CodexAppClient {
     private lastUsage: unknown = null;
     private pending = new Map<number, PendingRequest>();
     private activeTurns = new Map<string, PendingRequest>();
+    private activeTurnByThread = new Map<string, string>();
     private completedTurns = new Map<string, Error | null>();
 
     private constructor(private child: ChildProcess, private emit: AgentEmit) {}
@@ -175,13 +188,24 @@ class CodexAppClient {
         const result = await this.request("turn/start", { threadId, input: codexInput(prompt, images), approvalPolicy: "never" });
         const turnId = String(field(field(result, "turn"), "id") || "");
         if (!turnId) throw new Error("Codex app-server 没有返回 turn id");
-        const completed = this.completedTurns.get(turnId);
-        if (this.completedTurns.has(turnId)) {
-            this.completedTurns.delete(turnId);
-            if (completed) throw completed;
-            return;
+        this.activeTurnByThread.set(threadId, turnId);
+        try {
+            const completed = this.completedTurns.get(turnId);
+            if (this.completedTurns.has(turnId)) {
+                this.completedTurns.delete(turnId);
+                if (completed) throw completed;
+                return;
+            }
+            await new Promise((resolve, reject) => this.activeTurns.set(turnId, { resolve, reject }));
+        } finally {
+            if (this.activeTurnByThread.get(threadId) === turnId) this.activeTurnByThread.delete(threadId);
         }
-        await new Promise((resolve, reject) => this.activeTurns.set(turnId, { resolve, reject }));
+    }
+
+    async steerTurn(threadId: string, prompt: string, images: string[]) {
+        const expectedTurnId = this.activeTurnByThread.get(threadId);
+        if (!expectedTurnId) throw new Error("当前会话没有正在运行的 Codex 任务，无法引导。");
+        return this.request("turn/steer", { threadId, input: codexInput(prompt, images), expectedTurnId });
     }
 
     private request(method: string, params: unknown) {
@@ -228,6 +252,8 @@ class CodexAppClient {
         this.emit("agent_event", { agent: "codex", ...event });
         if (event.type === "turn.completed") {
             const turnId = String(field(params, "turnId") || field(field(params, "turn"), "id") || "");
+            const threadId = String(field(params, "threadId") || field(field(params, "turn"), "threadId") || "");
+            if (threadId && this.activeTurnByThread.get(threadId) === turnId) this.activeTurnByThread.delete(threadId);
             const pending = this.activeTurns.get(turnId);
             const error = field(field(params, "turn"), "error");
             if (pending) {
@@ -271,6 +297,7 @@ class CodexAppClient {
         [...this.pending.values(), ...this.activeTurns.values()].forEach((item) => item.reject(new Error(message)));
         this.pending.clear();
         this.activeTurns.clear();
+        this.activeTurnByThread.clear();
     }
 }
 
@@ -291,7 +318,7 @@ function codexInput(prompt: string, images: string[]) {
 
 function normalizeCodexNotification(method: string, params: Json): AgentEvent | null {
     if (method === "thread/started") return { type: "thread.started", thread_id: field(field(params, "thread"), "id") };
-    if (method === "turn/started") return { type: "turn.started" };
+    if (method === "turn/started") return { type: "turn.started", thread_id: field(params, "threadId"), turn_id: field(field(params, "turn"), "id") };
     if (method === "turn/completed") return { type: "turn.completed", usage: null };
     if (method === "item/started") return { type: "item.started", item: normalizeItem(field(params, "item")) };
     if (method === "item/completed") return { type: "item.completed", item: normalizeItem(field(params, "item")) };

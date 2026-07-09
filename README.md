@@ -62,6 +62,19 @@ npm run dev
 
 启动后终端会输出 `Connect token` 和可访问地址。同局域网可填入 `http://电脑局域网IP:17371`。远程使用线上画布时，请通过 Cloudflare Tunnel、Tailscale Funnel、ZeroTier 内网地址或 VPS 反代提供 **HTTPS Agent URL**，再在 `/mobile-agent` 填入该地址、token 和工作目录。
 
+想让重启后手机不用重新填 token / URL，可以固定启动参数：
+
+```powershell
+$env:CANVAS_AGENT_HOST="0.0.0.0"
+$env:CANVAS_AGENT_WORKSPACE="D:\canvas\infinite-canvas"
+$env:CANVAS_AGENT_TOKEN="自己生成的一段长随机字符串"
+$env:CANVAS_AGENT_PUBLIC_URL="https://你的固定反代域名"
+cd D:\canvas\infinite-canvas\canvas-agent
+npm run dev
+```
+
+`Canvas ID` 只是 `canvas-agent` 用来区分不同工作区配置的本地分桶 key：它会关联 workspace、active Codex thread 和本地消息缓存。它不是 Codex 会话 ID；真正指定 Codex 会话用 `Codex Thread ID`。
+
 不要把 `17371` 端口无鉴权裸露到公网；任何拿到 Agent URL 和 token 的人都能让你的本机 Codex 执行项目任务。
 
 ## 部署

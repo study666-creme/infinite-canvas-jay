@@ -32,6 +32,20 @@ Canvas Agent 默认只监听 `127.0.0.1`。网页第一次带正确 token 连接
 
 远程使用线上画布时，请把 Canvas Agent 放在受保护的 HTTPS 地址后面（Tailscale/ZeroTier、Cloudflare Tunnel、VPS 反代均可），再在 `/mobile-agent` 填入 HTTPS Agent URL 和 Connect token。不要把 `17371` 无鉴权裸露到公网；卡藏登录只保护网页入口，Agent URL + token 仍是执行本机 Codex 的关键凭证。
 
+重启后想保持手机端配置不变，可以固定 token 和公开地址：
+
+```bash
+CANVAS_AGENT_HOST=0.0.0.0 \
+CANVAS_AGENT_WORKSPACE=/path/to/project \
+CANVAS_AGENT_TOKEN=replace-with-a-long-random-secret \
+CANVAS_AGENT_PUBLIC_URL=https://agent.example.com \
+npx -y @basketikun/canvas-agent
+```
+
+`CANVAS_AGENT_TOKEN` 会覆盖并写入 `~/.infinite-canvas/canvas-agent.json`。`CANVAS_AGENT_PUBLIC_URL` 用于固定 `/config` 和启动输出里的 Agent URL；实际公网稳定性仍取决于 Cloudflare named tunnel、Tailscale Funnel 或自己的反代域名。
+
+`canvasId` 是 Canvas Agent 的工作区分桶 ID，用来保存 workspace、active Codex thread 和画布侧配置。它不是 Codex thread ID；如果只做独立 Codex 手机控制台，可以把它隐藏为默认值或在产品层改名为 `workspaceId`。
+
 ## 发布
 
 `canvas-agent` 使用自己的 `package.json` 版本号，不跟仓库根目录 `VERSION` 绑定。推送到 `main` 后，GitHub Actions 会检查 npm 上是否已经存在当前包版本；不存在时才发布 `@basketikun/canvas-agent`。

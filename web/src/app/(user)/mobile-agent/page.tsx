@@ -332,6 +332,7 @@ export default function MobileAgentPage() {
     const [pushing, setPushing] = useState(false);
     const [settingsOpen, setSettingsOpen] = useState(false);
     const [threadsOpen, setThreadsOpen] = useState(false);
+    const [requirementsOpen, setRequirementsOpen] = useState(false);
     const [projects, setProjects] = useState<ProjectPreset[]>(projectPresets);
     const [projectsLoading, setProjectsLoading] = useState(false);
     const [activeProjectId, setActiveProjectId] = useState("");
@@ -354,6 +355,7 @@ export default function MobileAgentPage() {
     const [attachments, setAttachments] = useState<AgentAttachment[]>([]);
     const [queuedTasks, setQueuedTasks] = useState<QueuedTask[]>([]);
     const [pendingGuides, setPendingGuides] = useState<PendingGuide[]>([]);
+    const [steeringGuideIds, setSteeringGuideIds] = useState<string[]>([]);
     const [runStatus, setRunStatus] = useState("");
     const [unreadCount, setUnreadCount] = useState(0);
     const eventSourceRef = useRef<EventSource | null>(null);
@@ -371,12 +373,14 @@ export default function MobileAgentPage() {
     const activeThreadIdRef = useRef("");
     const threadSyncSeqRef = useRef(0);
     const scrollerRef = useRef<HTMLDivElement>(null);
+    const messageElementsRef = useRef(new Map<string, HTMLElement>());
     const fileInputRef = useRef<HTMLInputElement>(null);
     const atBottomRef = useRef(true);
 
     const canSend = useMemo(() => Boolean(input.trim() || attachments.length), [attachments.length, input]);
     const activeQueueCount = useMemo(() => queueTaskCount(queuedTasks), [queuedTasks]);
     const visibleQueueTasks = useMemo(() => queuedTasks.filter((task) => task.status !== "done"), [queuedTasks]);
+    const requirementMessages = useMemo(() => messages.filter((message) => message.role === "user" && message.text.trim()), [messages]);
     const selectedRepo = useMemo(() => repos.find((repo) => samePath(repo.repoPath, settings.gitRepoPath)) || null, [repos, settings.gitRepoPath]);
     const detectedProject = useMemo(() => findProjectPreset(projects, settings, workspace), [projects, settings.canvasId, settings.threadId, settings.workspacePath, workspace]);
     const activeProject = useMemo(() => detectedProject || projects.find((project) => project.id === activeProjectId) || null, [activeProjectId, detectedProject, projects]);
@@ -652,18 +656,45 @@ export default function MobileAgentPage() {
         setPendingGuides(next);
     }
 
-    function confirmPendingGuide(id: string, extraGuide = "") {
+    async function confirmPendingGuide(id: string, extraGuide = "") {
         const draft = pendingGuidesRef.current.find((item) => item.id === id);
         if (!draft) return;
-        const task = pendingGuideToTask(draft, extraGuide);
-        if (!task) {
+        const text = [draft.text.trim(), extraGuide.trim()].filter(Boolean).join("\n");
+        if (!text) {
             clearPendingGuide(id);
             return;
         }
-        appendQueuedTasks([task], "next");
-        clearPendingGuide(id);
-        window.setTimeout(() => void runNextQueuedTask(), 100);
-        setTemporaryStatus("已插入队列，当前任务结束后继续执行。", true);
+        const threadId = activeThreadIdRef.current || normalizeThreadId(settingsRef.current.threadId);
+        if (!threadId) {
+            setTemporaryStatus("当前没有可引导的 Codex 会话。", true);
+            return;
+        }
+        if (!sending && !pendingPromptRef.current && !activeQueueTaskIdRef.current) {
+            setTemporaryStatus("当前没有正在运行的任务，已保留为待发送引导。", true);
+            return;
+        }
+        setSteeringGuideIds((items) => [...items, id]);
+        try {
+            await agentFetch<{ threadId?: string }>("/agent/codex/turn/steer", {
+                method: "POST",
+                body: JSON.stringify({
+                    canvasId: normalizeCanvasId(settingsRef.current.canvasId),
+                    threadId,
+                    prompt: text,
+                    attachments: draft.attachments || [],
+                }),
+            });
+            clearPendingGuide(id);
+            setTemporaryStatus("已引导对话", true);
+            pushMessage({ id: createId(), role: "status", text: "已引导对话" });
+        } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            const fallbackMessage = isAgentRouteNotFound(message) ? "电脑 Agent 还没更新到支持 Codex 引导。重启新版 Agent 后再点“引导”。" : message;
+            setTemporaryStatus("");
+            pushMessage({ id: createId(), role: "error", title: "引导失败", text: fallbackMessage });
+        } finally {
+            setSteeringGuideIds((items) => items.filter((item) => item !== id));
+        }
     }
 
     function removeQueueTask(id: string) {
@@ -688,6 +719,14 @@ export default function MobileAgentPage() {
         atBottomRef.current = true;
         scroller.scrollTo({ top: scroller.scrollHeight, behavior: "smooth" });
         setUnreadCount(0);
+    }
+
+    function scrollToRequirement(messageId: string) {
+        const element = messageElementsRef.current.get(messageId);
+        if (!element) return;
+        atBottomRef.current = false;
+        element.scrollIntoView({ block: "start", behavior: "smooth" });
+        setRequirementsOpen(false);
     }
 
     function handleScroll() {
@@ -1422,6 +1461,9 @@ export default function MobileAgentPage() {
                     <div className="truncate text-xs text-stone-500 dark:text-stone-400">{activeProject ? `${activeProject.label} · ${workspace?.workspacePath || activeProject.workspacePath}` : workspace?.workspacePath || "未连接工作目录"}</div>
                 </div>
                 <div className="flex shrink-0 items-center gap-1">
+                    <button type="button" className="grid size-9 place-items-center rounded-xl text-stone-500 transition hover:bg-black/[0.04] hover:text-stone-950 dark:text-stone-400 dark:hover:bg-sky-400/10 dark:hover:text-sky-100" onClick={() => setRequirementsOpen(true)} aria-label="需求索引" title="需求索引">
+                        <ListTodo className="size-4" />
+                    </button>
                     <button type="button" className="grid size-9 place-items-center rounded-xl text-stone-500 transition hover:bg-black/[0.04] hover:text-stone-950 dark:text-stone-400 dark:hover:bg-sky-400/10 dark:hover:text-sky-100" onClick={() => void connect()} aria-label="连接" title="连接">
                         {connecting ? <LoaderCircle className="size-4 animate-spin" /> : connected ? <CheckCircle2 className="size-4" /> : <PlugZap className="size-4" />}
                     </button>
@@ -1460,7 +1502,14 @@ export default function MobileAgentPage() {
                 <div className="mx-auto flex max-w-3xl flex-col gap-3">
                     {messages.length ? (
                         messages.map((message) => (
-                            <article key={message.id} className={`group flex ${message.role === "user" ? "justify-end" : "justify-start"}`}>
+                            <article
+                                key={message.id}
+                                ref={(element) => {
+                                    if (element) messageElementsRef.current.set(message.id, element);
+                                    else messageElementsRef.current.delete(message.id);
+                                }}
+                                className={`group flex scroll-mt-5 ${message.role === "user" ? "justify-end" : "justify-start"}`}
+                            >
                                 <div
                                     className={[
                                         "max-w-[90%] rounded-2xl px-4 py-3 text-[15px] leading-7 shadow-sm",
@@ -1520,7 +1569,9 @@ export default function MobileAgentPage() {
 
                         {pendingGuides.length ? (
                             <div className="mt-3 space-y-2">
-                                {pendingGuides.map((pendingGuide, index) => (
+                                {pendingGuides.map((pendingGuide, index) => {
+                                    const steering = steeringGuideIds.includes(pendingGuide.id);
+                                    return (
                                     <div key={pendingGuide.id} className="rounded-2xl border border-sky-400/25 bg-sky-500/[0.08] p-3 text-stone-900 shadow-[inset_0_1px_0_rgba(255,255,255,.45)] dark:border-sky-300/20 dark:bg-sky-300/[0.08] dark:text-stone-100">
                                         <div className="flex items-start justify-between gap-3">
                                             <div className="min-w-0 flex-1">
@@ -1529,10 +1580,11 @@ export default function MobileAgentPage() {
                                                     <div className="min-w-0 flex-1 line-clamp-3 break-words text-sm leading-5">{pendingGuide.text}</div>
                                                     <button
                                                         type="button"
-                                                        className="mt-0.5 shrink-0 rounded-full bg-[#0A84FF] px-2.5 py-1 text-xs font-semibold text-white shadow-[0_6px_18px_rgba(10,132,255,.24)] transition hover:brightness-105 active:scale-95"
-                                                        onClick={() => confirmPendingGuide(pendingGuide.id)}
+                                                        className="mt-0.5 shrink-0 rounded-full bg-[#0A84FF] px-2.5 py-1 text-xs font-semibold text-white shadow-[0_6px_18px_rgba(10,132,255,.24)] transition hover:brightness-105 active:scale-95 disabled:cursor-wait disabled:opacity-65"
+                                                        onClick={() => void confirmPendingGuide(pendingGuide.id)}
+                                                        disabled={steering}
                                                     >
-                                                        引导
+                                                        {steering ? "引导中" : "引导"}
                                                     </button>
                                                 </div>
                                                 {pendingGuide.attachments.length ? <div className="mt-1 text-xs text-stone-500 dark:text-stone-300">{pendingGuide.attachments.length} 张图片</div> : null}
@@ -1547,7 +1599,8 @@ export default function MobileAgentPage() {
                                             </button>
                                         </div>
                                     </div>
-                                ))}
+                                    );
+                                })}
                             </div>
                         ) : null}
 
@@ -1636,6 +1689,43 @@ export default function MobileAgentPage() {
                     </button>
                 </div>
             </form>
+
+            {requirementsOpen ? (
+                <div className="fixed inset-0 z-50 bg-black/35 backdrop-blur-sm" onClick={() => setRequirementsOpen(false)}>
+                    <section className="absolute inset-y-0 right-0 flex w-[min(92vw,390px)] flex-col border-l border-black/10 bg-[#f7f5ef] shadow-2xl dark:border-white/10 dark:bg-[#101010]" onClick={(event) => event.stopPropagation()}>
+                        <div className="shrink-0 border-b border-black/10 p-4 dark:border-white/10">
+                            <div className="flex items-center justify-between gap-3">
+                                <div>
+                                    <h2 className="text-lg font-semibold">需求索引</h2>
+                                    <p className="mt-1 text-xs leading-5 text-stone-500 dark:text-stone-400">{requirementMessages.length ? `${requirementMessages.length} 条用户需求` : "当前会话还没有用户需求"}</p>
+                                </div>
+                                <button type="button" className="grid size-9 place-items-center rounded-xl text-stone-500 transition hover:bg-black/[0.04] hover:text-stone-950 dark:hover:bg-sky-400/10 dark:hover:text-sky-100" onClick={() => setRequirementsOpen(false)} aria-label="关闭需求索引">
+                                    <X className="size-4" />
+                                </button>
+                            </div>
+                        </div>
+                        <div className="min-h-0 flex-1 overflow-y-auto p-4">
+                            {requirementMessages.length ? (
+                                <div className="space-y-2">
+                                    {requirementMessages.map((message, index) => (
+                                        <button
+                                            key={message.id}
+                                            type="button"
+                                            className="block w-full rounded-2xl border border-black/10 bg-white/70 px-3 py-3 text-left transition hover:border-sky-400/35 hover:bg-sky-50 dark:border-white/10 dark:bg-white/[0.05] dark:hover:bg-sky-400/10"
+                                            onClick={() => scrollToRequirement(message.id)}
+                                        >
+                                            <div className="mb-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-stone-400 dark:text-stone-500">#{index + 1}</div>
+                                            <div className="line-clamp-3 text-sm leading-5 text-stone-900 dark:text-stone-100">{message.text}</div>
+                                        </button>
+                                    ))}
+                                </div>
+                            ) : (
+                                <div className="rounded-2xl bg-black/[0.04] px-4 py-5 text-sm leading-6 text-stone-500 dark:bg-white/[0.05] dark:text-stone-400">发送需求后会自动出现在这里。</div>
+                            )}
+                        </div>
+                    </section>
+                </div>
+            ) : null}
 
             {threadsOpen ? (
                 <div className="fixed inset-0 z-50 bg-black/35 backdrop-blur-sm" onClick={() => setThreadsOpen(false)}>

@@ -6,7 +6,7 @@ import path from "node:path";
 
 import { DEFAULT_PORT, ensureCanvasWorkspace, loadConfig, saveConfig, updateCanvasWorkspace, type CanvasAgentConfig } from "./config.js";
 import { CanvasSession } from "./canvas-session.js";
-import { archiveCodexThread, listCodexThreads, readCodexThread, resumeCodexThread, runClaudeTurn, runCodexTurn, startCodexThread, summarizeCodexThread, verifyCodexThreadWorkspace, withAgentPrompt } from "./agents.js";
+import { archiveCodexThread, listCodexThreads, readCodexThread, resumeCodexThread, runClaudeTurn, runCodexTurn, startCodexThread, steerCodexTurn, summarizeCodexThread, verifyCodexThreadWorkspace, withAgentPrompt } from "./agents.js";
 import type { AgentAttachment } from "./types.js";
 
 type GitRemoteInfo = { name: string; url: string };
@@ -36,8 +36,9 @@ export function startHttpServer() {
     const config = loadConfig(true);
     const port = Number(process.env.PORT) || Number(new URL(config.url).port) || DEFAULT_PORT;
     const listenHost = process.env.CANVAS_AGENT_HOST || process.env.HOST || "127.0.0.1";
+    const publicUrl = String(process.env.CANVAS_AGENT_PUBLIC_URL || process.env.CANVAS_AGENT_URL || "").trim();
     const publicHost = process.env.CANVAS_AGENT_PUBLIC_HOST || (listenHost === "0.0.0.0" ? "127.0.0.1" : listenHost);
-    config.url = `http://${publicHost}:${port}`;
+    config.url = publicUrl ? publicUrl.replace(/\/+$/, "") : `http://${publicHost}:${port}`;
     saveConfig(config);
 
     const session = new CanvasSession();
@@ -124,6 +125,14 @@ export function startHttpServer() {
             updateCanvasWorkspace(config, workspace.canvasId, { activeThreadId: threadId });
         }
         void runCodexTurn(withAgentPrompt(String(req.body?.prompt || "")), emit, attachments, { threadId, cwd: workspace.workspacePath });
+        res.json({ ok: true, threadId });
+    }));
+    app.post("/agent/codex/turn/steer", route(async (req, res) => {
+        const attachments = Array.isArray(req.body?.attachments) ? (req.body.attachments as AgentAttachment[]) : [];
+        const workspace = ensureCanvasWorkspace(config, String(req.body?.canvasId || ""));
+        const threadId = String(req.body?.threadId || workspace.activeThreadId || "");
+        if (!threadId) throw new Error("没有可引导的 Codex 会话");
+        await steerCodexTurn(String(req.body?.prompt || ""), emit, attachments, { threadId, cwd: workspace.workspacePath });
         res.json({ ok: true, threadId });
     }));
     app.get("/agent/git/repos", route(async (req, res) => {

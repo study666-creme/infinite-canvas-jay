@@ -31,6 +31,31 @@ type PromptHubStore = {
     refreshGenerationAccount: () => Promise<void>;
 };
 
+function normalizePromptHubApiBase(value: string) {
+    const fallback = PROMPT_HUB_DEFAULTS.apiBase;
+    const raw = String(value || "").trim();
+    if (!raw) return fallback;
+
+    try {
+        const url = new URL(/^https?:\/\//i.test(raw) ? raw : `https://${raw}`);
+        const hostname = url.hostname.toLowerCase();
+        if (
+            hostname === "prompt-hubs.com"
+            || hostname === "www.prompt-hubs.com"
+            || hostname === "canvas.prompt-hubs.com"
+            || hostname === "infinite-canvas-jay.vercel.app"
+            || (hostname.endsWith(".vercel.app") && hostname.startsWith("prompt-canvas"))
+        ) {
+            return fallback;
+        }
+
+        const pathname = url.pathname.replace(/\/+$/, "").replace(/\/supabase$/i, "");
+        return `${url.origin}${pathname}`;
+    } catch {
+        return fallback;
+    }
+}
+
 export const usePromptHubStore = create<PromptHubStore>()(
     persist(
         (set, get) => ({
@@ -45,8 +70,17 @@ export const usePromptHubStore = create<PromptHubStore>()(
             setSession: (session) => set({ session }),
             setImageModel: (imageModel) => set({ imageModel: imageModel.trim() || "gpt-image-2" }),
             login: async (email, password) => {
-                const session = await loginPromptHub(email, password, { apiBase: get().apiBase });
-                set({ session, email: email.trim() });
+                const configuredApiBase = normalizePromptHubApiBase(get().apiBase);
+                let activeApiBase = configuredApiBase;
+                let session: PromptHubSession;
+                try {
+                    session = await loginPromptHub(email, password, { apiBase: configuredApiBase });
+                } catch (error) {
+                    if (configuredApiBase === PROMPT_HUB_DEFAULTS.apiBase) throw error;
+                    activeApiBase = PROMPT_HUB_DEFAULTS.apiBase;
+                    session = await loginPromptHub(email, password, { apiBase: activeApiBase });
+                }
+                set({ session, email: email.trim(), apiBase: activeApiBase });
                 await get().refreshGenerationAccount();
                 return session;
             },
@@ -92,6 +126,14 @@ export const usePromptHubStore = create<PromptHubStore>()(
         }),
         {
             name: "infinite-canvas:prompt_hub_store",
+            merge: (persisted, current) => {
+                const stored = (persisted || {}) as Partial<PromptHubStore>;
+                return {
+                    ...current,
+                    ...stored,
+                    apiBase: normalizePromptHubApiBase(stored.apiBase || current.apiBase),
+                };
+            },
             partialize: (state) => ({
                 apiBase: state.apiBase,
                 session: state.session,

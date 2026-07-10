@@ -1,9 +1,10 @@
 {
-  "title": "开发文档",
+  "title": "开发维护",
   "root": true,
   "defaultOpen": true,
   "pages": [
     "local-development",
-    "canvas-data-structure"
+    "canvas-data-structure",
+    "creative-library-data"
   ]
 }

@@ -1,43 +1,83 @@
 # 画布 Agent 架构
 
-画布 Agent 的目标是理解当前画布、调用画布工具并持续维护创作上下文。Codex 只是可选的大脑之一，不是画布产品中的独立功能入口。
+画布 Agent 的职责是读取当前画布、维护创作上下文并调用真实画布工具。Codex 和 Claude 是可选执行引擎，不是画布数据层。
 
-## 当前两种模式
+## 两种执行模式
 
-### 网站 Agent
+### 网页 Agent
 
-浏览器把当前画布快照、最近对话和用户要求发送给已配置的文本模型。模型通过工具循环调用节点、连线、生成和资产能力，工具结果直接回写当前画布。
+浏览器把当前画布快照、最近对话和用户任务发送给已配置的文本模型。模型通过工具循环读取状态、创建或更新节点、连接流程、调用生成并把结果写回当前画布。
 
-这条链路无需 Codex，适合线上画布的默认体验。
+该模式不依赖本机 Codex，适合作为线上默认体验。
 
-### Local Agent / Codex
+### 本机 Agent
 
 ```text
-画布 Agent 面板
+画布 Local Agent 面板
   -> canvas-agent HTTP + SSE
-  -> Codex app-server
+  -> Codex app-server 或 Claude CLI
   -> Infinite Canvas MCP
   -> CanvasSession
   -> 当前浏览器画布
 ```
 
-`CanvasLocalAgentPanel` 会持续上报当前画布快照，并在发送任务时传入 `canvasAgent: true`。`canvas-agent` 只有在这个标记存在时才注入画布提示词和 Infinite Canvas MCP 配置。MCP 工具调用经过 `CanvasSession` 回到当前网页执行，因此这条链路已经具备真实画布联动，不是普通 Codex 聊天。
+前端持续上报当前画布快照。发送任务时，`canvas-agent` 只对明确标记为画布任务的请求注入画布提示词和 MCP；普通代码工作区对话不会自动获得画布上下文。
 
-当前实现尚未完成系统化端到端验证，不能仅凭“连接成功”判断可用。至少需要验证：读取画布、新建文本节点、更新节点、连接节点、触发生成、工具确认、撤销、断线恢复和会话恢复。
+## 创作协作模型
 
-## 与 Codex Remote 的边界
+Agent 由总控维护结构化“项目黑板”，按当前缺口调用故事、剧本、资产、分镜、审核、预览、生成或返工能力。活动要求作为同一条创作链路的硬约束，不另起一套互相冲突的流程。
 
-[Codex Remote](https://github.com/study666-creme/codex-remote) 服务于“人从手机直接控制项目里的 Codex”，它的会话绑定本地代码工作区，不包含画布状态或画布工具。
+关键状态包括：
 
-画布仓库不再包含 Codex Remote 页面、配额、解锁和公网部署说明。两边只共享通用的 Codex app-server 客户端能力，画布提示词、Canvas MCP、CanvasSession 和工具执行始终由本仓库维护。
+- 当前阶段与完成度。
+- 已确认角色、场景、风格等常量。
+- 活动或平台硬性要求。
+- 待确认问题与下一缺口。
+- 各成果节点的版本、审核状态和用户确认状态。
 
-## 同步策略
+## MCP 工具范围
 
-不要再整文件复制两边的 Bridge。推荐下一步从 Codex Remote 抽出无 HTTP、无 UI、无画布依赖的 `codex-app-server-client` 包：
+- 状态：读取画布、选区和快照。
+- 节点：创建、更新、删除、选择和批量布局。
+- 连线：连接节点、删除连线。
+- 生成：文本、图片、视频、音频和生成流程。
+- 项目黑板：创建或更新结构化创作状态。
+- 3D 导演台：载入最多 10 个镜头、切换镜头、读取状态、截取单镜头或批量截图。
 
-1. Codex Remote 维护 app-server 初始化、thread/turn、事件归一化和附件协议。
-2. 画布通过版本化依赖升级该包。
-3. 画布 Adapter 注入 `mcp_servers.infinite-canvas`、画布提示词和服务端请求处理器。
-4. 每次升级用上述画布工具清单做端到端回归。
+3D 导演台截图固定输出 `1280x720`，并作为带 `metadata.directorStage` 的标准图片节点写回画布。角色、道具与相机的手动调整会同步回当前分镜包。
 
-在公共 client 包完成前，只同步经过审查的协议修复，并把 `@openai/codex` 固定在双方验证过的相同版本；不要用脚本覆盖 `canvas-agent/src/agents.ts`，否则会丢失画布 MCP 差异。
+## 配置与工作区
+
+默认配置文件：
+
+```text
+~/.infinite-canvas/canvas-agent.json
+```
+
+每个画布 `canvasId` 对应一个本机工作区配置。`canvasId` 只用于隔离画布会话与工作区映射，不代表画布数据已上传到 Agent。
+
+常用环境变量见 [.env.example](.env.example)：
+
+- `CANVAS_AGENT_HOST`
+- `CANVAS_AGENT_PUBLIC_URL`
+- `CANVAS_AGENT_TOKEN`
+- `CANVAS_AGENT_WORKSPACE`
+- `CANVAS_AGENT_REPO_ROOTS`
+
+## 安全边界
+
+- 默认只监听 `127.0.0.1`。
+- token 可以调用本机模型、工作区和画布工具，必须视为密钥。
+- 不要把用户主目录、磁盘根目录或无关仓库设为默认工作区。
+- 公网反向代理必须使用 HTTPS、访问控制、来源白名单和固定强随机 token。
+- 工具确认开关应保留，尤其是生成、文件写入和批量删除操作。
+
+## 当前验证
+
+本机运行时、网页工具路由和 3D 导演台均已完成构建验证。3D 导演台额外通过了 WebGL 非空像素、双镜头载入、手动调整持久化、两张 `1280x720` 截图入画布以及 `390px` 手机布局回归。
+
+仍需在真实账号与真实模型上持续验证断线恢复、长任务、生成取消、工具确认和多工作区会话恢复。对应项目记录在 [待验证清单](docs/content/docs/progress/pending-test.mdx)。
+
+## 与手机 Codex 的边界
+
+[Codex Remote](https://github.com/study666-creme/codex-remote) 是独立项目，用于从手机继续本机 Codex 代码任务。它不需要依赖画布。画布只有在需要让 Codex 直接读取和操作节点时才使用本仓库的 Canvas MCP 与 `canvas-agent`。

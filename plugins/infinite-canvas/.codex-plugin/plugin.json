@@ -1,20 +1,20 @@
 {
   "name": "infinite-canvas",
   "version": "0.1.0",
-  "description": "Use Codex to read and operate Infinite Canvas through the local Canvas Agent MCP server.",
+  "description": "Use Codex to operate Kazang Prompt Canvas through the local Canvas Agent MCP server.",
   "author": {
-    "name": "Infinite Canvas"
+    "name": "Kazang Prompt Canvas"
   },
-  "repository": "https://github.com/basketikun/infinite-canvas",
+  "repository": "https://github.com/study666-creme/infinite-canvas-jay",
   "license": "AGPL-3.0",
   "keywords": ["infinite-canvas", "canvas", "mcp", "agent"],
   "skills": "./skills/",
   "mcpServers": "./.mcp.json",
   "interface": {
-    "displayName": "Infinite Canvas",
+    "displayName": "Kazang Prompt Canvas",
     "shortDescription": "Use Codex to operate the current Infinite Canvas board.",
     "longDescription": "Connects Codex to the local Canvas Agent MCP server so Codex can inspect the current Infinite Canvas board, create nodes, connect flows, and trigger generation through the web canvas confirmation flow.",
-    "developerName": "Infinite Canvas",
+    "developerName": "Kazang Prompt Canvas",
     "category": "Productivity",
     "capabilities": ["Canvas", "MCP", "Creative Workflow"],
     "defaultPrompt": [

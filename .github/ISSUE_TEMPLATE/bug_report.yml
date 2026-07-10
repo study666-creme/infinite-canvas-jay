@@ -1,0 +1,43 @@
+name: Bug report
+description: 报告可稳定复现的问题
+title: "[Bug] "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: 请先移除 API Key、token、Cookie、私人画布和未授权素材。
+  - type: textarea
+    id: problem
+    attributes:
+      label: 问题描述
+      description: 实际发生了什么，预期应该怎样？
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: 复现步骤
+      placeholder: "1. 打开...\n2. 点击...\n3. 出现..."
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: 环境
+      description: 部署地址、提交版本、浏览器、操作系统和设备类型
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: 日志或截图
+      description: 请先打码密钥、账号与私人内容。
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: 提交前确认
+      options:
+        - label: 我已搜索现有 Issue，未发现相同问题。
+          required: true
+        - label: 我没有提交任何密钥、token、Cookie 或私人资料。
+          required: true

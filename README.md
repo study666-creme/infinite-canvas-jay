@@ -1,76 +1,82 @@
 # 卡藏提示词画布
 
-卡藏提示词画布是面向 AI 图像与视频创作的节点式工作台。它把提示词、参考图、视频节点、生成记录、资产沉淀和画布 Agent 放在同一个空间里，适合把一次次生成经验整理成可复用的创作流程。
+面向 AI 图片与视频创作的节点式工作台。把提示词、参考素材、生成配置、画布 Agent、创作资料库和 3D 分镜预演放在同一个可持续整理的画布中。
 
-## 当前定位
+[在线体验](https://infinite-canvas-jay.vercel.app/canvas) · [卡藏提示词库](https://prompt-hubs.com) · [API 中转](https://newapi.prompt-hubs.com) · [部署指南](DEPLOY.md)
 
-- 「卡藏画布」负责承载创作流程、节点关系、生成结果和 Agent 操作。
-- 「生图工作台 / 视频创作台」负责快速发起单次生成，并把有效结果沉淀回资产或画布。
-- 「我的资产」负责保存图片、视频、提示词与可复用素材。
-- 本地数据默认保存在浏览器侧；线上版本需要先登录卡藏账号，并按卡藏用户分桶保存画布与资产。
+![3D 导演台与分镜预演](docs/public/screenshots/director-stage.png)
 
-## 合规说明
+## 核心能力
 
-本项目保留 AGPL-3.0 许可证，详见 [LICENSE](LICENSE)。产品 UI 已使用「卡藏」品牌，但仓库层面的开源义务不能删除。线上部署时，请确保对应源码可访问。
-
-更完整的说明见 [OPEN-SOURCE.md](OPEN-SOURCE.md)。画布 Agent 的职责和技术边界见 [CANVAS-AGENT.md](CANVAS-AGENT.md)。
+- **无限画布**：图片、文本、视频、音频和生成配置节点，支持连线、成组、框选、撤销重做、小地图与导入导出。
+- **多模型生成**：支持 OpenAI 兼容与 Gemini 调用格式，可接入自定义图片、文本、视频和音频模型。
+- **创作总监 Agent**：网页 Agent 或本机 Agent 读取真实画布，通过工具创建节点、连接流程、调用生成并维护结构化项目黑板。
+- **3D 导演台**：把文字分镜转换为角色、道具、机位和 FOV，支持手动微调、镜头切换与批量生成 `1280x720` 预演截图。
+- **创作资料库**：本地摄取书摘、笔记、字幕和合法案例，经过提炼与二次审核后生成静态知识索引；完整原文不进入前端包。
+- **卡藏联动**：沿用卡藏账号登录、模型与积分，支持读取卡片库、保存画布图片为卡片，以及同步生成记录。
+- **本地优先存储**：画布、素材和媒体默认保存在当前浏览器，并按卡藏账号隔离；可选 WebDAV 同步。
+- **桌面与手机基础可用**：桌面负责密集编排，手机支持浏览、基础画布手势和 Agent 操作。
 
 ## 快速开始
+
+要求 Node.js 20 或更高版本。
 
 ```bash
 git clone https://github.com/study666-creme/infinite-canvas-jay.git
 cd infinite-canvas-jay/web
-npm install
+npm ci
 npm run dev
 ```
 
-默认开发地址：
+打开 [http://localhost:3000](http://localhost:3000)。当前用户区会要求使用卡藏账号登录；没有账号可前往 [prompt-hubs.com](https://prompt-hubs.com) 注册。
 
-```text
-http://localhost:3000
-```
+模型有两种来源：
 
-首次打开后，进入右上角配置，填写自己的 OpenAI 兼容 `Base URL` 和 `API Key`。
+1. 登录后直接选择卡藏已提供的图片模型。
+2. 在设置中填写自己的 OpenAI 兼容或 Gemini `Base URL`、`API Key` 和模型。
 
-## 构建
+生产构建：
 
 ```bash
 cd web
 npm run build
 ```
 
-## 登录与数据
-
-线上画布沿用卡片库的卡藏账号登录。未登录用户不能进入画布、资产和生成工作台。
-
-- 画布项目、资产库、AI 渠道配置仍主要保存在当前浏览器本地；画布与资产会按卡藏用户 ID 分桶，避免同一设备换账号后混用。
-- 卡藏生图、卡片库读取、Prompt Hub 媒体代理会使用当前登录 token；未登录用户不能无成本调用这些线上代理接口。
-
-## 画布 Agent
-
-画布内置 Agent 是产品能力，负责读取画布状态并调用节点、连线、生成和资产工具。当前提供两种执行方式：
-
-- 网站 Agent：使用网页已配置的文本模型，在浏览器内执行画布工具循环。
-- Local Agent：通过 `canvas-agent` 连接本机执行引擎；Codex 可作为其中一个大脑，并通过 Infinite Canvas MCP 操作画布。
-
-Codex 在这里不是独立产品入口，也不负责手机远程开发。Local Agent 的会话按画布项目 ID 隔离，并显式传入 `canvasAgent: true` 才启用画布提示词和 MCP。当前链路已经实现，正式使用前仍需做端到端验证。详见 [CANVAS-AGENT.md](CANVAS-AGENT.md)。
-
-## 部署
-
-推荐部署到 Vercel，并把 Root Directory 设置为 `web`。更多部署、WebDAV、视频网关和故障排查内容见 [DEPLOY.md](DEPLOY.md)。
-
-## 主要目录
+## 目录结构
 
 ```text
-web/             前端应用
-canvas-agent/    本地画布 Agent / MCP 运行时
-plugins/         Codex 插件
-docs/            文档站
-scripts/         辅助脚本
+web/                    Next.js 主应用
+canvas-agent/           本机画布 Agent、Codex/Claude 适配与 MCP
+plugins/infinite-canvas Codex App 插件
+web/knowledge/creative  本地创作资料收件箱与审核配置
+docs/                   Fumadocs 文档站与开发文档
+.github/                CI、发布工作流和 Issue/PR 模板
 ```
 
-## 开发备注
+## 文档
 
-- 不要修改或删除 [LICENSE](LICENSE)。
-- 不要把 AGPL 派生代码闭源上线。
-- 产品 UI 的品牌、导航、首屏和交互可以继续按「卡藏」方向演进。
+- [部署与自托管](DEPLOY.md)
+- [画布 Agent 架构](CANVAS-AGENT.md)
+- [开源与第三方许可](OPEN-SOURCE.md)
+- [创作资料库](web/knowledge/creative/README.md)
+- [功能总览](docs/content/docs/overview/features.mdx)
+- [数据与存储](docs/content/docs/development/canvas-data-structure.mdx)
+- [待验证项目](docs/content/docs/progress/pending-test.mdx)
+- [后续路线](docs/content/docs/progress/todo.mdx)
+
+## 数据与安全边界
+
+- 登录只负责身份、卡藏模型与受保护代理权限，**不代表画布已自动云同步**。
+- 画布项目、素材、生成记录和大部分媒体默认位于浏览器 IndexedDB；清理浏览器数据前请导出或配置 WebDAV。
+- 自定义 AI API Key 保存在当前浏览器并由前端直连对应服务，只应在可信设备上使用。
+- 本机 Agent 默认仅监听 `127.0.0.1`；连接 token 能调用本机 Codex 和画布工具，不应提交或公开。
+
+## 开源说明
+
+本仓库基于 [basketikun/infinite-canvas](https://github.com/basketikun/infinite-canvas) 继续开发，并遵循 [GNU AGPL-3.0](LICENSE)。AGPL 允许使用、修改和商业运营，但分发或通过网络提供修改版本时需要履行对应源码提供义务。详细边界见 [OPEN-SOURCE.md](OPEN-SOURCE.md)。
+
+Three.js 使用 MIT 许可证。导入的模型、HDRI、贴图、字体、书籍、字幕和案例拥有各自的版权与授权条件，不能因本仓库开源而自动获得商用许可。
+
+## 参与项目
+
+提交问题或代码前请阅读 [CONTRIBUTING.md](CONTRIBUTING.md) 和 [SECURITY.md](SECURITY.md)。

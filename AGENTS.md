@@ -8,8 +8,8 @@
 - 写代码保持最少行数，能简单实现就不要引入复杂抽象。
 - 标准格式、协议、解析、压缩、加密、日期等通用能力优先使用成熟稳定的库，不要手写底层实现，除非用户明确要求或项目已有实现必须沿用。
 - 不要为了“兼容更多场景”写大量分支，只实现当前明确需要的功能。
-- 项目尚未上线，不需要兼容旧数据；表结构或字段调整时直接按新设计修改，不写旧字段兼容、数据迁移兜底或删除旧表的清理逻辑，除非用户明确要求。
-- 每次写完代码，不需要检查语法，不需要执行构建，用户会自己做。
+- 项目已有公开部署和浏览器存量数据；调整持久化结构时必须说明兼容策略，并为已有数据提供迁移或明确的破坏性变更提示。
+- 每次修改后按影响范围执行类型检查、构建或端到端验证；纯文档修改至少检查链接和文档站构建。
 - 不要改无关文件，不要顺手重构。
 - 如果工作区已有用户改动，不要回滚，不要覆盖；只在必要范围内追加修改。
 
@@ -19,16 +19,12 @@
 - 补充时写成明确、可执行的规则，避免只写模糊描述。
 - 新规则应放到最相关的章节；找不到合适章节时放到“项目注意事项”。
 
-## 后端规范
+## 子代理协作
 
-- 后端使用 Go + Gin + GORM。
-- `handler/` 只处理 HTTP 入参、调用 service、返回 `OK` / `Fail`。
-- `service/` 放业务逻辑、默认值、校验、时间、ID、鉴权等处理。
-- `repository/` 只做数据库访问和 GORM 查询。
-- `model/` 只定义数据结构、枚举和简单模型方法。
-- 列表接口优先沿用 `model.Query`、`Normalize`、分页和标签筛选方式。
-- 业务接口保持 `{ code, data, msg }` 的响应结构。
-- 新增数据表时同步更新 `docs/backend-database.md`。
+- 任务包含多个彼此独立、耗时明显的模块时，如果当前环境提供子代理能力，应由主代理主动拆分并调用，不需要等用户再次提醒。
+- 适合拆分的工作包括独立模块调研、互不重叠的实现、测试矩阵、视觉验收和文档核对；共享同一接口或同一批文件的强耦合改动由主代理统一完成。
+- 子代理必须获得明确的文件范围、输入输出和禁止覆盖用户改动的约束；主代理负责汇总结果、处理冲突并完成最终端到端验证。
+- 当前环境没有子代理工具或拆分会增加冲突时，主代理继续完成任务，不把“缺少子代理”作为停止工作的理由。
 
 ## 前端规范
 
@@ -67,15 +63,15 @@
 ## 文档规范
 
 - README 保持简洁，只放项目介绍、核心功能、快速开始和文档入口。
-- `docs/index.md` 放给 AI 使用的文档索引，不要再放到 `docs/content/docs/` 内容目录里。
+- `docs/index.md` 放文档站总索引；AI 维护上下文放在 `docs/AI-HANDOFF.md`。
 - 详细功能介绍写到 `docs/content/docs/overview/features.mdx`。
 - 后续待办写到 `docs/content/docs/progress/todo.mdx`。
 - 已实现但还需要用户测试确认的事项写到 `docs/content/docs/progress/pending-test.mdx`。
 - `docs/content/docs/progress/pending-test.mdx` 用来记录这个版本实际做了哪些可测试变更；`CHANGELOG.md` 的 `Unreleased` 只保留对这些变更的版本级归纳，避免逐条照搬实现细节。
 - 每次 todo 事项完成后，先从 `docs/content/docs/progress/todo.mdx` 移到 `docs/content/docs/progress/pending-test.mdx`，不要直接写进正式功能说明；用户确认测试通过后再更新 `docs/content/docs/overview/features.mdx`。
 - 每次任务完成前，都要根据实际变更检查并更新 `docs/content/docs/progress/todo.mdx` 和 `docs/content/docs/progress/pending-test.mdx`；如果功能或待办没有变化，也要确认无需修改。
-- 接口响应规则写到 `docs/content/docs/backend/api-response.mdx`。
-- 数据库结构写到 `docs/content/docs/backend/backend-database.mdx`。
+- 浏览器数据结构写到 `docs/content/docs/development/canvas-data-structure.mdx`。
+- 创作资料库结构写到 `docs/content/docs/development/creative-library-data.mdx`。
 - 文档不要写过期日期；除非用户明确要求记录具体时间。
 
 ## 发版本流程
@@ -88,9 +84,10 @@
 
 ## 项目注意事项
 
-- 当前画布项目和“我的素材”主要保存在浏览器本地，不要在文档中误写成已支持云同步。
+- 当前线上用户区需要卡藏账号登录；登录负责身份和服务权限，不要误写成画布已自动云同步。
+- 当前画布项目和“我的素材”主要保存在浏览器本地并按卡藏账号分区；WebDAV 是用户主动配置的可选同步。
 - 当前 AI API Key 存在浏览器本地，并由前端直接请求 OpenAI 兼容接口；涉及安全说明时要写清楚。
-- Docker 静态资源路径目前仍是待办项，文档中不要过度承诺生产部署已经完全验证。
+- `canvas-agent` 默认仅监听本机；Agent token、Cookie、用户知识资料和私有媒体不得进入文档、测试夹具或 Git 历史。
 
 ## AI 接手入口
 

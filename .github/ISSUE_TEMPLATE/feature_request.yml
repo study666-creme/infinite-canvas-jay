@@ -1,0 +1,23 @@
+name: Feature request
+description: 提议一个明确的用户工作流改进
+title: "[Feature] "
+labels: [enhancement]
+body:
+  - type: textarea
+    id: workflow
+    attributes:
+      label: 使用场景
+      description: 谁在什么情况下需要它？当前流程卡在哪里？
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: 建议方案
+      description: 描述期望交互和验收结果，不必先限定技术实现。
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: 已尝试的替代方案

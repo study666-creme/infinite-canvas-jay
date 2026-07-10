@@ -1,143 +1,83 @@
-# AI Handoff Notes
+# AI / Maintainer Handoff
 
-This file is for future AI agents taking over this fork. Read it before editing canvas or Prompt Hub integration code.
+本文件给后续维护者和 AI 使用。开始修改画布、Prompt Hub、媒体、Agent 或创作资料库前，先阅读根目录 `AGENTS.md`，再核对当前工作区状态。
 
-## Scope
+## 仓库边界
 
-- Canvas repo: `D:\canvas\infinite-canvas`
-- Canvas web app: `D:\canvas\infinite-canvas\web`
-- Prompt Hub repo: `D:\prompt-hub`
-- Do not mix unrelated Prompt Hub app changes into Canvas commits unless the task explicitly spans both repos.
-- The working tree may contain pre-existing user changes. Check `git status --short --branch` first and do not revert files you did not change.
+- `web/`：Next.js 主应用。
+- `canvas-agent/`：本机 HTTP/SSE、Codex/Claude 适配与 Canvas MCP。
+- `plugins/infinite-canvas/`：Codex App 插件。
+- `web/knowledge/creative/`：本地创作资料收件箱与审核配置。
+- `docs/`：Fumadocs 文档站。
+- Prompt Hub、New API、Codex Remote 和视频网关是独立服务或仓库，不要把它们的无关改动混入本仓库。
 
-## Recent Canvas / Prompt Hub Generation Fix
+工作区可能已有用户改动。先运行 `git status --short`，不要回滚或覆盖来源不明的修改。
 
-User issue: standalone image generation node worked, but generating through a connected image node could fail; generated images were visible in canvas but not in the image generation page.
+## 登录与本地数据
 
-Important files:
+- 用户区由 `PromptHubAuthGate` 保护。
+- 登录负责身份、卡藏服务权限和浏览器账号分区，不等于云同步。
+- 画布 key 由 `infinite-canvas:canvas_store:<user>` 组成；素材使用同类账号分区。
+- 图片、视频和音频存为 Blob，节点 JSON 只保留 `storageKey` 与元数据。
+- 写媒体必须使用 `uploadImage` / `uploadMediaFile`，不要长期持久化大 base64。
+- WebDAV 由用户主动同步，修改数据结构时需要考虑版本与兼容。
 
-- `web/src/services/prompt-hub-generation.ts`
-- `web/src/app/(user)/canvas/[id]/canvas-client-page.tsx`
-- `web/src/services/image-generation-logs.ts`
-- `web/src/app/(user)/image/page.tsx`
-- `web/src/app/(user)/video/page.tsx`
-- Prompt Hub backend limit reference: `D:\prompt-hub\server\src\routes\v1\generate.ts`
+## Prompt Hub 生成
 
-Root cause found:
+- 连接图片生成时，上游连接参考图优先；节点自身图片只在没有连接参考图时回退使用。
+- 提交卡藏生成前，参考图副本会压缩并通过媒体上传转换为 `storage://card-images/...` 引用；原画布图片不能被替换。
+- Prompt Hub 错误可能是嵌套 `{ error: { message, code, details } }`，不能回退成 `[object Object]`。
+- 成功结果通过共享日志写入 `/image` 生成记录。
+- 图片与视频历史首屏读取轻量摘要，打开详情时再恢复完整媒体。
 
-- Connected image generation sends upstream images as Prompt Hub reference images.
-- Large data URLs can exceed the Prompt Hub `/api/v1/generate` reference-image input limit.
-- Prompt Hub `/api/v1/generate` can also fail with `参考图上传失败：Bucket not found` when data URL refs hit the backend Supabase `card-images` upload path on a deployment without that bucket.
-- Standalone text-to-image does not send the reference image, so it can succeed while connected generation fails.
-- **Additional logic bug (2026-07-06):** image nodes with existing content always used *only* the node’s own image as reference, ignoring connected upstream images. Fixed: connected references now take priority; self-image is fallback when no connections exist.
+## 生成取消
 
-Implemented behavior:
+- 同一批生成的多个节点可能共享 AbortController。
+- 删除节点、清空画布或取消批次时，必须终止所有相关请求。
+- 每个异步阶段写回节点前都要确认请求仍有效，避免删除的加载/错误节点被晚到 Promise 重新创建。
 
-- Canvas now converts reference images to data URLs, compresses the copy, uploads it through Prompt Hub `/api/v1/media/upload`, then submits the returned `storage://card-images/...` refs to `/api/v1/generate`.
-- The original canvas image is not modified.
-- Successful canvas image generations are also appended to the shared `image_generation_logs` localforage store, so the `/image` page can show them.
-- Prompt Hub API errors are parsed from nested `{ error: { message, code, details } }` envelopes before reaching canvas nodes; seeing `[object Object]` in an image node usually means this parser regressed.
+## Agent 与项目黑板
 
-If this path breaks again, inspect:
+- 网页 Agent 与本机 Agent 使用同一组画布工具语义。
+- 创作任务先读取画布，再创建或更新唯一项目黑板。
+- 用户确认常量和活动硬约束优先于知识卡、案例和模型推断。
+- 不要假装所有专门 Agent 同时运行；只调用当前缺口需要的能力。
+- 普通 Codex 代码对话不应自动注入画布提示词或 Canvas MCP。
 
-1. Whether `referenceImagesToRefUrls` returns Prompt Hub `storage://card-images/...` refs instead of raw data URLs.
-2. Whether `requestPromptHubCanvasImages` gets a valid Prompt Hub session from `usePromptHubStore`.
-3. Whether generated items are uploaded with `uploadImage` and then passed to `recordCanvasImageGeneration`.
-4. Whether `/image` history reads `image_generation_logs` and hydrates full media only when a log is opened.
+## 3D 导演台
 
-## First-Screen Loading Notes
+- 核心组件：`web/src/app/(user)/canvas/components/canvas-director-stage.tsx`。
+- 协议：`web/src/app/(user)/canvas/utils/director-stage-types.ts`。
+- Agent 工具：`canvas_director_get_state/load_packet/load_shot/capture_shot/capture_all`。
+- 最多 10 个镜头，截图固定 `1280x720`。
+- 手动角色/道具与 Orbit 相机调整必须同步回分镜包，切镜头或批量截图不能丢失。
+- 当前是空间预演，不要在文档中声称已支持真实角色、骨骼动画或自动 3D 重建。
 
-Recent optimization:
+## 创作资料库
 
-- `/image` and `/video` history lists no longer hydrate all stored media on first paint.
-- Lists read lightweight log summaries; full image/video/reference URLs are resolved only when a user opens a log.
-- `/api/prompts` now uses Next revalidation and a short remote GitHub fetch timeout to avoid slow prompt repositories blocking first-screen rendering.
+- SQLite 位于忽略目录 `web/data/`，只用于摄取缓存和审核状态。
+- 方法资料、完整案例和视频字幕使用不同收件箱。
+- 正式卡需要通过二次审核；`candidate` 不能进入前端正式检索。
+- 完整作品只建立结构索引，不复制完整原文进数据库或生成包。
+- 不要声称 Agent 已拥有完整书籍、完整视频字幕或实时趋势数据。
 
-Known remaining structural issue:
-
-- Canvas project list still reads the entire `infinite-canvas:canvas_store` JSON from localforage.
-- With many projects or large node/chat data, `/canvas` can show `loading canvas` for several seconds.
-- A real fix should split project list metadata from project detail data:
-  - project index: id, title, counts, updatedAt, small preview
-  - project detail: nodes, connections, chatSessions, viewport
-- Do not attempt that migration casually; it changes persisted data shape and needs a compatibility plan.
-
-## Canvas Generation Cancellation Notes
-
-- Deleting a node during generation must abort every request that shares the same generation controller, not only the deleted target node. Batch image slots, Prompt Hub sidecar nodes, video nodes, and audio nodes can all share one run.
-- Before async generation code writes results back into the canvas after an API call, upload, or media save, check that the generation request is still active. Otherwise deleted error/loading nodes can reappear when a late promise resolves.
-- Clearing the canvas should abort all tracked generation requests before removing nodes.
-
-## Validation Commands
-
-From `D:\canvas\infinite-canvas\web`:
+## 验证
 
 ```bash
+cd web
+npx tsc --noEmit
 npm run build
+
+cd ../canvas-agent
+npm run build
+
+cd ../docs
+bun run types:check
+bun run build
 ```
 
-Useful local smoke checks:
+UI 修改还需检查桌面与手机截图、文本溢出、按钮重叠和 WebGL/canvas 非空像素。功能状态同步到：
 
-- `/`
-- `/image`
-- `/video`
-- `/canvas`
-
-Expected after the recent fixes:
-
-- `npm run build` succeeds.
-- `/image` and `/video` first render should not block on all historical media.
-- No broken images in first-screen smoke checks.
-- Ant Design Drawer warning for `height` should not be reintroduced; use `size` for bottom drawer custom height.
-
-## Coding Cautions
-
-- Canvas page file is large. Prefer small helper files when adding shared behavior, but avoid broad refactors during bug fixes.
-- Media should be stored through `uploadImage` / `uploadMediaFile`, not directly as long-lived base64 in JSON.
-- Use `imageToDataUrl` only when an API needs a data URL; do not eagerly convert media during first render.
-- For Prompt Hub generated image history, keep `storageKey` and leave `dataUrl` empty in persisted logs when possible.
-- Do not document or reuse private user credentials from chat history.
-
-## Canvas Composer UI (2026-07-06)
-
-Large bottom prompt panel under selected nodes (`canvas-node-prompt-panel.tsx`):
-
-- Apple-style glass shell: `.canvas-composer-shell` in `globals.css`, anchored by `.canvas-node-panel-anchor`, width up to `min(1680px, 86vw)`.
-- Image nodes now show the same reference strip + `@` picker as video nodes when upstream assets are connected.
-- Connection handles (`ConnectionHandlePlus`): visible only on node hover (not when merely selected); hovering one side hides the other; handle expands ~2× while dragging a line.
-
-Key files:
-
-- `web/src/app/(user)/canvas/components/canvas-node-prompt-panel.tsx`
-- `web/src/app/(user)/canvas/components/canvas-node.tsx`
-- `web/src/app/(user)/canvas/[id]/canvas-client-page.tsx` (`handleGenerateNode` reference priority)
-- `web/src/app/globals.css` (`.canvas-composer-*`)
-
-## Creative Director Agent (2026-07-06)
-
-The canvas assistant prompt now treats creative work as a full-chain creative director task, not a generic chat task.
-
-Key files:
-
-- `web/src/app/(user)/canvas/utils/short-drama-agent-prompt.ts`
-- `web/src/app/(user)/canvas/components/canvas-assistant-panel.tsx`
-- `docs/content/docs/overview/creative-agent.mdx`
-
-Current behavior:
-
-- Creative requests about story, script, characters, IP, directing, shots, color, editing, sound, AI video prompting, thumbnails/titles, retention, comments, platform spread, aesthetics, or internet sense should inject `CREATIVE_KNOWLEDGE_CORE_CONTEXT`.
-- Short drama mode always injects the same core plus the short-drama director workflow.
-- The core is meant to be applied silently during creation. Do not dump knowledge cards unless the user explicitly asks to list or visualize the knowledge base.
-- The quality gate rejects low-quality trend hacks, unverified prompt folklore, generic "cinematic/high-end" wording, and short-lived platform loopholes.
-- The internet-sense layer covers hooks, thumbnails/titles, comment triggers, platform adaptation, modern aesthetics, trend decomposition, and A/B alternatives.
-
-Caution:
-
-- Do not claim the agent owns complete books, full video transcripts, or real-time trend data. It has an original summarized knowledge core and can use user-provided samples or notes to specialize further.
-
-## Canvas Mobile Usability
-
-- Compact canvas view is detected with `useCompactCanvasViewport` (`max-width: 900px`, or coarse pointer under 1180px).
-- On compact view, the Agent panel is a fixed overlay below the top bar instead of a right sidebar, and the asset drawer uses the available screen width without a resize handle.
-- Touch canvas gestures live in `InfiniteCanvas`: empty-canvas single-finger drag pans the viewport, two-finger pinch zooms around the gesture midpoint, and desktop mouse drag still creates the selection box.
-- Mobile toolbar/zoom controls intentionally trade the zoom slider for pinch zoom and move the compact zoom buttons above the bottom toolbar.
+- `docs/content/docs/overview/features.mdx`
+- `docs/content/docs/progress/pending-test.mdx`
+- `docs/content/docs/progress/todo.mdx`

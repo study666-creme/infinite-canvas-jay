@@ -1,54 +1,43 @@
 ---
 title: 快速开始
-description: 用最少步骤把无限画布跑起来
+description: 本地启动、登录与模型配置
 ---
 
 # 快速开始
 
-如果你只是想先把项目跑起来，优先部署或启动 `web/` 前端。
+## 在线体验
 
-## GitHub + Vercel 部署
+打开 [卡藏提示词画布](https://infinite-canvas-jay.vercel.app/canvas)，使用卡藏账号登录。没有账号时前往 [卡藏提示词库](https://prompt-hubs.com) 注册。
 
-1. 将 fork 推送到你的 GitHub 仓库（保留 LICENSE 与上游版权声明）。
-2. 在 Vercel 导入该仓库，**Root Directory** 设为 `web`（仅控制台设置；勿在仓库根目录写 `rootDirectory`）。
-3. 部署完成后访问站点，在右上角配置弹窗填入 Base URL 与 API Key。
-
-当前版本的 AI 请求由浏览器前台直连用户自己的 OpenAI 兼容地址，**不需要在 Vercel 配置服务端 API Key**。
-
-更完整的清单、Docker / Render 与协议说明见仓库根目录 `DEPLOY.md`，或 [GitHub 与 Vercel 部署](/docs/overview/github-deploy)。
+登录负责身份、卡藏模型和受保护接口权限。画布项目仍主要保存在当前浏览器，不会仅凭登录自动出现在另一台设备。
 
 ## 本地启动
 
-```bash
-git clone git@github.com:basketikun/infinite-canvas.git
-cd infinite-canvas
-cd web
-bun install
-bun run dev
-```
-
-启动后访问：
-
-```text
-http://localhost:3000
-```
-
-## Docker 启动
-
-如果你需要基于当前源码构建镜像：
+要求 Node.js 20 或更高版本。
 
 ```bash
-docker build -t infinite-canvas .
-docker run --rm -p 3000:3000 infinite-canvas
+git clone https://github.com/study666-creme/infinite-canvas-jay.git
+cd infinite-canvas-jay/web
+npm ci
+npm run dev
 ```
 
-## 首次使用建议
+打开 [http://localhost:3000](http://localhost:3000)。本地版本默认仍连接卡藏登录服务，可通过服务端环境变量 `PROMPT_HUB_API_BASE` 指向兼容的自建身份服务。
 
-- 先打开右上角配置弹窗，填入自己的 `Base URL`、`API Key` 和模型名。
-- 如果需要提示词仓库内容，打开 `/prompts` 会通过 Next.js route 拉取并缓存在内存中。
-- 如果需要跨设备同步画布、素材和生成记录，可在配置弹窗中填写 WebDAV。
+## 配置模型
 
-## 说明
+登录后有两种使用方式：
 
-- 当前画布项目和“我的素材”主要保存在浏览器本地，WebDAV 同步需要用户自行配置。
-- AI API Key 保存在浏览器本地，并由前端直接请求 OpenAI 兼容接口。
+1. 直接选择卡藏账号可用的图片模型。
+2. 打开设置，添加自己的 OpenAI 兼容或 Gemini 渠道，并填写 `Base URL`、`API Key` 和模型。
+
+自定义 API Key 保存在当前浏览器。不要在公共设备或不可信浏览器环境中保存生产密钥。
+
+## 数据备份
+
+- 画布项目可导出 JSON。
+- 图片、视频和音频 Blob 位于浏览器 IndexedDB。
+- 支持的桌面浏览器可以授权本地媒体目录。
+- 需要跨设备时可在设置中配置 WebDAV，并手动执行同步。
+
+部署细节见 [部署与自托管](/docs/overview/deployment)。

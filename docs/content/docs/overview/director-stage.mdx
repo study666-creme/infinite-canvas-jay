@@ -1,0 +1,67 @@
+---
+title: 3D 导演台
+description: 从文字分镜自动摆场、恢复机位并批量截图
+---
+
+# 3D 导演台
+
+3D 导演台用于在生成视频前检查人物站位、道具关系、景别和机位。它是基于 Three.js 的轻量预演工具，不是完整 DCC 或动画软件。
+
+## 工作流
+
+1. 在画布中确认文字分镜和角色/场景常量。
+2. 让 Agent 调用 `canvas_director_load_packet`，把最多 10 条分镜转为结构化镜头槽。
+3. 导演台自动恢复角色、道具、相机位置、FOV 和镜头说明。
+4. 手动调整角色/道具的 X、Z、朝向与缩放，或使用 Orbit 相机调整机位。
+5. 截取当前镜头，或批量渲染全部镜头。
+6. 每张 `1280x720` PNG 作为标准图片节点回到画布。
+
+## 分镜包核心字段
+
+```json
+{
+  "global_visual_contract": "统一的空间、光线和美术约束",
+  "slots": [
+    {
+      "shot_id": "shot-01",
+      "dramatic_function": "建立人物与空间关系",
+      "camera": {
+        "shot_size": "wide shot",
+        "angle": "eye level",
+        "movement": "slow push",
+        "x": 0,
+        "y": 1.7,
+        "z": 6.4,
+        "fov": 40
+      },
+      "subjects": [],
+      "props": []
+    }
+  ]
+}
+```
+
+坐标约定：X 为横向，Y 为离地高度，Z 为前后纵深。同一项目的角色和道具 ID 应保持稳定。
+
+## Agent 工具
+
+- `canvas_director_get_state`
+- `canvas_director_load_packet`
+- `canvas_director_load_shot`
+- `canvas_director_capture_shot`
+- `canvas_director_capture_all`
+
+## 已验证行为
+
+- WebGL 画面非空且具有明显色差。
+- 两个镜头槽能正确载入与切换。
+- 手动角色位移在切换镜头后仍保留。
+- 批量截图生成对应数量的画布图片节点，尺寸为 `1280x720`。
+- `390px` 宽度无横向溢出或头部按钮重叠。
+
+## 当前限制
+
+- 人物和道具是程序化占位模型。
+- 没有骨骼动作、布料、物理、口型和剪辑时间轴。
+- 没有自动导入用户角色三视图并重建 3D 模型。
+- 当前目标是空间与机位预演；下一阶段应接入有明确商用许可的 GLTF/VRM 资产和动作库。

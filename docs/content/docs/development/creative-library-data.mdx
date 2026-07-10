@@ -1,0 +1,48 @@
+---
+title: 创作资料库数据
+description: 本地摄取、SQLite 审核状态与前端静态索引
+---
+
+# 创作资料库数据
+
+本地数据库位于 `web/data/creative-library.sqlite`，只用于摄取缓存、审核状态和失败重试。浏览器与 Vercel 读取生成后的 TypeScript 静态索引，不直接连接 SQLite。
+
+原始材料分别保留在：
+
+```text
+web/knowledge/creative/raw/          方法、笔记、官方文档和字幕
+web/knowledge/creative/cases/raw/    完整故事与剧本案例
+web/knowledge/creative/videos/inbox/ 视频收件箱
+```
+
+这些目录中的用户材料、Cookie 和 URL 清单默认不进入 Git。
+
+## 数据表
+
+- `library_sources`：来源、类型、内容哈希、摄取模式与状态。
+- `knowledge_cards`：方法卡 JSON、分类、审核状态、可信度与来源权威度。
+- `knowledge_card_sources`：知识卡与来源的多对多关系。
+- `story_cases`：人物、关系、故事发动机、真实钩子、节奏和禁止照搬项，不保存完整原文。
+- `ingest_jobs`：知识、案例和字幕任务的成功、失败与重试记录。
+
+只有 `verified` 和 `auto_verified` 知识卡进入运行时检索。模型失败或证据不足的内容保留为 `candidate`。
+
+## 生成索引
+
+- `creative-knowledge-pack.generated.ts`：审核后的方法卡。
+- `creative-case-library.generated.ts`：审核后的故事案例结构。
+
+项目黑板中的用户确认事实和活动硬约束始终高于知识与案例。
+
+## 常用命令
+
+```bash
+cd web
+npm run knowledge:watch
+npm run knowledge:status
+npm run knowledge:ingest
+npm run knowledge:cases
+npm run knowledge:subtitle
+```
+
+格式、OCR、字幕、模型变量和版权边界见 `web/knowledge/creative/README.md`。

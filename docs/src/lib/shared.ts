@@ -1,11 +1,10 @@
-export const appName = '无限画布';
+export const appName = '卡藏提示词画布';
 export const docsRoute = '/docs';
 export const docsContentRoute = '/llms.mdx/docs';
 
-// fill this with your actual GitHub info, for example:
 export const gitConfig = {
-  user: 'basketikun',
-  repo: 'infinite-canvas',
+  user: 'study666-creme',
+  repo: 'infinite-canvas-jay',
   branch: 'main',
   docsContentDir: 'docs/content/docs',
 };

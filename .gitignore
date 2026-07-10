@@ -10,3 +10,15 @@ data/
 .idea
 .vercel
 .tools/
+.runtime/
+
+# Local creative-library inputs and generated reports. Keep only placeholders
+# and reviewed TypeScript indexes in Git.
+web/knowledge/creative/.tmp/
+web/knowledge/creative/review.json
+web/knowledge/creative/cases/*.json
+web/knowledge/creative/cases/raw/*
+!web/knowledge/creative/cases/raw/.gitkeep
+web/knowledge/creative/videos/urls.txt
+web/knowledge/creative/videos/inbox/*
+!web/knowledge/creative/videos/inbox/.gitkeep

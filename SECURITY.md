@@ -1,64 +1,32 @@
-# Security Policy
+# 安全策略
 
-## Supported Versions
+## 支持范围
 
-infinite-canvas is in active development. Security fixes are accepted for the
-`main` branch and the latest tagged release. Older versions may be handled on a
-best-effort basis.
+安全修复优先覆盖 GitHub `main` 分支和最新发布版本。更早版本仅尽力支持。
 
-## Reporting a Vulnerability
+## 报告漏洞
 
-Please do not open a public issue with exploit details, credentials, private
-API keys, proof-of-concept code, or screenshots that reveal sensitive data.
+不要在公开 Issue 中提交利用细节、私密 API Key、Agent token、Cookie、个人文件或未打码截图。
 
-Preferred reporting channels:
+优先使用仓库的 GitHub Private Vulnerability Reporting / Security Advisory。该入口不可用时，可发送邮件至 `1844025705@qq.com`，标题使用 `[infinite-canvas security]`。
 
-1. Use GitHub private vulnerability reporting or a GitHub Security Advisory for
-   this repository, if available.
-2. If a private GitHub report is not available, email `1844025705@qq.com` with
-   the subject `[infinite-canvas security]`.
-3. If neither private channel is available, open a public issue that asks for a
-   private contact channel and does not include technical exploit details.
+报告请包括：
 
-Please include:
+- 受影响的版本、提交或部署方式。
+- 最小复现步骤与实际影响。
+- 是否影响浏览器存储、卡藏登录、WebDAV、AI 配置、媒体代理或本机 Agent。
+- 已移除凭据和个人信息的日志或截图。
 
-- Affected version, commit, branch, or deployment mode.
-- Clear reproduction steps.
-- Impact and attack scenario.
-- Any relevant logs, screenshots, or proof of concept, with secrets removed.
-- Whether the issue affects local-only usage, hosted deployments, browser
-  storage, WebDAV sync, AI provider configuration, or API proxy behavior.
+## 重点风险面
 
-## Scope
+- XSS、token 泄漏或跨账号读取浏览器数据。
+- Prompt Hub、WebDAV 和媒体代理的鉴权绕过或 SSRF。
+- 导入导出、文件处理和本地目录权限问题。
+- 本机 Agent 的未授权访问、工作区越界或 token 泄露。
+- 默认配置下可实际利用的依赖与供应链漏洞。
 
-Examples of in-scope reports:
+第三方 AI 服务、模型供应商、托管平台和用户自行暴露的密钥不属于本仓库可直接修复的范围，但如果项目默认行为放大了风险，仍欢迎提交报告。
 
-- Cross-site scripting or token exfiltration in the web app.
-- Exposure of locally stored API keys or synced canvas data caused by project
-  code.
-- Unsafe file handling, import/export behavior, or WebDAV proxy behavior.
-- Authentication, authorization, or access-control flaws in project-managed
-  features.
-- Supply-chain issues that are exploitable through this repository's shipped
-  code or default configuration.
+## 披露
 
-Examples that are usually out of scope:
-
-- Vulnerabilities in third-party AI providers, model APIs, hosting platforms,
-  or browser extensions outside this repository.
-- Compromise of a user's own API key outside the app.
-- Denial-of-service reports that require unrealistic traffic volume or physical
-  access to the user's device.
-- Missing security headers without a demonstrated exploit path.
-- Social engineering, phishing, spam, or account recovery requests.
-- Dependency reports without a practical impact on this project.
-
-## Disclosure
-
-The maintainers aim to acknowledge valid reports within 7 days and coordinate a
-fix before public disclosure. Response and fix timelines are best effort for
-this community project.
-
-Please allow time for investigation and remediation before publishing details.
-Credit will be given on request unless you prefer to remain anonymous.
-
+维护者会尽力在 7 天内确认有效报告，并在公开细节前协调修复。社区项目无法承诺固定修复时限。

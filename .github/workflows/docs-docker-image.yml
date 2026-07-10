@@ -1,4 +1,4 @@
-name: Docs Docker image
+name: Publish docs image
 
 on:
   push:
@@ -10,7 +10,7 @@ permissions:
   packages: write
 
 env:
-  IMAGE_NAME: ghcr.io/basketikun/infinite-canvas-docs
+  IMAGE_NAME: ghcr.io/${{ github.repository_owner }}/infinite-canvas-jay-docs
 
 jobs:
   meta:

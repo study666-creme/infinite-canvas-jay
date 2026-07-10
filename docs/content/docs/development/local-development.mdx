@@ -1,0 +1,65 @@
+---
+title: 本地开发
+description: 主应用、Agent 与文档站的启动和验证方式
+---
+
+# 本地开发
+
+## 主应用
+
+要求 Node.js 20+。
+
+```bash
+cd web
+npm ci
+npm run dev
+```
+
+默认地址为 `http://localhost:3000`。
+
+验证：
+
+```bash
+npx tsc --noEmit
+npm run build
+```
+
+## 本机 Agent
+
+```bash
+cd canvas-agent
+npm install
+npm run dev
+```
+
+默认地址为 `http://127.0.0.1:17371`。配置持久化在 `~/.infinite-canvas/canvas-agent.json`。
+
+```bash
+npm run build
+```
+
+## 文档站
+
+```bash
+cd docs
+bun install --frozen-lockfile
+bun run dev -- -p 3001
+```
+
+```bash
+bun run types:check
+bun run build
+```
+
+## 常用目录
+
+```text
+web/src/app/(user)/canvas/  画布页面、节点、Agent 与导演台
+web/src/services/           模型请求、媒体、本地存储和 Prompt Hub
+web/scripts/                创作资料摄取脚本
+canvas-agent/src/           HTTP/SSE、Codex/Claude 与 MCP
+plugins/infinite-canvas/    Codex App 插件
+docs/content/docs/          文档正文
+```
+
+不要提交 `.env`、Agent token、Cookie、用户画布、本地 SQLite、私人书籍、完整字幕或大型生成媒体。

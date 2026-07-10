@@ -1,4 +1,4 @@
-name: Manual Publish Codex Remote Bridge
+name: Publish Canvas Agent package
 
 on:
   workflow_dispatch:
@@ -7,7 +7,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: manual-publish-codex-remote-bridge
+  group: publish-canvas-agent
   cancel-in-progress: false
 
 jobs:
@@ -19,17 +19,17 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           registry-url: https://registry.npmjs.org
-
       - name: Install dependencies
         run: npm install --no-audit --no-fund
-
-      - name: Check package version
+      - name: Build
+        run: npm run build
+      - name: Read package metadata
         id: package
+        shell: bash
         run: |
           name=$(node -p "require('./package.json').name")
           version=$(node -p "require('./package.json').version")
@@ -41,29 +41,11 @@ jobs:
           else
             echo "should_publish=true" >> "$GITHUB_OUTPUT"
           fi
-
-      - name: Check npm token
-        id: npm-token
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: |
-          if [ -n "$NODE_AUTH_TOKEN" ]; then
-            echo "has_token=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "has_token=false" >> "$GITHUB_OUTPUT"
-            echo "::warning::NPM_TOKEN is not configured; skipping npm publish."
-          fi
-
-      - name: Publish to npm
-        if: steps.package.outputs.should_publish == 'true' && steps.npm-token.outputs.has_token == 'true'
+      - name: Publish
+        if: steps.package.outputs.should_publish == 'true'
         run: npm publish --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-
-      - name: Skip existing version
+      - name: Existing version
         if: steps.package.outputs.should_publish != 'true'
-        run: echo "${{ steps.package.outputs.name }}@${{ steps.package.outputs.version }} already exists on npm, skipping publish."
-
-      - name: Skip missing token
-        if: steps.package.outputs.should_publish == 'true' && steps.npm-token.outputs.has_token != 'true'
-        run: echo "NPM_TOKEN is missing, so ${{ steps.package.outputs.name }}@${{ steps.package.outputs.version }} was not published."
+        run: echo "${{ steps.package.outputs.name }}@${{ steps.package.outputs.version }} already exists."

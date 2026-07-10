@@ -1,6 +1,6 @@
 services:
   - type: web
-    name: infinite-canvas
+    name: prompt-canvas
     runtime: docker
     plan: free
     autoDeployTrigger: off

@@ -4,9 +4,8 @@
   "pages": [
     "overview",
     "canvas",
-    "backend",
+    "development",
     "progress",
-    "business",
-    "support"
+    "legal"
   ]
 }

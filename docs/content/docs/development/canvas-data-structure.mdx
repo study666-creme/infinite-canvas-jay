@@ -1,0 +1,84 @@
+---
+title: 画布数据与存储
+description: 账号分区、项目结构、媒体 Blob 与 WebDAV 边界
+---
+
+# 画布数据与存储
+
+## 存储位置
+
+浏览器使用 `localforage` / IndexedDB：
+
+| 数据 | 数据库 / store | 说明 |
+| --- | --- | --- |
+| 画布与素材 JSON | `infinite-canvas / app_state` | 按卡藏用户 ID 生成账号分区 key |
+| 图片 Blob | `infinite-canvas / image_files` | 节点 JSON 只保存 `storageKey` 与元数据 |
+| 视频/音频 Blob | `infinite-canvas / media_files` | 使用随机 `storageKey` 恢复 Blob URL |
+| 图片/视频记录 | 独立 localforage store | 首屏只读取轻量摘要 |
+
+画布基础 key 是 `infinite-canvas:canvas_store`。登录后实际 key 会追加经过清理的卡藏用户 ID。首次进入账号分区且分区为空时，旧基础 key 会被复制进去。
+
+这只是同一浏览器内的账号隔离，不是服务端同步或强安全沙箱。
+
+## 项目结构
+
+```ts
+type CanvasProject = {
+  id: string;
+  title: string;
+  createdAt: string;
+  updatedAt: string;
+  nodes: CanvasNodeData[];
+  connections: CanvasConnection[];
+  chatSessions: CanvasAssistantSession[];
+  activeChatId: string | null;
+  backgroundMode: "lines" | "dots" | "blank";
+  showImageInfo: boolean;
+  viewport: { x: number; y: number; k: number };
+};
+```
+
+项目列表和项目详情目前仍保存在同一个持久化对象中。项目、节点和聊天大量增长后会拖慢 `/canvas` 首屏，后续应拆分索引与详情。
+
+## 节点结构
+
+```ts
+type CanvasNodeData = {
+  id: string;
+  type: "image" | "text" | "config" | "video" | "audio";
+  title: string;
+  position: { x: number; y: number };
+  width: number;
+  height: number;
+  metadata?: CanvasNodeMetadata;
+};
+```
+
+`metadata` 按节点能力扩展，常见字段包括：
+
+- 内容与生成：`content`、`prompt`、`status`、`model`、`generationMode`、`generationProgress`。
+- 媒体：`storageKey`、`mimeType`、`bytes`、`naturalWidth`、`naturalHeight`、`durationMs`。
+- 图片批次与节点组：`batchRootId`、`batchChildIds`、`primaryImageId`、`groupRootId`、`groupMemberIds`。
+- 视频：`videoTaskId`、`videoProvider`、`seconds`、`vquality`、`generateAudio`、`watermark`。
+- 创作状态：`creativeArtifact`、`creativeProjectState`。
+- 导演台截图：`directorStage.shotId`、`slot`、`dramaticFunction`。
+
+## 媒体写入
+
+- 图片统一通过 `uploadImage` 写入。
+- 视频和音频统一通过 `uploadMediaFile` 写入。
+- 支持 File System Access API 时，可把生成媒体保存到用户授权目录。
+- `content` 中的 `blob:` URL 只对当前页面会话有效，长期恢复以 `storageKey` 为准。
+- 发送模型请求时，只有上游需要 data URL 才临时读取 Blob 并转换。
+
+删除节点或项目后通过引用扫描清理未使用 Blob，避免同一媒体仍被素材、画布或聊天引用时误删。
+
+## 连线与聊天
+
+连线只保存 `fromNodeId` 与 `toNodeId`。节点删除时同步移除相关连线。
+
+助手会话保存在对应画布项目中，消息角色包括 `user`、`assistant`、`system`、`tool` 和 `error`。图片引用使用与节点相同的 `storageKey` 恢复规则。
+
+## WebDAV
+
+WebDAV 同步由用户主动触发，覆盖画布、素材、图片/视频生成记录和关联媒体。登录不会自动执行 WebDAV，也不会替用户解决远端冲突。同步结构变化必须保持版本信息并提供兼容策略。

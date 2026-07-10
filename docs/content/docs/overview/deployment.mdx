@@ -1,0 +1,43 @@
+---
+title: 部署与自托管
+description: Vercel、Docker、Render 与本机 Agent 的部署边界
+---
+
+# 部署与自托管
+
+推荐在 Vercel 导入 GitHub 仓库，并把 **Root Directory** 设置为 `web`。主应用不需要在服务器保存用户画布，但用户区默认需要连接卡藏登录服务。
+
+## Vercel
+
+```text
+Repository: study666-creme/infinite-canvas-jay
+Root Directory: web
+Framework: Next.js
+Node.js: 20+
+```
+
+可选服务端变量：
+
+- `PROMPT_HUB_API_BASE`
+- `NEW_API_BASE_URL`
+- `NEW_API_API_KEY`
+
+模型密钥与 Agent token 不应写入 `NEXT_PUBLIC_*`。
+
+## Docker
+
+```bash
+docker compose -f docker-compose.local.yml up -d --build
+```
+
+GitHub tag 工作流发布的镜像为：
+
+```text
+ghcr.io/study666-creme/infinite-canvas-jay
+```
+
+## 本机 Agent
+
+Vercel 和 Docker Web 容器不会替用户运行 Codex。需要 Codex/Claude 操作画布时，用户必须在自己的电脑启动 `canvas-agent`，并保护连接 token。
+
+完整步骤、环境变量和发布检查清单以仓库根目录 [DEPLOY.md](https://github.com/study666-creme/infinite-canvas-jay/blob/main/DEPLOY.md) 为准。

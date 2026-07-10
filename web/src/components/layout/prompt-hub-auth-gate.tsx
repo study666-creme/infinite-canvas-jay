@@ -2,7 +2,6 @@
 
 import type { ReactNode } from "react";
 import { FormEvent, useEffect, useState } from "react";
-import { usePathname } from "next/navigation";
 import { AlertCircle, LoaderCircle, LockKeyhole, LogIn, ShieldCheck } from "lucide-react";
 
 import { prepareCanvasStorageForSession, setCanvasStorageUserFromSession } from "@/app/(user)/canvas/stores/use-canvas-store";
@@ -17,7 +16,6 @@ const authVerifiedAtKey = "infinite-canvas:prompt_hub_auth_verified_at";
 const authVerifyTtlMs = 30 * 60 * 1000;
 
 export function PromptHubAuthGate({ children }: { children: ReactNode }) {
-    const pathname = usePathname();
     const apiBase = usePromptHubStore((state) => state.apiBase);
     const savedEmail = usePromptHubStore((state) => state.email);
     const session = usePromptHubStore((state) => state.session);
@@ -31,9 +29,8 @@ export function PromptHubAuthGate({ children }: { children: ReactNode }) {
     const [state, setState] = useState<AuthState>(() => (usePromptHubStore.getState().session?.access_token ? "authenticated" : "checking"));
     const [submitting, setSubmitting] = useState(false);
     const [error, setError] = useState("");
-    const codexRemoteAuth = pathname === "/codex-remote" || pathname.startsWith("/codex-remote/") || pathname === "/mobile-agent" || pathname.startsWith("/mobile-agent/");
-    const authTitle = codexRemoteAuth ? "登录后使用 Codex Remote" : "登录后使用画布";
-    const authDescription = codexRemoteAuth ? "Codex Remote 沿用卡片库账号权限；真正控制电脑仍需要你的 Agent URL 和 Connect token。" : "画布、资产、生成和远程 Codex 控制会沿用卡片库账号权限。";
+    const authTitle = "登录后使用画布";
+    const authDescription = "画布、资产和生成能力会沿用卡片库账号权限。";
 
     useEffect(() => setEmail((value) => value || savedEmail), [savedEmail]);
 

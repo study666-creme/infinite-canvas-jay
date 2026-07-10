@@ -6,7 +6,7 @@
       "name": "codex-remote-bridge",
       "dependencies": {
         "@modelcontextprotocol/sdk": "^1.12.1",
-        "@openai/codex": "^0.143.0",
+        "@openai/codex": "0.143.0",
         "express": "^5.1.0",
         "zod": "^3.25.0",
       },

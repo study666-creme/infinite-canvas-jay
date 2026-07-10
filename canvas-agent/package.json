@@ -1,6 +1,7 @@
 {
   "name": "codex-remote-bridge",
   "version": "0.1.1",
+  "description": "Local Infinite Canvas Agent runtime with Codex app-server and Canvas MCP integration.",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -19,7 +20,7 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.12.1",
-    "@openai/codex": "^0.143.0",
+    "@openai/codex": "0.143.0",
     "express": "^5.1.0",
     "zod": "^3.25.0"
   },

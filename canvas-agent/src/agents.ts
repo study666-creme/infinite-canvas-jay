@@ -170,7 +170,7 @@ class CodexAppClient {
             codexThreadId = "";
             emit("agent_log", { text: `Codex app-server exited: ${code ?? 0}` });
         });
-        await client.request("initialize", { clientInfo: { name: "codex-remote-bridge", title: "Codex Remote Bridge", version: VERSION }, capabilities: { experimentalApi: true, requestAttestation: false } });
+        await client.request("initialize", { clientInfo: { name: "infinite-canvas-agent", title: "Infinite Canvas Agent", version: VERSION }, capabilities: { experimentalApi: true, requestAttestation: false } });
         client.notify("initialized");
         return client;
     }

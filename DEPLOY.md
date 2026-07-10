@@ -222,18 +222,6 @@ npm start
 
 更完整的说明、代码路径与待办见 **[docs/content/docs/overview/video-playback.mdx](docs/content/docs/overview/video-playback.mdx)**。
 
-## 远程 Codex Agent
-
-Vercel 只托管网页，不能直接运行你电脑上的 Codex、读写本地仓库或执行部署命令。远程使用 `/mobile-agent` 时，需要另行运行 `canvas-agent`，并把它放到受保护的 HTTPS 地址后面。
-
-推荐顺序：
-
-1. Tailscale / ZeroTier：只让自己的设备进内网，线上画布里填内网 HTTPS/Funnel 地址。
-2. Cloudflare Tunnel：把本机 `17371` 映射成 HTTPS 域名，并保留 `Connect token`。
-3. VPS / 自托管：在服务器上放仓库工作区和 `canvas-agent`，再通过 Nginx/Caddy 反代 HTTPS。
-
-不要直接把 `17371` 裸露到公网。卡藏登录只保护网页入口；如果别人拿到 Agent URL 和 token，仍然可以绕过网页直接调用你的 Agent。
-
 ## New API 跳转
 
 使用 New API 等系统时，可用带参数的跳转自动填配置：
@@ -251,7 +239,6 @@ https://你的部署域名?apiKey={key}&baseUrl={address}
 - [ ] **视频**：网关含 `/v1/media/fetch`；生成后节点能播放或已知失败已记录（见 [video-playback.mdx](docs/content/docs/overview/video-playback.mdx)）
 - [ ] 若启用本地文件夹保存，在 Chrome/Edge 中授权目录并可读写
 - [ ] Prompt Hub：设置里能登录；**插入素材 → Prompt Hub 卡片库** 能列出并插入
-- [ ] 远程 Codex：`/mobile-agent` 使用 HTTPS Agent URL + Connect token；未裸露 `17371`
 - [ ] README 与 LICENSE 仍包含上游版权声明
 
 ## 开源协议与「能不能商用」

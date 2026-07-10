@@ -13,7 +13,7 @@
 
 本项目保留 AGPL-3.0 许可证，详见 [LICENSE](LICENSE)。产品 UI 已使用「卡藏」品牌，但仓库层面的开源义务不能删除。线上部署时，请确保对应源码可访问。
 
-更完整的说明见 [OPEN-SOURCE.md](OPEN-SOURCE.md)。Codex Remote 的独立拆分计划、`workspaceId` 和 Codex 合规边界见 [CODEX-REMOTE-OPEN-SOURCE.md](CODEX-REMOTE-OPEN-SOURCE.md)。
+更完整的说明见 [OPEN-SOURCE.md](OPEN-SOURCE.md)。画布 Agent 的职责和技术边界见 [CANVAS-AGENT.md](CANVAS-AGENT.md)。
 
 ## 快速开始
 
@@ -41,62 +41,19 @@ npm run build
 
 ## 登录与数据
 
-线上画布沿用卡片库的卡藏账号登录。未登录用户不能进入画布、资产、生成工作台和 Codex Remote。Codex Remote 真正控制电脑时仍需要用户自己的 Agent URL 和 Connect token。
+线上画布沿用卡片库的卡藏账号登录。未登录用户不能进入画布、资产和生成工作台。
 
 - 画布项目、资产库、AI 渠道配置仍主要保存在当前浏览器本地；画布与资产会按卡藏用户 ID 分桶，避免同一设备换账号后混用。
 - 卡藏生图、卡片库读取、Prompt Hub 媒体代理会使用当前登录 token；未登录用户不能无成本调用这些线上代理接口。
-- 远程 Codex 不会运行在 Vercel 上。要让手机远程操作项目，需要把你自己的本机 Agent 放在受保护的 HTTPS 地址后面，并使用 Connect token 连接。
-- 开源/自托管 Codex Remote 默认不限额；线上体验站可按卡藏登录账号做 10 次体验额度，并通过激活码解锁无限使用。公开运营时仍应在服务端/网关侧做硬限额，防止绕过前端。
 
-## Codex Remote
+## 画布 Agent
 
-打开 `/codex-remote` 可以把手机变成 Codex Remote Console，连接电脑上的本机 bridge 后继续让 Codex 读项目、改代码、跑命令和部署。它是准备独立拆出的自托管 Codex 控制台；画布需要 Codex 当 Agent 大脑时，应作为可选 adapter/MCP 能力接入。旧入口 `/mobile-agent` 保留兼容。
+画布内置 Agent 是产品能力，负责读取画布状态并调用节点、连线、生成和资产工具。当前提供两种执行方式：
 
-当前阶段不要把画布 Agent 当成已开源产品发布。`/codex-remote` 是先挂在同一个 Web 应用里的独立入口，用来验证移动 Codex 体验；真正开源前应再拆成独立仓库/独立包名，并把画布 MCP 能力做成可选 adapter。
+- 网站 Agent：使用网页已配置的文本模型，在浏览器内执行画布工具循环。
+- Local Agent：通过 `canvas-agent` 连接本机执行引擎；Codex 可作为其中一个大脑，并通过 Infinite Canvas MCP 操作画布。
 
-线上体验入口：`https://infinite-canvas-jay.vercel.app/codex-remote`。体验站可以要求先登录卡藏账号；要实际控制 Codex，还需要在自己的电脑上启动本机 Agent 并填写 Agent URL + token。
-
-相关入口：
-
-- 提示词仓库：https://prompt-hubs.com
-- API 中转：https://newapi.prompt-hubs.com
-- 开源无限画布在线网站（自定义 API）：https://infinite-canvas-jay.vercel.app/canvas
-
-体验站限额相关环境变量：
-
-```bash
-NEXT_PUBLIC_CODEX_REMOTE_DEMO_MODE=1
-NEXT_PUBLIC_CODEX_REMOTE_DAILY_LIMIT=10
-CODEX_REMOTE_UNLOCK_CODES=your-private-code
-```
-
-`CODEX_REMOTE_UNLOCK_CODES` 只在服务端读取，不要放进 `NEXT_PUBLIC_*`。
-
-局域网使用示例：
-
-```powershell
-$env:CANVAS_AGENT_HOST="0.0.0.0"
-$env:CANVAS_AGENT_WORKSPACE="D:\canvas\infinite-canvas"
-cd D:\canvas\infinite-canvas\canvas-agent
-npm run dev
-```
-
-启动后终端会输出 `Connect token` 和可访问地址。同局域网可填入 `http://电脑局域网IP:17371`。远程使用时，请通过 Cloudflare Tunnel、Tailscale Funnel、ZeroTier 内网地址或 VPS 反代提供 **HTTPS Bridge URL**，再在 `/codex-remote` 填入该地址、token 和工作目录。
-
-想让重启后手机不用重新填 token / URL，可以固定启动参数：
-
-```powershell
-$env:CANVAS_AGENT_HOST="0.0.0.0"
-$env:CANVAS_AGENT_WORKSPACE="D:\canvas\infinite-canvas"
-$env:CANVAS_AGENT_TOKEN="自己生成的一段长随机字符串"
-$env:CANVAS_AGENT_PUBLIC_URL="https://你的固定反代域名"
-cd D:\canvas\infinite-canvas\canvas-agent
-npm run dev
-```
-
-`Workspace ID` 只是本机 Agent 用来区分不同工作区配置的本地分桶 key：它会关联 workspace、active Codex thread 和本地消息缓存。它不是 Codex 会话 ID；真正指定 Codex 会话用 `Codex Thread ID`。旧字段 `Canvas ID / canvasId` 仅为兼容画布历史调用保留。
-
-不要把 `17371` 端口无鉴权裸露到公网；任何拿到 Agent URL 和 token 的人都能让你的本机 Codex 执行项目任务。
+Codex 在这里不是独立产品入口，也不负责手机远程开发。Local Agent 的会话按画布项目 ID 隔离，并显式传入 `canvasAgent: true` 才启用画布提示词和 MCP。当前链路已经实现，正式使用前仍需做端到端验证。详见 [CANVAS-AGENT.md](CANVAS-AGENT.md)。
 
 ## 部署
 
@@ -106,7 +63,7 @@ npm run dev
 
 ```text
 web/             前端应用
-canvas-agent/    本地 Agent / Codex Remote Bridge
+canvas-agent/    本地画布 Agent / MCP 运行时
 plugins/         Codex 插件
 docs/            文档站
 scripts/         辅助脚本

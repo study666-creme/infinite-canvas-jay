@@ -12,6 +12,7 @@ import { useThemeStore } from "@/stores/use-theme-store";
 import { useUserStore } from "@/stores/use-user-store";
 import { useCanvasAgentStore, type AgentAttachment, type AgentChatItem, type AgentEventLog, type AgentPanelTab, type AgentPendingToolCall, type AgentThreadSummary, type CanvasAgentCreativeMode } from "../stores/use-canvas-agent-store";
 import { summarizeCanvasAgentOps, type CanvasAgentOp, type CanvasAgentSnapshot } from "../utils/canvas-agent-ops";
+import { directorStageActionLabel, isDirectorStageActionName, isDirectorStageReadAction, type DirectorStageActionHandler } from "../utils/director-stage-types";
 import { applyShortDramaAgentMode, isShortDramaAgentPresetPrompt } from "../utils/short-drama-agent-prompt";
 import { AgentChatComposer, AgentChatMessage, AgentPanelTabs, AgentPendingToolCard, AgentWorkingMessage, type CanvasAgentChatAttachment } from "./canvas-agent-chat-ui";
 import { ShortDramaAgentPresetButton } from "./short-drama-agent-preset-button";
@@ -43,7 +44,7 @@ type AgentThreadsResponse = { ok?: boolean; workspace?: AgentWorkspace; data?: A
 type AgentThreadResponse = { ok?: boolean; workspace?: AgentWorkspace; thread?: AgentThreadSummary; messages?: AgentChatItem[] };
 type AgentConfigResponse = { ok?: boolean; url?: string; token?: string; hasToken?: boolean };
 
-export function CanvasLocalAgentPanel({ snapshot, canUndoOps, collapsed, embedded, headless, autoConnect, onApplyOps, onUndoOps }: { snapshot: CanvasAgentSnapshot; canUndoOps: boolean; collapsed?: boolean; embedded?: boolean; headless?: boolean; autoConnect?: boolean; onApplyOps: (ops: CanvasAgentOp[]) => unknown; onUndoOps: () => CanvasAgentSnapshot | null }) {
+export function CanvasLocalAgentPanel({ snapshot, canUndoOps, collapsed, embedded, headless, autoConnect, onApplyOps, onUndoOps, onDirectorAction }: { snapshot: CanvasAgentSnapshot; canUndoOps: boolean; collapsed?: boolean; embedded?: boolean; headless?: boolean; autoConnect?: boolean; onApplyOps: (ops: CanvasAgentOp[]) => unknown; onUndoOps: () => CanvasAgentSnapshot | null; onDirectorAction: DirectorStageActionHandler }) {
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const user = useUserStore((state) => state.user);
     const { message, modal } = App.useApp();
@@ -55,6 +56,7 @@ export function CanvasLocalAgentPanel({ snapshot, canUndoOps, collapsed, embedde
     const confirmToolsRef = useRef(confirmTools);
     const pendingToolRef = useRef<AgentPendingToolCall | null>(null);
     const onApplyOpsRef = useRef(onApplyOps);
+    const onDirectorActionRef = useRef(onDirectorAction);
     const autoConnectRef = useRef(false);
     const connectedRef = useRef(false);
     const errorLoggedRef = useRef(false);
@@ -98,6 +100,9 @@ export function CanvasLocalAgentPanel({ snapshot, canUndoOps, collapsed, embedde
     useEffect(() => {
         onApplyOpsRef.current = onApplyOps;
     }, [onApplyOps]);
+    useEffect(() => {
+        onDirectorActionRef.current = onDirectorAction;
+    }, [onDirectorAction]);
     useEffect(() => {
         listRef.current?.scrollTo({ top: listRef.current.scrollHeight });
     }, [messages, pendingTool, waiting]);
@@ -254,7 +259,7 @@ export function CanvasLocalAgentPanel({ snapshot, canUndoOps, collapsed, embedde
     };
 
     const handleToolCall = async (endpoint: string, token: string, payload: AgentPendingToolCall) => {
-        if (confirmToolsRef.current && payload.name === "canvas_apply_ops") {
+        if (confirmToolsRef.current && (payload.name === "canvas_apply_ops" || (isDirectorStageActionName(payload.name) && !isDirectorStageReadAction(payload.name)))) {
             if (pendingToolRef.current) {
                 await postToolResult(endpoint, token, clientIdRef.current, { requestId: payload.requestId, error: "仍有待确认的画布工具调用" });
                 return;
@@ -269,15 +274,18 @@ export function CanvasLocalAgentPanel({ snapshot, canUndoOps, collapsed, embedde
 
     const runToolCall = async (endpoint: string, token: string, payload: AgentPendingToolCall) => {
         try {
-            const input: { ops?: CanvasAgentOp[] } = payload.input || {};
-            setAgentState({ activity: payload.name === "canvas_apply_ops" ? "执行画布操作" : "读取画布", waiting: true });
+            const input = payload.input || {};
+            const directorAction = isDirectorStageActionName(payload.name);
+            setAgentState({ activity: directorAction ? directorStageActionLabel(payload.name) : payload.name === "canvas_apply_ops" ? "执行画布操作" : "读取画布", waiting: true });
             addEventLog(toolName(payload.name), payload, payload);
-            const result = payload.name === "canvas_apply_ops" ? onApplyOpsRef.current(input.ops || []) : snapshotRef.current;
+            let result: unknown;
+            if (isDirectorStageActionName(payload.name)) result = await onDirectorActionRef.current(payload.name, input);
+            else result = payload.name === "canvas_apply_ops" ? onApplyOpsRef.current(input.ops || []) : snapshotRef.current;
             await postToolResult(endpoint, token, clientIdRef.current, { requestId: payload.requestId, result });
             if (payload.name === "canvas_apply_ops") void postState(endpoint, token, clientIdRef.current, result as CanvasAgentSnapshot);
             setAgentState({ activity: "工具完成", waiting: true });
             addEventLog(`${toolName(payload.name)}完成`, result, result);
-            addMessage({ role: "tool", title: `${toolName(payload.name)}完成`, text: payload.name === "canvas_apply_ops" ? summarizeCanvasAgentOps(input.ops || []) || "画布操作" : "已完成", detail: { requestId: payload.requestId, name: payload.name, input, result } });
+            addMessage({ role: "tool", title: `${toolName(payload.name)}完成`, text: directorAction ? directorStageActionLabel(payload.name) : payload.name === "canvas_apply_ops" ? summarizeCanvasAgentOps(input.ops || []) || "画布操作" : "已完成", detail: { requestId: payload.requestId, name: payload.name, input, result } });
         } catch (error) {
             const message = error instanceof Error ? error.message : "画布操作失败";
             setAgentState({ activity: "工具失败", waiting: false });
@@ -904,6 +912,8 @@ function isConnectionErrorMessage(item: AgentChatItem) {
 }
 
 function toolName(name: string) {
+    if (isDirectorStageActionName(name)) return directorStageActionLabel(name);
+    if (name === "canvas_update_project_blackboard") return "更新项目黑板";
     if (name === "canvas_apply_ops") return "画布操作";
     if (name === "canvas_get_state") return "读取画布";
     if (name === "canvas_get_selection") return "读取选区";
@@ -931,7 +941,7 @@ function toolName(name: string) {
 }
 
 function isReadTool(name: string) {
-    return name === "canvas_get_state" || name === "canvas_get_selection" || name === "canvas_export_snapshot";
+    return name === "canvas_get_state" || name === "canvas_get_selection" || name === "canvas_export_snapshot" || isDirectorStageReadAction(name);
 }
 
 function isMcpToolItem(item?: AgentEventItem) {

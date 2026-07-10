@@ -1,5 +1,6 @@
 import type { CanvasAgentCreativeMode } from "../stores/use-canvas-agent-store";
-import { CREATIVE_IMPORTED_KNOWLEDGE_CONTEXT } from "./creative-knowledge-pack.generated";
+import { CREATIVE_STORY_CASE_META, CREATIVE_STORY_CASES } from "./creative-case-library.generated";
+import { CREATIVE_IMPORTED_KNOWLEDGE_CARDS, CREATIVE_IMPORTED_KNOWLEDGE_META } from "./creative-knowledge-pack.generated";
 
 export const CREATIVE_KNOWLEDGE_CORE_CONTEXT = `内置创作知识核心（高质量源二次审核版）：
 定位：
@@ -338,12 +339,340 @@ export const CREATIVE_KNOWLEDGE_CORE_CONTEXT = `内置创作知识核心（高�
 检查问题：A 版解决留存，B 版解决传播，还是相反？哪个风险更大？哪个更符合当前账号阶段？
 禁忌：只给一个“我觉得高级”的方案。`;
 
-export const CREATIVE_AGENT_KNOWLEDGE_CONTEXT = [
-    CREATIVE_KNOWLEDGE_CORE_CONTEXT,
-    CREATIVE_IMPORTED_KNOWLEDGE_CONTEXT ? `用户导入创作知识包（已蒸馏，不含原文）：\n${CREATIVE_IMPORTED_KNOWLEDGE_CONTEXT}` : "",
-]
-    .filter(Boolean)
-    .join("\n\n");
+type CreativeKnowledgeLayer = "project" | "private" | "public" | "model";
+type CreativeKnowledgeStatus = "candidate" | "auto_verified" | "verified" | "rejected";
+
+type CreativeKnowledgeCard = {
+    id: string;
+    title: string;
+    category: string;
+    principle: string;
+    appliesTo: string[];
+    checks: string[];
+    avoid: string[];
+    sourceIds: string[];
+    layer: CreativeKnowledgeLayer;
+    status: CreativeKnowledgeStatus;
+    confidence: number;
+    authority: number;
+    triggers: string[];
+    evidenceSummary?: string;
+    conflicts?: string[];
+};
+
+type CreativeStoryCase = {
+    id: string;
+    title: string;
+    category: string;
+    format: string;
+    genres: string[];
+    narrativePerspective: string;
+    setting: string;
+    tone: string;
+    audiencePromise: string;
+    logline: string;
+    protagonist: { identity: string; desire: string; obstacle: string; stakes: string; change: string };
+    relationships: Array<{ parties: string; tension: string; change: string }>;
+    storyEngine: string;
+    coreConflict: string;
+    firstThreeEpisodeHooks: Array<{ episode: number; opening: string; escalation: string; payoff: string; cliffhanger: string }>;
+    sceneFunctions: string[];
+    pacingCurve: string[];
+    reusablePatterns: string[];
+    adaptationNotes: string[];
+    marketEvidence: string;
+    doNotCopy: string[];
+    tags: string[];
+    status: CreativeKnowledgeStatus;
+    confidence: number;
+};
+
+const CREATIVE_KNOWLEDGE_POLICY_CONTEXT = `创作知识调用协议：
+- 当前项目事实、活动硬性要求和用户已确认常量优先于任何方法卡。
+- 方法卡不是身份标签，也不能因为来源名称响亮就自动正确；只在与当前任务直接相关时调用。
+- 私有验证卡用于用户偏好和特定工作方法；公共专业卡用于行业共识和技术事实；模型自身知识与互联网知识只用于发现候选和补缺口。
+- 出现冲突时按问题类型判断权威：平台规格以最新官方信息为准，用户审美与项目取舍以用户确认内容为准。
+- 每轮最多调用五张卡，但不是必须打满；没有足够相关卡时宁可少用。`;
+
+const CORE_KNOWLEDGE_CARDS = parseCoreKnowledgeCards(CREATIVE_KNOWLEDGE_CORE_CONTEXT);
+const IMPORTED_KNOWLEDGE_CARDS = normalizeImportedKnowledgeCards(CREATIVE_IMPORTED_KNOWLEDGE_CARDS as readonly unknown[]);
+const IMPORTED_STORY_CASES = normalizeStoryCases(CREATIVE_STORY_CASES as readonly unknown[]);
+
+export const CREATIVE_AGENT_KNOWLEDGE_CONTEXT = CREATIVE_KNOWLEDGE_POLICY_CONTEXT;
+
+export function buildCreativeAgentKnowledgeContext(prompt: string, mode: CanvasAgentCreativeMode, maxCards = 5) {
+    const cards = retrieveCreativeKnowledgeCards(prompt, mode, maxCards);
+    const cases = retrieveCreativeStoryCases(prompt, mode);
+    const importedStatus = `导入库：${CREATIVE_IMPORTED_KNOWLEDGE_META.sourceCount} 个来源，${CREATIVE_IMPORTED_KNOWLEDGE_META.cardCount} 张卡。`;
+    const caseStatus = `故事案例库：${CREATIVE_STORY_CASE_META.caseCount} 个案例，${CREATIVE_STORY_CASE_META.activeCaseCount} 个通过审核。`;
+    if (!cards.length && !cases.length) return `${CREATIVE_KNOWLEDGE_POLICY_CONTEXT}\n${importedStatus}\n${caseStatus}\n本轮没有检索到足够相关且通过审核的方法卡或案例，使用项目事实和模型基础能力推进，不伪装已有专业资料。`;
+    const cardContext = cards.length ? `本轮按任务检索到的方法卡（${cards.length}/${Math.min(5, maxCards)}）：\n${cards.map(renderKnowledgeCard).join("\n\n")}` : "本轮未调用方法卡。";
+    const caseContext = cases.length
+        ? `本轮按任务检索到的故事案例（${cases.length}/3）：\n只借鉴结构功能和选择逻辑，禁止照搬人物、专有设定、关键桥段排列、台词和原文表达。\n${cases.map(renderStoryCase).join("\n\n")}`
+        : "本轮未调用故事案例。";
+    return `${CREATIVE_KNOWLEDGE_POLICY_CONTEXT}\n${importedStatus}\n${caseStatus}\n\n${cardContext}\n\n${caseContext}`;
+}
+
+export function retrieveCreativeKnowledgeCards(prompt: string, mode: CanvasAgentCreativeMode, maxCards = 5): CreativeKnowledgeCard[] {
+    const query = prompt.trim();
+    const limit = Math.max(1, Math.min(5, Math.floor(maxCards), knowledgeCardBudget(query)));
+    const cards = [...CORE_KNOWLEDGE_CARDS, ...IMPORTED_KNOWLEDGE_CARDS].filter((card) => card.status === "verified" || card.status === "auto_verified");
+    const scored = cards
+        .map((card) => ({ card, score: scoreKnowledgeCard(card, query, mode) }))
+        .filter((item) => item.score >= (query.length >= 8 ? 4 : 5))
+        .sort((a, b) => b.score - a.score || b.card.confidence - a.card.confidence);
+    const selected: CreativeKnowledgeCard[] = [];
+    const categoryCounts = new Map<string, number>();
+    for (const item of scored) {
+        if ((categoryCounts.get(item.card.category) || 0) >= 2) continue;
+        selected.push(item.card);
+        categoryCounts.set(item.card.category, (categoryCounts.get(item.card.category) || 0) + 1);
+        if (selected.length >= limit) break;
+    }
+    return selected;
+}
+
+export function retrieveCreativeStoryCases(prompt: string, mode: CanvasAgentCreativeMode, maxCases = 3): CreativeStoryCase[] {
+    const query = prompt.trim();
+    if (!shouldRetrieveStoryCases(query, mode)) return [];
+    const queryTokens = tokenizeKnowledgeText(query);
+    const limit = Math.max(1, Math.min(3, Math.floor(maxCases)));
+    return IMPORTED_STORY_CASES.filter((item) => item.status === "verified" || item.status === "auto_verified")
+        .map((item) => {
+            const indexText = [
+                item.title,
+                item.category,
+                item.format,
+                ...item.genres,
+                ...item.tags,
+                item.narrativePerspective,
+                item.setting,
+                item.tone,
+                item.audiencePromise,
+                item.logline,
+                item.protagonist.identity,
+                item.protagonist.desire,
+                item.protagonist.obstacle,
+                item.storyEngine,
+                item.coreConflict,
+                ...item.reusablePatterns,
+            ].join(" ");
+            const overlap = overlapCount(queryTokens, tokenizeKnowledgeText(indexText));
+            const genreBonus = item.genres.some((genre) => query.includes(genre)) ? 2 : 0;
+            return { item, score: overlap * 1.8 + genreBonus + item.confidence * 1.5 };
+        })
+        .filter(({ score }) => score >= 3.2)
+        .sort((a, b) => b.score - a.score || b.item.confidence - a.item.confidence)
+        .slice(0, limit)
+        .map(({ item }) => item);
+}
+
+function shouldRetrieveStoryCases(query: string, mode: CanvasAgentCreativeMode) {
+    if (!query) return false;
+    if (/字幕|转写|知识库|蒸馏|PDF|MOBI|数据库|安装|报错|404/.test(query)) return false;
+    if (/资产|参考图|三视图|多角度|分镜|镜头|视频生成|提示词/.test(query) && !/故事|剧情|剧本|人物|角色|冲突|前三集/.test(query)) return false;
+    return mode === "short_drama" || /点子|故事|剧情|剧本|人物|角色|冲突|关系|世界观|大纲|前三集|改编|网文|短剧/.test(query);
+}
+
+function knowledgeCardBudget(query: string) {
+    if (!query.trim()) return 2;
+    const domains = [
+        /故事|剧情|结构|冲突|悬念|人物|角色|世界观/,
+        /台词|对白|潜台词|声口|口语|配音/,
+        /镜头|分镜|摄影|构图|色彩|光线|导演|表演|调度/,
+        /资产|参考图|三视图|场景|道具|服装|一致性/,
+        /视频生成|图生视频|文生视频|提示词|首帧|尾帧|运动/,
+        /短剧|钩子|网感|留存|传播|标题|封面|平台/,
+        /活动|参赛|评奖|交付|画幅|时长|审核/,
+        /质检|复盘|返工|失败|矛盾|错误/,
+    ].filter((pattern) => pattern.test(query)).length;
+    if (domains <= 1) return 2;
+    if (domains === 2) return 3;
+    if (domains === 3) return 4;
+    return 5;
+}
+
+function parseCoreKnowledgeCards(context: string): CreativeKnowledgeCard[] {
+    const matches = context.matchAll(/(?:^|\n)(\d+)\.\s*([^\n]+)\n原则：([^\n]+)\n适用阶段：([^\n]+)\n检查问题：([^\n]+)\n禁忌：([^\n]+)/g);
+    return Array.from(matches).map((match, index) => ({
+        id: `core-${index + 1}`,
+        title: match[2].trim(),
+        category: inferKnowledgeCategory(`${match[2]} ${match[4]}`),
+        principle: match[3].trim(),
+        appliesTo: splitKnowledgeList(match[4]),
+        checks: splitKnowledgeList(match[5]),
+        avoid: splitKnowledgeList(match[6]),
+        sourceIds: ["built-in-core"],
+        layer: "public",
+        status: "verified",
+        confidence: 0.78,
+        authority: 0.78,
+        triggers: splitKnowledgeList(`${match[2]}、${match[4]}`),
+    }));
+}
+
+function normalizeImportedKnowledgeCards(cards: readonly unknown[]): CreativeKnowledgeCard[] {
+    return cards.flatMap((value, index) => {
+        if (!value || typeof value !== "object" || Array.isArray(value)) return [];
+        const card = value as Record<string, unknown>;
+        const title = String(card.title || "").trim();
+        const principle = String(card.principle || "").trim();
+        if (!title || !principle) return [];
+        return [{
+            id: String(card.id || `imported-${index + 1}`),
+            title,
+            category: String(card.category || "综合创作"),
+            principle,
+            appliesTo: stringList(card.appliesTo),
+            checks: stringList(card.checks),
+            avoid: stringList(card.avoid),
+            sourceIds: stringList(card.sourceIds),
+            layer: normalizeKnowledgeLayer(card.layer),
+            status: normalizeKnowledgeStatus(card.status),
+            confidence: clampScore(card.confidence, 0.6),
+            authority: clampScore(card.authority, 0.65),
+            triggers: stringList(card.triggers),
+            evidenceSummary: typeof card.evidenceSummary === "string" ? card.evidenceSummary : undefined,
+            conflicts: stringList(card.conflicts),
+        }];
+    });
+}
+
+function normalizeStoryCases(cases: readonly unknown[]): CreativeStoryCase[] {
+    return cases.flatMap((value) => {
+        if (!value || typeof value !== "object" || Array.isArray(value)) return [];
+        const item = value as Record<string, unknown>;
+        const protagonist = item.protagonist && typeof item.protagonist === "object" && !Array.isArray(item.protagonist) ? (item.protagonist as Record<string, unknown>) : {};
+        const title = String(item.title || "").trim();
+        if (!title) return [];
+        return [{
+            id: String(item.id || title),
+            title,
+            category: String(item.category || "故事案例"),
+            format: String(item.format || "其他"),
+            genres: stringList(item.genres),
+            narrativePerspective: String(item.narrativePerspective || ""),
+            setting: String(item.setting || ""),
+            tone: String(item.tone || ""),
+            audiencePromise: String(item.audiencePromise || ""),
+            logline: String(item.logline || ""),
+            protagonist: {
+                identity: String(protagonist.identity || ""),
+                desire: String(protagonist.desire || ""),
+                obstacle: String(protagonist.obstacle || ""),
+                stakes: String(protagonist.stakes || ""),
+                change: String(protagonist.change || ""),
+            },
+            relationships: normalizeStoryCaseObjects(item.relationships, ["parties", "tension", "change"]) as CreativeStoryCase["relationships"],
+            storyEngine: String(item.storyEngine || ""),
+            coreConflict: String(item.coreConflict || ""),
+            firstThreeEpisodeHooks: normalizeStoryCaseObjects(item.firstThreeEpisodeHooks, ["episode", "opening", "escalation", "payoff", "cliffhanger"]).map((hook) => ({
+                episode: Number(hook.episode) || 0,
+                opening: String(hook.opening || ""),
+                escalation: String(hook.escalation || ""),
+                payoff: String(hook.payoff || ""),
+                cliffhanger: String(hook.cliffhanger || ""),
+            })),
+            sceneFunctions: stringList(item.sceneFunctions),
+            pacingCurve: stringList(item.pacingCurve),
+            reusablePatterns: stringList(item.reusablePatterns),
+            adaptationNotes: stringList(item.adaptationNotes),
+            marketEvidence: String(item.marketEvidence || ""),
+            doNotCopy: stringList(item.doNotCopy),
+            tags: stringList(item.tags),
+            status: normalizeKnowledgeStatus(item.status),
+            confidence: clampScore(item.confidence, 0.5),
+        }];
+    });
+}
+
+function normalizeStoryCaseObjects(value: unknown, keys: string[]) {
+    if (!Array.isArray(value)) return [];
+    return value.flatMap((item) => {
+        if (!item || typeof item !== "object" || Array.isArray(item)) return [];
+        const record = item as Record<string, unknown>;
+        return [Object.fromEntries(keys.map((key) => [key, record[key]]))];
+    });
+}
+
+function scoreKnowledgeCard(card: CreativeKnowledgeCard, query: string, mode: CanvasAgentCreativeMode) {
+    const queryTokens = tokenizeKnowledgeText(query);
+    const titleTokens = tokenizeKnowledgeText(`${card.title} ${card.category} ${card.triggers.join(" ")}`);
+    const bodyTokens = tokenizeKnowledgeText(`${card.principle} ${card.appliesTo.join(" ")} ${card.checks.join(" ")}`);
+    let score = overlapCount(queryTokens, titleTokens) * 2.4 + overlapCount(queryTokens, bodyTokens) * 0.8;
+    score += card.confidence * 1.4 + card.authority * 1.2;
+    if (card.layer === "private") score += 1.4;
+    if (card.status === "verified") score += 0.8;
+    if (mode === "short_drama" && /短剧|网感|故事|剧本|人物|台词/.test(`${card.category}${card.title}`)) score += 0.9;
+    if (/参考图|视觉|生图|资产|三视图|场景图|道具图/.test(query) && !/台词|对白|声口/.test(query) && card.category === "台词与对白") score -= 5;
+    if (/台词|对白|潜台词|声口/.test(query) && !/镜头|视觉|资产|参考图/.test(query) && /视听与分镜|AI视频生成/.test(card.category)) score -= 4;
+    if (!query && /质检|欲望|视觉一致性/.test(card.title)) score += 2;
+    return score;
+}
+
+function tokenizeKnowledgeText(value: string) {
+    const text = value.toLowerCase();
+    const tokens = new Set<string>();
+    for (const word of text.match(/[a-z0-9]{2,}/g) || []) tokens.add(word);
+    for (const segment of text.match(/[\u4e00-\u9fff]+/g) || []) {
+        if (segment.length <= 4) tokens.add(segment);
+        for (let index = 0; index < segment.length - 1; index += 1) tokens.add(segment.slice(index, index + 2));
+    }
+    return tokens;
+}
+
+function overlapCount(a: Set<string>, b: Set<string>) {
+    let count = 0;
+    a.forEach((token) => {
+        if (b.has(token)) count += 1;
+    });
+    return count;
+}
+
+function renderKnowledgeCard(card: CreativeKnowledgeCard, index: number) {
+    const source = card.sourceIds.length ? card.sourceIds.join("、") : "未标注来源";
+    return `${index + 1}. ${card.title}｜${card.category}｜${card.layer === "private" ? "私有验证层" : "公共专业层"}\n- 原则：${card.principle}\n- 适用：${card.appliesTo.join("；") || "当前创作与质检"}\n- 检查：${card.checks.join("；") || "是否真正改善当前成果"}\n- 禁忌：${card.avoid.join("；") || "机械套用"}\n- 可信度：${card.confidence.toFixed(2)}；来源：${source}`;
+}
+
+function renderStoryCase(item: CreativeStoryCase, index: number) {
+    const protagonist = [item.protagonist.identity, item.protagonist.desire && `欲望：${item.protagonist.desire}`, item.protagonist.obstacle && `阻碍：${item.protagonist.obstacle}`].filter(Boolean).join("；");
+    const hooks = item.firstThreeEpisodeHooks
+        .map((hook) => `第${hook.episode || "?"}集：${[hook.opening, hook.escalation, hook.payoff, hook.cliffhanger].filter(Boolean).join(" -> ")}`)
+        .join("；");
+    return `${index + 1}. ${item.title}｜${[item.category, item.format, ...item.genres].filter(Boolean).join("/")}\n- 叙事条件：${[item.narrativePerspective, item.setting, item.tone].filter(Boolean).join("；") || "未标注"}\n- 受众承诺：${item.audiencePromise || "未标注"}\n- 故事骨架：${item.logline || "未标注"}\n- 主角与冲突：${protagonist || item.coreConflict || "未标注"}\n- 故事发动机：${item.storyEngine || "未标注"}\n- 前三集结构：${hooks || "非分集来源或未标注"}\n- 可借鉴结构：${item.reusablePatterns.join("；") || "仅作同类题材比较"}\n- 短剧适配：${item.adaptationNotes.join("；") || "根据当前媒介重新判断"}\n- 市场证据：${item.marketEvidence || "未由用户提供，不得自行声称已验证"}\n- 禁止照搬：${item.doNotCopy.join("；") || "人物、设定、桥段和表达"}`;
+}
+
+function inferKnowledgeCategory(value: string) {
+    if (/AI|视频生成|提示词|参考图|首帧|尾帧/.test(value)) return "AI视频生成";
+    if (/台词|对白|潜台词|声口|口语/.test(value)) return "台词与对白";
+    if (/镜头|分镜|摄影|构图|色彩|光线|视觉/.test(value)) return "视听与分镜";
+    if (/导演|表演|调度|演员/.test(value)) return "导演与表演";
+    if (/剪辑|声音|音效|音乐/.test(value)) return "剪辑与声音";
+    if (/人物|角色|心理|欲望|关系/.test(value)) return "人物与心理";
+    if (/短剧|网感|爽点|钩子|留存/.test(value)) return "短剧与网感";
+    return "故事与剧本";
+}
+
+function splitKnowledgeList(value: string) {
+    return value.split(/[；、，？]/).map((item) => item.trim()).filter(Boolean);
+}
+
+function stringList(value: unknown) {
+    return Array.isArray(value) ? value.map((item) => String(item || "").trim()).filter(Boolean) : [];
+}
+
+function normalizeKnowledgeLayer(value: unknown): CreativeKnowledgeLayer {
+    return value === "project" || value === "public" || value === "model" ? value : "private";
+}
+
+function normalizeKnowledgeStatus(value: unknown): CreativeKnowledgeStatus {
+    return value === "verified" || value === "auto_verified" || value === "rejected" ? value : "candidate";
+}
+
+function clampScore(value: unknown, fallback: number) {
+    const score = Number(value);
+    return Number.isFinite(score) ? Math.max(0, Math.min(1, score)) : fallback;
+}
 
 export const CANVAS_AGENT_KNOWLEDGE_DISCLOSURE_CONTEXT = `知识库透明规则：
 - 你没有独立于系统提示、当前画布、用户附件和工具结果之外的长期学习库。不要声称已经完整阅读、观看或吸收某本书、某个视频合集，除非这些资料明确出现在上下文、画布节点、附件或项目资产中。
@@ -376,31 +705,39 @@ export const SHORT_DRAMA_AGENT_MODE_CONTEXT = `当前工作模式：精品 AI �
 - 对互相冲突的方法，标记适用边界，而不是混成一锅。
 - 每次创作都区分：IP长期常量、系列常量、单集变量。
 
-默认工作流：
-读取画布状态 -> 判断创作阶段 -> 隐性调用内置创作知识核心 -> 生成阶段成果 -> 二次质量审核 -> 必要时重写 -> 把新设定沉淀回对应总纲。
+默认协作协议：
+读取画布状态 -> 识别用户输入完成度和已确认材料 -> 更新公共黑板 -> 判断当前最小缺口 -> 只调用对应能力/agent -> 生成阶段成果 -> 审核并二次修正 -> 把确认后的常量沉淀回总纲/资产/分镜节点。
+流程可以跳转和回退，不强制从点子走到成片；线性流程只是“从零开始”的一种模式。知识库只在需要时隐性调用；展示方法卡时按需要创建，最多五张不是硬性打满。
 
 ${CREATIVE_AGENT_KNOWLEDGE_CONTEXT}`;
 
-export const SHORT_DRAMA_AGENT_PROMPT = `请切换为「精品 AI 短剧创作总监」模式，在当前画布上搭建一个可反复使用的短剧创作工作区。
+export const SHORT_DRAMA_AGENT_PROMPT = `请切换为「AI 视频/精品短剧创作总监」模式，在当前画布上搭建或更新一个可反复使用的创作工作区。这个工作区的最终目标不是泛泛写剧本，而是产出可生成 AI 视频的文字分镜提示词和配套资产图/参考图。
 
 术语先统一：旧说法里的「IP圣经 / 角色圣经 / 视觉圣经」不是宗教含义，而是影视创作里的 Bible，意思是长期设定总纲、创作规则手册。后续请优先使用「IP创作总纲」「角色总纲」「视觉总纲」这些更自然的中文说法。
 
-请先读取当前画布状态，然后按从左到右、从上到下的工作流创建或补充项目工作区节点，并用连线组织流程。如果已有同名节点，优先更新和补充，不要重复堆叠。内置创作知识核心是你创作时默认应用的能力，不要把它全部倒成知识节点；只有用户明确要求展示知识库时，才整理为可视化节点。
+请先读取当前画布状态，用 canvas_update_project_blackboard 建立或更新结构化「公共黑板」，再根据用户已经提供的材料决定当前阶段。不要把流程写死：如果用户没有点子，先做点子和故事；如果已有点子，直接扩展故事骨架；如果已有剧本，直接进入资产提取和分镜；如果已有资产，直接进入分镜、审核、预览或视频生成。参赛/活动需求不需要另起一个 agent，它是同一套 AI 视频创作链路中的约束模式：当用户提供活动文字、截图或链接时，先抽取硬性要求、评奖偏好、画幅、时长、交付格式、禁区和加分项，写入公共黑板的「活动约束」。
 
-需要建立这些模块：
-1. IP创作总纲：账号母题、审美气质、受众、价值边界、不可改变的常量。
-2. 创作知识核心：默认隐性应用已内置的高质量创作知识，覆盖网文/短剧叙事、结构人物、剧本场景、台词对白、导演视听、视觉剪辑声音、AI 视频生成、生产复盘；不要创建空知识库节点，除非用户要求展示。
-3. 系列设定总纲：世界观、核心关系、故事机制、系列内保持一致的设定。
-4. 角色总纲：人物欲望、伤口、关系张力、说话方式、视觉特征、禁止偏离项。
-5. 单集生产模板：选题、钩子、冲突升级、情绪转折、结尾余味。
-6. 剧本与分镜模板：分场目的、对白、动作、镜头、音效、剪辑节奏点。
-7. 视觉总纲：角色形象、场景、服装、光影、构图、封面风格、一致性规则。
-8. 资产提示词工作流：角色图、场景图、分镜图、视频提示词、封面提示词。
-9. 质检与复盘：是否偏离 IP、是否套路、人物动机是否薄、台词是否像 AI、视觉是否可执行、是否适合短视频前三秒。
+协作方式是「总控维护公共黑板，按需调度专门 agent」，不是多个模型各写各的，也不是每次都把所有 agent 叫出来。公共黑板要记录：用户已有输入、当前完成度、已确认常量、待确认问题、活动约束、故事骨架、前三集剧情、剧本版本、资产清单、参考图状态、文字分镜、审核意见、25宫格预览、视频生成批次和返工记录。
 
-每个节点都要包含：用途、固定常量、可变变量、输入、输出、质检问题、需要我补充的信息。
+需要建立或补充这些模块：
+1. 公共黑板/项目状态：记录目标、已有材料、当前阶段、下一步缺口、用户确认项。
+2. 用户输入完成度：判断当前输入属于点子、故事、剧本、资产、分镜、活动要求、成片返工中的哪一种。
+3. 活动约束：只在用户提供参赛/活动要求时建立，沉淀平台、主题、时长、画幅、提交物、审核禁区、评奖倾向。
+4. 点子/故事骨架：没有点子时产出候选点子，有点子时扩展世界观、人物关系、主角设定、故事主线和核心冲突。
+5. 前三集剧情：只做到能支撑前三集，不在早期膨胀成长篇设定；后续确认有效再扩展。
+6. 单集剧本：按 1-3 分钟目标控制长度，保证钩子、冲突升级、情绪转折和集尾余味。
+7. 资产清单/资产提示词：从剧本提取实际出现且影响一致性的角色、服装、场景、道具、标志物和特效元素。
+8. 角色资产：先生成参考图；用户满意后再做三视图，不满意则先改提示词或参考图。
+9. 场景/道具资产：生成多角度图，通常 4 个角度，最多 5 个角度，不为凑数滥做。
+10. 文字分镜：单集分段分镜，每段尽量不超过 15 秒；难以无缝拼接的动作、转场或情绪连续段，优先合并进一个 15 秒内镜头/段落。
+11. 分镜审核/二次分镜：检查上下文矛盾、空间错误、动机断裂、镜头不可生成、资产不一致、节奏过密/过松、平台审核风险，并给出修正后的分镜版本。
+12. 25宫格预览：只在文字分镜确认后用于人工检查节奏、构图和审核风险；预览图不反过来限制最终视频，最终视频仍以文字分镜和确认参考图为约束。
+13. 视频生成批次/返工记录：视频生成后诊断问题来自提示词、参考图、动作复杂度、镜头切分、审核风险还是模型限制，再给局部返工方案。
+14. 方法卡/知识库：默认隐性应用，不要把知识库整块倒出来；只有当前阶段真的缺方法支撑或用户要求展示时才创建方法卡，最多五张只是上限，不必打满。
 
-本轮不要直接调用图片、视频或音频生成，也不要马上写完整剧本；先把可用的创作系统和模板搭好。完成后，用简短文字告诉我下一步最该补充的 3 个信息。`;
+每个阶段节点都要包含：目的、触发条件、负责 agent、输入、输出、质量门槛、用户确认项、可跳转的下一步。
+
+首次搭建工作区时，除非用户已经明确要求生成资产、预览或视频，不要为了展示能力而调用图片、视频或音频生成；但如果画布状态已经进入资产、预览或视频阶段，就可以直接调用对应生成工具。完成后，用简短文字说明当前公共黑板判断出的阶段、下一步最该补的缺口，以及最多 3 个需要用户补充的信息。`;
 
 export function applyShortDramaAgentMode(prompt: string, mode: CanvasAgentCreativeMode) {
     const text = prompt.trim();
@@ -408,8 +745,8 @@ export function applyShortDramaAgentMode(prompt: string, mode: CanvasAgentCreati
     const shouldUseCreativeKnowledge = shouldUseCanvasCreativeKnowledge(text, mode);
     const context = [
         shouldDiscloseKnowledge ? CANVAS_AGENT_KNOWLEDGE_DISCLOSURE_CONTEXT : "",
-        shouldUseCreativeKnowledge && mode !== "short_drama" ? CREATIVE_AGENT_KNOWLEDGE_CONTEXT : "",
         mode === "short_drama" ? SHORT_DRAMA_AGENT_MODE_CONTEXT : "",
+        shouldUseCreativeKnowledge ? buildCreativeAgentKnowledgeContext(text, mode) : "",
     ]
         .filter(Boolean)
         .join("\n\n");

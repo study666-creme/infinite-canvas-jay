@@ -26,7 +26,7 @@ export function PromptHubAuthGate({ children }: { children: ReactNode }) {
     const setLocalUser = useUserStore((state) => state.setUser);
     const [email, setEmail] = useState(savedEmail);
     const [password, setPassword] = useState("");
-    const [state, setState] = useState<AuthState>(() => (usePromptHubStore.getState().session?.access_token ? "authenticated" : "checking"));
+    const [state, setState] = useState<AuthState>("checking");
     const [submitting, setSubmitting] = useState(false);
     const [error, setError] = useState("");
     const authTitle = "登录后使用画布";

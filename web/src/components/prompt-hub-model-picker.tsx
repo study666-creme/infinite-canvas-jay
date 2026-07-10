@@ -4,15 +4,20 @@ import { useEffect, useId, useMemo, useState } from "react";
 import { Cpu, Sparkles } from "lucide-react";
 
 import { Select, SelectContent, SelectItem, SelectTrigger } from "@/components/ui/select";
+import { CreditSymbol, resolveModelPricingRule, type ModelPricingRule } from "@/constant/credits";
 import { cn } from "@/lib/utils";
 import {
+    builtInPromptHubImageModels,
     isPromptHubModelValue,
+    mergePromptHubImageModels,
     parsePromptHubModelId,
     promptHubModelPickerLabel,
     toPromptHubModelValue,
 } from "@/services/prompt-hub-models";
+import { formatCredits, useRemoteModelPricingRules } from "@/services/model-pricing";
 import { usePromptHubStore } from "@/stores/use-prompt-hub-store";
 import { modelOptionLabel, modelOptionName, selectableModelsByCapability, type AiConfig } from "@/stores/use-config-store";
+import type { PromptHubImageModel } from "@/services/prompt-hub";
 
 type Props = {
     config: AiConfig;
@@ -29,17 +34,22 @@ export function PromptHubAwareImageModelPicker(props: Props) {
     const session = usePromptHubStore((s) => s.session);
     const imageModels = usePromptHubStore((s) => s.imageModels);
     const refreshGenerationAccount = usePromptHubStore((s) => s.refreshGenerationAccount);
+    const remotePricing = useRemoteModelPricingRules();
     const loggedIn = Boolean(session?.access_token);
+    const mergedImageModels = useMemo(
+        () => mergePromptHubImageModels(imageModels, builtInPromptHubImageModels(remotePricing)),
+        [imageModels, remotePricing],
+    );
 
     useEffect(() => {
         if (loggedIn) void refreshGenerationAccount();
     }, [loggedIn, refreshGenerationAccount]);
 
-    if (!loggedIn || !imageModels.length) {
+    if (!loggedIn || !mergedImageModels.length) {
         return <PlainImageModelPicker {...props} />;
     }
 
-    return <MergedImageModelPicker {...props} imageModels={imageModels} />;
+    return <MergedImageModelPicker {...props} imageModels={mergedImageModels} remotePricing={remotePricing} />;
 }
 
 function PlainImageModelPicker({ config, value, onChange, className, fullWidth, placeholder = "选择模型", onMissingConfig }: Props) {
@@ -70,7 +80,8 @@ function MergedImageModelPicker({
     placeholder = "选择模型",
     onMissingConfig,
     imageModels,
-}: Props & { imageModels: { id: string; label?: string }[] }) {
+    remotePricing,
+}: Props & { imageModels: PromptHubImageModel[]; remotePricing: ModelPricingRule[] }) {
     const localModels = useMemo(
         () => Array.from(new Set(selectableModelsByCapability(config, "image").filter(Boolean))),
         [config],
@@ -80,14 +91,16 @@ function MergedImageModelPicker({
             value: toPromptHubModelValue(m.id),
             label: promptHubModelPickerLabel(m.id, m.label),
             kind: "ph" as const,
+            credits: promptHubImageModelCredits(m, remotePricing),
         }));
         const local = localModels.map((model) => ({
             value: model,
             label: modelOptionLabel(config, model),
             kind: "local" as const,
+            credits: resolveModelPricingRule(remotePricing, model)?.credits,
         }));
         return [...ph, ...local];
-    }, [config, imageModels, localModels]);
+    }, [config, imageModels, localModels, remotePricing]);
 
     return (
         <BaseModelSelect
@@ -113,7 +126,7 @@ function BaseModelSelect({
     onMissingConfig,
     options,
 }: Props & {
-    options: { value: string; label: string; kind: "ph" | "local" }[];
+    options: { value: string; label: string; kind: "ph" | "local"; credits?: number }[];
 }) {
     const pickerId = useId();
     const [open, setOpen] = useState(false);
@@ -172,13 +185,15 @@ function BaseModelSelect({
                                     <div className="mt-1 border-t border-border/60 pt-1 px-2 py-1 text-[11px] font-medium text-stone-500">本地 / 第三方 API</div>
                                 ) : null}
                                 <SelectItem value={opt.value} textValue={opt.label}>
-                                    <span className="flex min-w-0 items-center gap-2">
-                                        {opt.kind === "ph" ? (
-                                            <Sparkles className="size-4 shrink-0 text-amber-500" />
-                                        ) : (
-                                            <ModelIcon model={opt.value} />
-                                        )}
-                                        <span className="truncate">{opt.label}</span>
+                                    <span className="flex min-w-0 items-center gap-2 pr-1">
+                                        {opt.kind === "ph" ? <Sparkles className="size-4 shrink-0 text-amber-500" /> : <ModelIcon model={opt.value} />}
+                                        <span className="min-w-0 flex-1 truncate">{opt.label}</span>
+                                        {typeof opt.credits === "number" ? (
+                                            <span className="inline-flex shrink-0 items-center gap-1 text-[11px] tabular-nums opacity-70">
+                                                <CreditSymbol className="size-3" />
+                                                {formatCredits(opt.credits)}
+                                            </span>
+                                        ) : null}
                                     </span>
                                 </SelectItem>
                             </div>
@@ -192,6 +207,12 @@ function BaseModelSelect({
             </SelectContent>
         </Select>
     );
+}
+
+function promptHubImageModelCredits(model: PromptHubImageModel, remotePricing: ModelPricingRule[]) {
+    const direct = Number(model.cost?.credits);
+    if (Number.isFinite(direct) && direct > 0) return direct;
+    return resolveModelPricingRule(remotePricing, model.id)?.credits;
 }
 
 function ModelIcon({ model }: { model: string }) {

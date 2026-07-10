@@ -6,7 +6,11 @@ import { fileURLToPath } from "node:url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const appRoot = path.resolve(__dirname, "..");
-const rawDir = path.join(appRoot, "knowledge", "creative", "raw");
+const rawDir = process.argv.includes("--cases")
+    ? path.join(appRoot, "knowledge", "creative", "cases", "raw")
+    : process.argv.includes("--videos")
+      ? path.join(appRoot, "knowledge", "creative", "videos")
+      : path.join(appRoot, "knowledge", "creative", "raw");
 
 await fs.mkdir(rawDir, { recursive: true });
 

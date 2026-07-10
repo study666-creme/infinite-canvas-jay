@@ -804,6 +804,7 @@ export async function fetchImageModels(config: Pick<AiConfig, "baseUrl" | "apiKe
         return (response.data.data || [])
             .map((model) => model.id)
             .filter((id): id is string => Boolean(id))
+            .filter((id) => !HIDDEN_MODEL_ALIASES.has(id.toLowerCase()))
             .sort((a, b) => a.localeCompare(b));
     } catch (error) {
         throw new Error(readAxiosError(error, "读取模型失败"));
@@ -821,3 +822,5 @@ const defaultGeminiConfig: Pick<AiConfig, "baseUrl" | "apiKey" | "apiFormat" | "
     model: "",
     systemPrompt: "",
 };
+
+const HIDDEN_MODEL_ALIASES = new Set(["dsv4pro", "glm5.1"]);

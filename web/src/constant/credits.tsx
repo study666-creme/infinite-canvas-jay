@@ -37,10 +37,12 @@ export function resolveModelPricingRule(rules: ModelPricingRule[] | undefined, m
     const modelKey = model.toLowerCase();
     const exact = rules.find((rule) => rule.model.toLowerCase() === modelKey || rule.model.toLowerCase() === modelName);
     if (exact) return exact;
-    return rules.find((rule) => {
-        const token = rule.model.toLowerCase();
-        return modelName.includes(token) || modelKey.includes(token);
-    }) || null;
+    return rules
+        .filter((rule) => {
+            const token = rule.model.toLowerCase();
+            return modelName.includes(token) || modelKey.includes(token);
+        })
+        .sort((a, b) => b.model.length - a.model.length)[0] || null;
 }
 
 export function requestCreditCost(options: {

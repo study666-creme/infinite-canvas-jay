@@ -8,6 +8,7 @@ import { ModelPicker } from "@/components/model-picker";
 import { PromptHubAwareImageModelPicker } from "@/components/prompt-hub-model-picker";
 import { defaultConfig, useConfigStore, useEffectiveConfig, type AiConfig } from "@/stores/use-config-store";
 import { CreditSymbol, requestCreditCost } from "@/constant/credits";
+import { useEffectiveModelPricing } from "@/services/model-pricing";
 import { canvasThemes } from "@/lib/canvas-theme";
 import { useThemeStore } from "@/stores/use-theme-store";
 import { normalizeJimengQualityValue } from "@/components/image-settings-panel";
@@ -32,10 +33,11 @@ export function CanvasConfigNodePanel({ node, isRunning, inputSummary, onConfigC
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const mode = node.metadata?.generationMode || "image";
     const config = buildNodeConfig(globalConfig, node, mode);
+    const modelPricing = useEffectiveModelPricing(config.modelPricing);
     const count = Math.max(1, Math.min(15, Math.floor(Math.abs(Number(config.count)) || 1)));
     const credits = requestCreditCost({
         channelMode: config.channelMode,
-        modelPricing: config.modelPricing,
+        modelPricing,
         model: config.model,
         count: mode === "image" ? count : 1,
         videoSeconds: mode === "video" ? config.videoSeconds : undefined,

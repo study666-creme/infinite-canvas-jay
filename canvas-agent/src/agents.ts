@@ -526,6 +526,7 @@ function stringOrNull(value: unknown) {
 }
 
 function toolName(name: string) {
+    if (name === "canvas_update_project_blackboard") return "更新项目黑板";
     if (name === "canvas_apply_ops") return "画布操作";
     if (name === "canvas_get_state") return "读取画布";
     if (name === "canvas_get_selection") return "读取选区";

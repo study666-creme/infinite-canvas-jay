@@ -20,6 +20,31 @@ export enum CanvasNodeType {
 export type CanvasNodeStatus = "idle" | "success" | "loading" | "error";
 export type CanvasGenerationMode = "text" | "image" | "video" | "audio";
 export type CanvasImageGenerationType = "generation" | "edit";
+export type CreativeProjectStage = "brief" | "story" | "episodes" | "script" | "assets" | "storyboard" | "review" | "preview" | "generation" | "rework";
+export type CreativeArtifactStatus = "missing" | "draft" | "review" | "approved" | "blocked";
+export type CreativeArtifactKind = "project_blackboard" | "activity_constraints" | "story" | "episodes" | "script" | "asset_manifest" | "character_assets" | "scene_assets" | "prop_assets" | "storyboard" | "storyboard_review" | "preview_grid" | "video_batch" | "rework_log";
+
+export type CreativeArtifactMetadata = {
+    kind: CreativeArtifactKind;
+    version: number;
+    status: CreativeArtifactStatus;
+    ownerAgent?: string;
+    userConfirmed?: boolean;
+    qualityGate?: string[];
+    updatedAt?: string;
+};
+
+export type CreativeProjectState = {
+    schemaVersion: 1;
+    currentStage: CreativeProjectStage;
+    completion: number;
+    confirmedConstants: string[];
+    activityConstraints: string[];
+    openQuestions: string[];
+    nextGap: string;
+    userConfirmed: boolean;
+    updatedAt: string;
+};
 
 export type CanvasNodeMetadata = {
     content?: string;
@@ -72,6 +97,14 @@ export type CanvasNodeMetadata = {
     videoProvider?: "openai" | "seedance" | "xai";
     generationProgress?: number;
     generationStage?: string;
+    creativeArtifact?: CreativeArtifactMetadata;
+    creativeProjectState?: CreativeProjectState;
+    directorStage?: {
+        shotId: string;
+        slot: number;
+        dramaticFunction?: string;
+        source?: "3d-director-stage";
+    };
 };
 
 export type CanvasNodeData = {

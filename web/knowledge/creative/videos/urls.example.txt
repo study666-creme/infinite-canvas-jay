@@ -1,0 +1,2 @@
+# 每行一个你有权处理的视频或播放列表 URL。
+# https://example.com/video

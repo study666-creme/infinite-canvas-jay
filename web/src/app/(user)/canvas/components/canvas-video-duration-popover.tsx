@@ -7,6 +7,7 @@ import { Check, Clock } from "lucide-react";
 import { CreditSymbol, durationOptionCreditCost } from "@/constant/credits";
 import { canvasVideoDurationOptions } from "@/lib/video-duration-options";
 import { videoSecondsLabel } from "@/components/video-settings-panel";
+import { useEffectiveModelPricing } from "@/services/model-pricing";
 import { canvasThemes } from "@/lib/canvas-theme";
 import { normalizeSeedanceDuration } from "@/lib/seedance-video";
 import { useThemeStore } from "@/stores/use-theme-store";
@@ -25,6 +26,7 @@ export function CanvasVideoDurationPopover({ config, onConfigChange }: Props) {
     const [buttonRect, setButtonRect] = useState<DOMRect | null>(null);
     const duration = String(normalizeSeedanceDuration(config.videoSeconds));
     const options = useMemo(() => canvasVideoDurationOptions(), []);
+    const modelPricing = useEffectiveModelPricing(config.modelPricing);
 
     useEffect(() => {
         if (!open) return;
@@ -53,6 +55,7 @@ export function CanvasVideoDurationPopover({ config, onConfigChange }: Props) {
                 panelRef={panelRef}
                 theme={theme}
                 config={config}
+                modelPricing={modelPricing}
                 duration={duration}
                 options={options}
                 onSelect={(value) => {
@@ -85,6 +88,7 @@ function DurationPortal({
     panelRef,
     theme,
     config,
+    modelPricing,
     duration,
     options,
     onSelect,
@@ -93,6 +97,7 @@ function DurationPortal({
     panelRef: RefObject<HTMLDivElement | null>;
     theme: (typeof canvasThemes)[keyof typeof canvasThemes];
     config: AiConfig;
+    modelPricing: AiConfig["modelPricing"];
     duration: string;
     options: Array<{ value: string; label: string }>;
     onSelect: (value: string) => void;
@@ -114,7 +119,7 @@ function DurationPortal({
         >
             {options.map((option) => {
                 const selected = duration === option.value;
-                const credits = durationOptionCreditCost(config.model, config.modelPricing, option.value);
+                const credits = durationOptionCreditCost(config.model, modelPricing, option.value);
                 return (
                     <button
                         key={option.value}

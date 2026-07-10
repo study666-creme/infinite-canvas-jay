@@ -2,9 +2,12 @@
 
 import { App, Button, Form, Input, Select } from "antd";
 import { ExternalLink, LogIn, LogOut, Save } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
+import { CreditSymbol, resolveModelPricingRule } from "@/constant/credits";
+import { formatCredits, useRemoteModelPricingRules } from "@/services/model-pricing";
 import { PROMPT_HUB_DEFAULTS } from "@/services/prompt-hub";
+import { builtInPromptHubImageModels, mergePromptHubImageModels } from "@/services/prompt-hub-models";
 import { usePromptHubStore } from "@/stores/use-prompt-hub-store";
 
 export function PromptHubSettingsPanel() {
@@ -22,11 +25,16 @@ export function PromptHubSettingsPanel() {
     const logout = usePromptHubStore((state) => state.logout);
     const verifySession = usePromptHubStore((state) => state.verifySession);
     const refreshGenerationAccount = usePromptHubStore((state) => state.refreshGenerationAccount);
+    const remotePricing = useRemoteModelPricingRules();
     const [password, setPassword] = useState("");
     const [loading, setLoading] = useState(false);
 
     const loggedIn = Boolean(session?.access_token);
     const displayEmail = session?.user?.email || email;
+    const mergedImageModels = useMemo(
+        () => mergePromptHubImageModels(imageModels, builtInPromptHubImageModels(remotePricing)),
+        [imageModels, remotePricing],
+    );
 
     useEffect(() => {
         if (loggedIn) void refreshGenerationAccount();
@@ -83,10 +91,26 @@ export function PromptHubSettingsPanel() {
                         <Form.Item label="卡藏生图模型" className="mb-4 md:col-span-2" extra="连接后画布图片生成优先使用此模型；积分从卡藏账户扣除。">
                             <Select
                                 value={imageModel}
-                                options={imageModels.map((m) => ({ value: m.id, label: m.label || m.id }))}
+                                options={mergedImageModels.map((m) => {
+                                    const credits = Number(m.cost?.credits) || resolveModelPricingRule(remotePricing, m.id)?.credits;
+                                    return {
+                                        value: m.id,
+                                        label: (
+                                            <span className="flex min-w-0 items-center gap-2">
+                                                <span className="min-w-0 flex-1 truncate">{m.label || m.id}</span>
+                                                {typeof credits === "number" && credits > 0 ? (
+                                                    <span className="inline-flex shrink-0 items-center gap-1 text-xs tabular-nums opacity-70">
+                                                        <CreditSymbol className="size-3" />
+                                                        {formatCredits(credits)}
+                                                    </span>
+                                                ) : null}
+                                            </span>
+                                        ),
+                                    };
+                                })}
                                 onChange={setImageModel}
-                                placeholder={imageModels.length ? "选择模型" : "加载模型列表…"}
-                                loading={!imageModels.length}
+                                placeholder={mergedImageModels.length ? "选择模型" : "加载模型列表…"}
+                                loading={!mergedImageModels.length}
                             />
                         </Form.Item>
                         <Form.Item label="卡藏积分余额" className="mb-4">

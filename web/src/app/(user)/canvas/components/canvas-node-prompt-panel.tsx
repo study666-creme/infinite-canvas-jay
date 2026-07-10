@@ -13,6 +13,8 @@ import { defaultConfig, useConfigStore, useEffectiveConfig, type AiConfig } from
 
 import { CreditSymbol, requestCreditCost } from "@/constant/credits";
 
+import { useEffectiveModelPricing } from "@/services/model-pricing";
+
 import { canvasThemes } from "@/lib/canvas-theme";
 
 import { useThemeStore } from "@/stores/use-theme-store";
@@ -66,10 +68,11 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
     const isTextEditMode = node.type === CanvasNodeType.Text && hasTextContent;
     const [prompt, setPrompt] = useState(isTextEditMode ? "" : node.metadata?.prompt || "");
     const promptInputRef = useRef<CanvasResourceMentionTextareaHandle>(null);
+    const modelPricing = useEffectiveModelPricing(config.modelPricing);
 
     const credits = requestCreditCost({
         channelMode: config.channelMode,
-        modelPricing: config.modelPricing,
+        modelPricing,
         model: config.model,
         count: mode === "image" ? config.count : 1,
         videoSeconds: mode === "video" ? config.videoSeconds : undefined,

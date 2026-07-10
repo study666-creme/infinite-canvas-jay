@@ -59,9 +59,11 @@ import { CANVAS_ASSET_DRAG_TYPE, parseAssetDragPayload, type InsertAssetPayload 
 import { CanvasZoomControls } from "../components/canvas-zoom-controls";
 import { CanvasShortcutsModal } from "../components/canvas-shortcuts-panel";
 import { CanvasLocalAgentPanel } from "../components/canvas-local-agent-panel";
+import { CanvasDirectorStage, type CanvasDirectorStageHandle } from "../components/canvas-director-stage";
 import { useCanvasAgentStore } from "../stores/use-canvas-agent-store";
 import { useCanvasStore, flushCanvasStore, subscribeCanvasPersistStatus } from "../stores/use-canvas-store";
 import { applyCanvasAgentOps, type CanvasAgentOp, type CanvasAgentSnapshot } from "../utils/canvas-agent-ops";
+import type { DirectorStageActionHandler, DirectorStageCapture } from "../utils/director-stage-types";
 import { buildCanvasResourceReferences, buildNodeMentionReferences } from "../utils/canvas-resource-references";
 import { getCanvasViewBounds, isConnectionInView, isNodeInView } from "../utils/canvas-viewport";
 import { screenPointToCanvasWorld } from "../utils/canvas-coordinates";
@@ -395,6 +397,7 @@ function InfiniteCanvasPage() {
     const projectMetaRef = useRef({ chatSessions, activeChatId, backgroundMode, showImageInfo });
     const projectLoadedRef = useRef(projectLoaded);
     const projectIdRef = useRef(projectId);
+    const directorStageRef = useRef<CanvasDirectorStageHandle>(null);
 
     const createHistoryEntry = useCallback(
         (): CanvasHistoryEntry => ({
@@ -535,7 +538,7 @@ function InfiniteCanvasPage() {
     useEffect(() => {
         if (!projectLoaded || !["new", "recent", "choose"].includes(searchParams.get("mode") || "")) return;
         if (searchParams.has("agentUrl")) {
-            setAgentMode("local");
+            openAgent("local");
             return;
         }
         openAgent("local");
@@ -1031,6 +1034,49 @@ function InfiniteCanvasPage() {
         () => ({ projectId, title: currentProject?.title || "未命名画布", nodes, connections, selectedNodeIds: Array.from(selectedNodeIds), viewport }),
         [connections, currentProject?.title, nodes, projectId, selectedNodeIds, viewport],
     );
+    const addDirectorStageCaptures = useCallback(
+        async (captures: DirectorStageCapture[]) => {
+            if (!captures.length) return [];
+            const images = await Promise.all(captures.map((capture) => uploadImage(capture.dataUrl)));
+            const currentNodes = nodesRef.current;
+            const center = getCanvasCenter();
+            const maxRight = currentNodes.length ? Math.max(...currentNodes.map((node) => node.position.x + node.width)) : center.x - 720;
+            const baseX = maxRight + 96;
+            const baseY = center.y - 220;
+            const width = 320;
+            const height = 180;
+            const gap = 34;
+            const columns = Math.min(4, captures.length);
+            const capturedNodes: CanvasNodeData[] = captures.map((capture, index) => ({
+                id: `director-shot-${capture.shotId}-${nanoid(6)}`,
+                type: CanvasNodeType.Image,
+                title: `分镜 ${String(capture.slot).padStart(2, "0")} · ${capture.title}`,
+                position: { x: baseX + (index % columns) * (width + gap), y: baseY + Math.floor(index / columns) * (height + 76) },
+                width,
+                height,
+                metadata: {
+                    ...imageMetadata(images[index]),
+                    prompt: capture.prompt,
+                    directorStage: { shotId: capture.shotId, slot: capture.slot, dramaticFunction: capture.title, source: "3d-director-stage" },
+                },
+            }));
+            const nextNodes = [...currentNodes, ...capturedNodes];
+            nodesRef.current = nextNodes;
+            setNodes(nextNodes);
+            const ids = capturedNodes.map((node) => node.id);
+            selectedNodeIdsRef.current = new Set(ids);
+            setSelectedNodeIds(new Set(ids));
+            setSelectedConnectionId(null);
+            setContextMenu(null);
+            return ids;
+        },
+        [getCanvasCenter],
+    );
+    const executeDirectorStageAction = useCallback<DirectorStageActionHandler>(async (name, input) => {
+        const stage = directorStageRef.current;
+        if (!stage) throw new Error("3D 导演台尚未就绪");
+        return stage.execute(name, input);
+    }, []);
     const applyAgentOps = useCallback(
         (ops?: CanvasAgentOp[]) => {
             const safeOps = Array.isArray(ops) ? ops.filter((op) => op?.type) : [];
@@ -3863,6 +3909,7 @@ function InfiniteCanvasPage() {
                     onOpenMyAssets={() => {
                         setAssetDrawerOpen((value) => !value);
                     }}
+                    onOpenDirectorStage={() => directorStageRef.current?.open()}
                 />
 
                 {isMiniMapOpen ? <Minimap nodes={nodes} viewport={viewport} viewportSize={size} onViewportChange={(next) => { viewportRef.current = next; setViewport(next); }} /> : null}
@@ -4070,7 +4117,8 @@ function InfiniteCanvasPage() {
                 </Modal>
 
                 <CanvasAssetDrawer open={assetDrawerOpen} onInsert={handleAssetInsert} onClose={() => setAssetDrawerOpen(false)} />
-                {codexCompactAgent && !assistantMounted ? <CanvasLocalAgentPanel headless snapshot={agentSnapshot} canUndoOps={Boolean(agentUndoSnapshot)} onApplyOps={applyAgentOps} onUndoOps={undoAgentOps} autoConnect={codexAutoConnect} /> : null}
+                <CanvasDirectorStage ref={directorStageRef} onCapture={addDirectorStageCaptures} />
+                {codexCompactAgent && !assistantMounted ? <CanvasLocalAgentPanel headless snapshot={agentSnapshot} canUndoOps={Boolean(agentUndoSnapshot)} onApplyOps={applyAgentOps} onUndoOps={undoAgentOps} onDirectorAction={executeDirectorStageAction} autoConnect={codexAutoConnect} /> : null}
             </section>
             {assistantMounted ? (
                 <CanvasAssistantPanel
@@ -4084,6 +4132,7 @@ function InfiniteCanvasPage() {
                     onApplyOps={applyAgentOps}
                     canUndoOps={Boolean(agentUndoSnapshot)}
                     onUndoOps={undoAgentOps}
+                    onDirectorAction={executeDirectorStageAction}
                     onPasteImage={pasteAssistantImage}
                     agentMode={agentMode}
                     onAgentModeChange={setAgentMode}
@@ -4145,6 +4194,11 @@ function CanvasTopBar({
     const theme = canvasThemes[colorTheme];
     const titleRef = useRef<HTMLDivElement>(null);
     const [shortcutsOpen, setShortcutsOpen] = useState(false);
+    const stopTopBarPointerEvent = (event: ReactPointerEvent<HTMLElement>) => event.stopPropagation();
+    const handleAgentButtonClick = (event: ReactMouseEvent<HTMLElement>) => {
+        event.stopPropagation();
+        onToggleAgent();
+    };
 
     useEffect(() => {
         if (!isTitleEditing) return;
@@ -4233,8 +4287,13 @@ function CanvasTopBar({
                         type="text"
                         className="!h-9 !w-9 !min-w-9 !rounded-xl !p-0 !font-medium sm:!h-10 sm:!w-auto sm:!px-3"
                         style={{ background: agentOpen ? theme.toolbar.activeBg : theme.toolbar.panel, color: theme.node.text, boxShadow: "0 10px 30px rgba(28,25,23,.10)" }}
+                        aria-label={agentOpen ? "收起 Agent 面板" : "打开 Agent 面板"}
+                        title={agentOpen ? "收起 Agent 面板" : "打开 Agent 面板"}
+                        data-testid="canvas-agent-toggle"
                         icon={<Bot className="size-4" />}
-                        onClick={onToggleAgent}
+                        onPointerDown={stopTopBarPointerEvent}
+                        onMouseDown={(event) => event.stopPropagation()}
+                        onClick={handleAgentButtonClick}
                     >
                         <span className="hidden sm:inline">Agent</span>
                     </Button>

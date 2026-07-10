@@ -48,12 +48,21 @@ export class CanvasSession {
         if (!isToolName(name)) throw new Error(`未知工具：${String(name)}`);
         let tool: ToolName = name;
         let input = parseToolInput(tool, rawInput) as Record<string, unknown>;
-        const readTool = ["canvas_get_state", "canvas_get_selection", "canvas_export_snapshot"].includes(tool);
+        const directorTool = tool.startsWith("canvas_director_");
+        const readTool = ["canvas_get_state", "canvas_get_selection", "canvas_export_snapshot", "canvas_director_get_state"].includes(tool);
         if (readTool && (!this.clients.size || !this.canvasState)) throw new Error("当前没有已连接画布");
         if (tool === "canvas_get_state" || tool === "canvas_export_snapshot") return compactCanvasState(this.canvasState);
         if (tool === "canvas_get_selection") {
             const ids = new Set(this.canvasState?.selectedNodeIds || []);
             return { nodes: (this.canvasState?.nodes || []).filter((node) => ids.has(node.id)).map(compactNode) };
+        }
+        if (directorTool) {
+            if (!this.clients.size) throw new Error("当前没有已连接画布");
+            return await this.requestCanvasTool(tool, input);
+        }
+        if (tool === "canvas_update_project_blackboard") {
+            input = { ops: projectBlackboardOps(input, this.canvasState) };
+            tool = "canvas_apply_ops";
         }
         if (tool === "canvas_create_node") {
             const data = input as { nodeType: CanvasNodeType; title?: string; x?: number; y?: number; width?: number; height?: number; metadata?: Record<string, unknown> };
@@ -226,6 +235,66 @@ function generationFlowOps(input: Record<string, unknown>, state: CanvasSnapshot
 
 function runGenerationOp(nodeId: string, mode: "text" | "image" | "video" | "audio", prompt?: string) {
     return { type: "run_generation", nodeId, mode, prompt };
+}
+
+function projectBlackboardOps(input: Record<string, unknown>, state: CanvasSnapshot | null) {
+    const existing = (state?.nodes || []).find((node) => node.title === "项目黑板" || objectRecord(node.metadata?.creativeArtifact).kind === "project_blackboard");
+    const stored = objectRecord(existing?.metadata?.creativeProjectState);
+    const currentStage = String(stored.currentStage || "brief");
+    const nextStage = String(input.currentStage || currentStage);
+    const next = {
+        schemaVersion: 1,
+        currentStage: nextStage,
+        completion: clampNumber(input.completion ?? stored.completion, 0, 100),
+        confirmedConstants: input.confirmedConstants === undefined ? stringArray(stored.confirmedConstants) : stringArray(input.confirmedConstants),
+        activityConstraints: input.activityConstraints === undefined ? stringArray(stored.activityConstraints) : stringArray(input.activityConstraints),
+        openQuestions: input.openQuestions === undefined ? stringArray(stored.openQuestions) : stringArray(input.openQuestions),
+        nextGap: String(input.nextGap ?? (nextStage !== currentStage ? defaultNextGap(nextStage) : stored.nextGap) ?? "").trim(),
+        userConfirmed: input.userConfirmed === undefined ? stored.userConfirmed === true : input.userConfirmed === true,
+        updatedAt: new Date().toISOString(),
+    };
+    const version = Math.max(1, Number(objectRecord(existing?.metadata?.creativeArtifact).version || 0) + 1);
+    const metadata = {
+        content: renderBlackboard(next),
+        status: "success",
+        fontSize: 14,
+        creativeProjectState: next,
+        creativeArtifact: { kind: "project_blackboard", version, status: next.userConfirmed ? "approved" : "draft", ownerAgent: "coordinator", userConfirmed: next.userConfirmed, qualityGate: ["阶段与现有画布成果一致", "活动硬约束已记录", "下一缺口明确"], updatedAt: next.updatedAt },
+    };
+    if (existing) return [{ type: "update_node", id: existing.id, patch: { title: "项目黑板" }, metadata }];
+    return [{ type: "add_node", id: `project-blackboard-${crypto.randomUUID()}`, nodeType: "text", title: "项目黑板", position: { x: nextCanvasX(state), y: 0 }, width: 420, height: 520, metadata }];
+}
+
+function renderBlackboard(state: Record<string, unknown>) {
+    return `当前阶段：${stageLabel(String(state.currentStage || "brief"))}\n完成度：${state.completion}%\n用户已确认：${state.userConfirmed ? "是" : "否"}\n\n活动约束：\n${listText(stringArray(state.activityConstraints))}\n\n已确认常量：\n${listText(stringArray(state.confirmedConstants))}\n\n待确认问题：\n${listText(stringArray(state.openQuestions))}\n\n下一缺口：\n${String(state.nextGap || "由总控根据当前成果判断")}\n\n更新时间：${String(state.updatedAt || "")}`;
+}
+
+function objectRecord(value: unknown): Record<string, unknown> {
+    return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
+}
+
+function stringArray(value: unknown) {
+    return Array.isArray(value) ? [...new Set(value.map((item) => String(item || "").trim()).filter(Boolean))].slice(0, 30) : [];
+}
+
+function clampNumber(value: unknown, min: number, max: number) {
+    const number = Number(value);
+    return Number.isFinite(number) ? Math.max(min, Math.min(max, Math.round(number))) : min;
+}
+
+function listText(items: string[]) {
+    return items.length ? items.map((item) => `- ${item}`).join("\n") : "- 暂无";
+}
+
+function stageLabel(stage: string) {
+    return ({ brief: "需求/活动约束", story: "故事骨架", episodes: "前三集剧情", script: "单集剧本", assets: "资产确立", storyboard: "文字分镜", review: "分镜审核", preview: "25宫格预览", generation: "视频生成", rework: "返工复盘" } as Record<string, string>)[stage] || stage;
+}
+
+function defaultNextGap(stage: string) {
+    const stages = ["brief", "story", "episodes", "script", "assets", "storyboard", "review", "preview", "generation", "rework"];
+    const index = stages.indexOf(stage);
+    const next = stages[Math.min(stages.length - 1, Math.max(0, index) + 1)];
+    return next === stage ? "检查当前生成结果并记录返工原因" : `推进到${stageLabel(next)}`;
 }
 
 function generationMode(value: unknown): "text" | "image" | "video" | "audio" {

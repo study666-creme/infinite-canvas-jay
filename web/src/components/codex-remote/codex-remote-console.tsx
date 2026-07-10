@@ -8,7 +8,8 @@ import { usePromptHubStore } from "@/stores/use-prompt-hub-store";
 
 type MessageRole = "user" | "assistant" | "tool" | "error" | "status";
 type MobileMessage = { id: string; role: MessageRole; title?: string; text: string; streamId?: string };
-type Settings = { agentUrl: string; token: string; canvasId: string; threadId: string; workspacePath: string; gitRepoPath: string; model: string; effort: string };
+type ReceiveMode = "full" | "text" | "final";
+type Settings = { agentUrl: string; token: string; canvasId: string; threadId: string; workspacePath: string; gitRepoPath: string; model: string; effort: string; receiveMode: ReceiveMode };
 type Workspace = { canvasId: string; workspaceId?: string; workspacePath: string; activeThreadId?: string; model?: string; effort?: string };
 type AgentEvent = { type?: string; item?: Record<string, unknown>; usage?: unknown; message?: string };
 type PendingRun = { threadId: string; canvasId: string; prompt: string; startedAt: number };
@@ -66,6 +67,7 @@ const defaultSettings: Settings = {
     gitRepoPath: "",
     model: "",
     effort: "",
+    receiveMode: "text",
 };
 const emptyProjectDraft: ProjectDraft = { label: "", canvasId: "", workspacePath: "", threadId: "", gitRepoPath: "" };
 
@@ -135,6 +137,7 @@ function sanitizeSettings(value: Partial<Settings>) {
     const next = { ...defaultSettings, ...value };
     if (normalizeLocalPathForCompare(next.workspacePath) === normalizeLocalPathForCompare(legacyDefaultWorkspacePath)) next.workspacePath = "";
     if (isCanvasWebUrl(next.agentUrl)) next.agentUrl = "";
+    if (!["full", "text", "final"].includes(next.receiveMode)) next.receiveMode = "text";
     return next;
 }
 
@@ -199,6 +202,28 @@ function withToken(base: string, path: string, token: string) {
 
 function normalizeText(value: unknown) {
     return typeof value === "string" ? value.trim() : value == null ? "" : JSON.stringify(value, null, 2);
+}
+
+function messagesForReceiveMode(items: MobileMessage[], mode: ReceiveMode) {
+    if (mode === "full") return items;
+    const textItems = items.filter((item) => item.role === "user" || item.role === "assistant" || item.role === "error");
+    if (mode === "text") return textItems;
+    const finalItems: MobileMessage[] = [];
+    let finalReply: MobileMessage | null = null;
+    const flushReply = () => {
+        if (finalReply) finalItems.push(finalReply);
+        finalReply = null;
+    };
+    textItems.forEach((item) => {
+        if (item.role === "user") {
+            flushReply();
+            finalItems.push(item);
+            return;
+        }
+        finalReply = item;
+    });
+    flushReply();
+    return finalItems;
 }
 
 function itemField(item: unknown, key: string) {
@@ -462,6 +487,7 @@ export function CodexRemoteConsole() {
     const [unlockError, setUnlockError] = useState("");
     const [demoNoticeOpen, setDemoNoticeOpen] = useState(false);
     const [runStatus, setRunStatus] = useState("");
+    const [syncPaused, setSyncPaused] = useState(false);
     const [unreadCount, setUnreadCount] = useState(0);
     const eventSourceRef = useRef<EventSource | null>(null);
     const pollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -469,7 +495,10 @@ export function CodexRemoteConsole() {
     const completionFallbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const autoSyncTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
     const autoSyncInFlightRef = useRef(false);
+    const autoSyncFailureCountRef = useRef(0);
     const lastAutoSyncAtRef = useRef(0);
+    const pollingRunKeyRef = useRef("");
+    const syncPausedRef = useRef(false);
     const pendingPromptRef = useRef("");
     const activeQueueTaskIdRef = useRef("");
     const queuedTasksRef = useRef<QueuedTask[]>([]);
@@ -576,6 +605,11 @@ export function CodexRemoteConsole() {
     }, [hydrated, settings]);
 
     useEffect(() => {
+        if (!hydrated) return;
+        setMessages((items) => messagesForReceiveMode(items, settings.receiveMode));
+    }, [hydrated, settings.receiveMode]);
+
+    useEffect(() => {
         if (hydrated) localStorage.setItem(activeProjectKey, activeProjectId);
     }, [activeProjectId, hydrated]);
 
@@ -615,6 +649,7 @@ export function CodexRemoteConsole() {
         if (!hydrated) return;
         const resume = (force = false) => {
             if (document.visibilityState === "hidden") return;
+            if (syncPausedRef.current) return;
             void autoSyncFromAgent(force ? "foreground" : "interval");
         };
         const handleFocus = () => resume(true);
@@ -623,7 +658,7 @@ export function CodexRemoteConsole() {
         window.addEventListener("online", handleFocus);
         document.addEventListener("visibilitychange", handleVisibility);
         resume(true);
-        autoSyncTimerRef.current = setInterval(() => resume(false), codexBusy || runStatus ? 5000 : 15000);
+        autoSyncTimerRef.current = setInterval(() => resume(false), codexBusy || runStatus ? 10000 : 30000);
         return () => {
             window.removeEventListener("focus", handleFocus);
             window.removeEventListener("online", handleFocus);
@@ -631,7 +666,7 @@ export function CodexRemoteConsole() {
             if (autoSyncTimerRef.current) clearInterval(autoSyncTimerRef.current);
             autoSyncTimerRef.current = null;
         };
-    }, [hydrated, activeThreadId, settings.agentUrl, settings.token, settings.canvasId, settings.threadId, codexBusy, runStatus]);
+    }, [hydrated, activeThreadId, settings.agentUrl, settings.token, settings.canvasId, settings.threadId, codexBusy, runStatus, syncPaused]);
 
     const setTemporaryStatus = (text: string, autoClear = false) => {
         setRunStatus(text);
@@ -671,9 +706,9 @@ export function CodexRemoteConsole() {
     }
 
     function stopThreadPoll() {
-        if (!pollTimerRef.current) return;
-        clearTimeout(pollTimerRef.current);
+        if (pollTimerRef.current) clearTimeout(pollTimerRef.current);
         pollTimerRef.current = null;
+        pollingRunKeyRef.current = "";
     }
 
     function stopCompletionFallback() {
@@ -682,7 +717,33 @@ export function CodexRemoteConsole() {
         completionFallbackTimerRef.current = null;
     }
 
+    function setSyncPause(paused: boolean) {
+        syncPausedRef.current = paused;
+        setSyncPaused(paused);
+    }
+
+    function stopBackgroundSync(message = "已停止手机端后台同步。") {
+        setSyncPause(true);
+        autoSyncFailureCountRef.current = 0;
+        pendingPromptRef.current = "";
+        threadSyncSeqRef.current += 1;
+        setSending(false);
+        setRemoteBusy(false);
+        clearPendingRun();
+        stopThreadPoll();
+        stopCompletionFallback();
+        eventSourceRef.current?.close();
+        eventSourceRef.current = null;
+        setConnected(false);
+        setConnecting(false);
+        setConnectionStatus("idle");
+        setConnectionMessage(message);
+        setTemporaryStatus("");
+        markActiveQueueTask("failed", message);
+    }
+
     function finishCurrentTurn(statusText = "本轮完成", autoClear = true) {
+        setSyncPause(false);
         pendingPromptRef.current = "";
         setSending(false);
         setRemoteBusy(false);
@@ -698,6 +759,7 @@ export function CodexRemoteConsole() {
         pendingPromptRef.current = "";
         setSending(false);
         setRemoteBusy(false);
+        clearPendingRun();
         stopThreadPoll();
         stopCompletionFallback();
         setTemporaryStatus("");
@@ -960,13 +1022,14 @@ export function CodexRemoteConsole() {
 
     function applyThreadMessages(items: MobileMessage[] | undefined, pendingPrompt = "", options: { requirePromptMatch?: boolean; forceScroll?: boolean } = {}) {
         if (!items?.length) return [];
-        if (pendingPrompt && options.requirePromptMatch && promptIndex(items, pendingPrompt) < 0) return items;
+        const visibleItems = messagesForReceiveMode(items, settingsRef.current.receiveMode);
+        if (pendingPrompt && options.requirePromptMatch && promptIndex(visibleItems, pendingPrompt) < 0) return visibleItems;
         if (options.forceScroll) {
             atBottomRef.current = true;
             setUnreadCount(0);
         }
-        setMessages(items);
-        return items;
+        setMessages(visibleItems);
+        return visibleItems;
     }
 
     function scheduleCompletionFallback() {
@@ -992,9 +1055,11 @@ export function CodexRemoteConsole() {
 
     async function autoSyncFromAgent(reason: "foreground" | "interval" | "offline" = "interval") {
         const currentSettings = settingsRef.current;
+        if (syncPausedRef.current) return;
         if (!currentSettings.agentUrl.trim() || !currentSettings.token.trim()) return;
         if (typeof document !== "undefined" && document.visibilityState === "hidden") return;
         if (autoSyncInFlightRef.current) return;
+        if (reason === "interval" && pollingRunKeyRef.current) return;
         const canvasId = normalizeCanvasId(currentSettings.canvasId);
         const pendingRun = readPendingRun(canvasId);
         const activeWork = Boolean(pendingRun || pendingPromptRef.current || codexBusy || runStatus || connectionStatus === "offline");
@@ -1005,7 +1070,13 @@ export function CodexRemoteConsole() {
         autoSyncInFlightRef.current = true;
         try {
             if (activeWork) setTemporaryStatus(pendingRun ? "正在自动同步后台执行结果..." : runStatus || "正在自动同步 Codex 状态...");
-            await connect({ quiet: true, silent: true, syncOnly: true });
+            const ok = await connect({ quiet: true, silent: true, syncOnly: true });
+            if (!ok) {
+                autoSyncFailureCountRef.current += 1;
+                if (autoSyncFailureCountRef.current >= 3) stopBackgroundSync("电脑 Agent 连续 3 次不可达，已停止自动同步。电脑端任务可能仍在运行。");
+                return;
+            }
+            autoSyncFailureCountRef.current = 0;
             await resumeThreadAfterInterruption();
         } finally {
             autoSyncInFlightRef.current = false;
@@ -1157,33 +1228,40 @@ export function CodexRemoteConsole() {
     };
 
     const pollThreadUntilReply = (threadId: string, canvasId: string, prompt: string) => {
+        const runKey = `${canvasId}:${threadId}:${prompt}`;
+        if (pollingRunKeyRef.current === runKey) return;
         stopThreadPoll();
+        pollingRunKeyRef.current = runKey;
         writePendingRun({ threadId, canvasId, prompt, startedAt: Date.now() });
+        if (settingsRef.current.receiveMode === "final" && eventSourceRef.current?.readyState === EventSource.OPEN) return;
         let attempts = 0;
+        let consecutiveFailures = 0;
         const tick = async () => {
+            if (syncPausedRef.current || pollingRunKeyRef.current !== runKey) return;
             attempts += 1;
             try {
                 const items = await refreshThreadMessages(threadId, canvasId, prompt);
+                consecutiveFailures = 0;
                 if (hasTurnCompletion(items, prompt)) {
                     finishCurrentTurn("本轮完成", true);
                     return;
                 }
             } catch (error) {
-                if (attempts >= 2) pushMessage({ id: createId(), role: "error", title: "刷新失败", text: error instanceof Error ? error.message : String(error) });
+                consecutiveFailures += 1;
+                if (consecutiveFailures >= 4) {
+                    stopBackgroundSync("电脑 Agent 连续 4 次不可达，已停止自动同步。电脑端任务可能仍在运行。");
+                    pushMessage({ id: createId(), role: "error", title: "同步已停止", text: error instanceof Error ? error.message : String(error) });
+                    return;
+                }
             }
             if (attempts >= 60) {
-                pendingPromptRef.current = "";
-                setSending(false);
-                clearPendingRun();
-                stopThreadPoll();
-                markActiveQueueTask("failed", "等待 Codex 返回超时");
-                setTemporaryStatus("");
-                pushMessage({ id: createId(), role: "status", text: "Codex 还没返回结果。回到页面或点右上角连接按钮，会继续同步当前会话记录。" });
+                stopBackgroundSync("等待 Codex 返回超时，已停止自动同步。电脑端任务可能仍在运行。");
                 return;
             }
-            pollTimerRef.current = setTimeout(tick, attempts < 4 ? 1500 : 3000);
+            const delay = settingsRef.current.receiveMode === "final" ? 15000 : attempts < 4 ? 2500 : 5000;
+            pollTimerRef.current = setTimeout(tick, delay);
         };
-        pollTimerRef.current = setTimeout(tick, 1200);
+        pollTimerRef.current = setTimeout(tick, settingsRef.current.receiveMode === "final" ? 10000 : 2000);
     };
 
     const resumeThreadAfterInterruption = async () => {
@@ -1250,6 +1328,7 @@ export function CodexRemoteConsole() {
             return;
         }
         if ((event.type === "item.updated" || event.type === "item.completed") && itemType === "agent_message") {
+            if (settingsRef.current.receiveMode === "final") return;
             const id = normalizeText(itemField(item, "id")) || createId();
             const text = normalizeText(itemField(item, "text"));
             if (text) {
@@ -1259,6 +1338,7 @@ export function CodexRemoteConsole() {
             return;
         }
         if (event.type === "item.started" || event.type === "item.completed") {
+            if (settingsRef.current.receiveMode !== "full") return;
             const tool = normalizeText(itemField(item, "tool"));
             if (tool || itemType === "commandExecution" || itemType === "fileChange") {
                 const id = normalizeText(itemField(item, "id")) || createId();
@@ -1271,7 +1351,10 @@ export function CodexRemoteConsole() {
     };
 
     const connect = async (options: { quiet?: boolean; silent?: boolean; syncOnly?: boolean } = {}) => {
-        eventSourceRef.current?.close();
+        if (!options.syncOnly) {
+            setSyncPause(false);
+            eventSourceRef.current?.close();
+        }
         if (!options.silent) {
             setConnecting(true);
             setConnected(false);
@@ -1328,6 +1411,7 @@ export function CodexRemoteConsole() {
                     });
                 }
             }
+            if (options.syncOnly) return true;
 
             const source = new EventSource(withToken(agentEndpoint, `/events?clientId=mobile-codex-${Date.now()}`, settingsRef.current.token));
             eventSourceRef.current = source;
@@ -1367,6 +1451,7 @@ export function CodexRemoteConsole() {
                 setConnecting(false);
                 setConnectionStatus("offline");
                 if (!options.silent) setConnectionMessage("实时通道断开；发送和同步仍会尝试通过 HTTP 继续");
+                if (pendingPromptRef.current && !syncPausedRef.current) window.setTimeout(() => void autoSyncFromAgent("offline"), 1500);
             };
             return true;
         } catch (error) {
@@ -1709,7 +1794,18 @@ export function CodexRemoteConsole() {
     return (
         <main className="flex h-full flex-col bg-[#f5f3ee] text-stone-950 dark:bg-[#070707] dark:text-stone-100">
             <header className="flex shrink-0 items-center justify-between gap-3 border-b border-black/10 bg-white/60 px-4 py-3 backdrop-blur-xl dark:border-white/10 dark:bg-white/[0.04]">
-                <button type="button" className="grid size-9 shrink-0 place-items-center rounded-xl text-stone-500 transition hover:bg-black/[0.04] hover:text-stone-950 dark:text-stone-400 dark:hover:bg-sky-400/10 dark:hover:text-sky-100" onClick={() => { setThreadsOpen(true); void refreshWorkspaceProjects(true); void refreshThreads(true); }} aria-label="打开侧边栏" title="打开侧边栏">
+                <button
+                    type="button"
+                    className="grid size-9 shrink-0 place-items-center rounded-xl text-stone-500 transition hover:bg-black/[0.04] hover:text-stone-950 dark:text-stone-400 dark:hover:bg-sky-400/10 dark:hover:text-sky-100"
+                    onPointerDown={(event) => event.stopPropagation()}
+                    onClick={(event) => {
+                        event.stopPropagation();
+                        setThreadsOpen(true);
+                        void refreshWorkspaceProjects(true);
+                    }}
+                    aria-label="打开侧边栏"
+                    title="打开侧边栏"
+                >
                     <Menu className="size-4" />
                 </button>
                 <div className="min-w-0 flex-1">
@@ -1723,13 +1819,13 @@ export function CodexRemoteConsole() {
                     </div>
                 </div>
                 <div className="flex shrink-0 items-center gap-1">
-                    <button type="button" className="grid size-9 place-items-center rounded-xl text-stone-500 transition hover:bg-black/[0.04] hover:text-stone-950 dark:text-stone-400 dark:hover:bg-sky-400/10 dark:hover:text-sky-100" onClick={() => setRequirementsOpen(true)} aria-label="需求索引" title="需求索引">
+                    <button type="button" className="grid size-9 place-items-center rounded-xl text-stone-500 transition hover:bg-black/[0.04] hover:text-stone-950 dark:text-stone-400 dark:hover:bg-sky-400/10 dark:hover:text-sky-100" onPointerDown={(event) => event.stopPropagation()} onClick={(event) => { event.stopPropagation(); setRequirementsOpen(true); }} aria-label="需求索引" title="需求索引">
                         <ListTodo className="size-4" />
                     </button>
-                    <button type="button" className="grid size-9 place-items-center rounded-xl text-stone-500 transition hover:bg-black/[0.04] hover:text-stone-950 dark:text-stone-400 dark:hover:bg-sky-400/10 dark:hover:text-sky-100" onClick={() => void connect()} aria-label="连接" title="连接">
+                    <button type="button" className="grid size-9 place-items-center rounded-xl text-stone-500 transition hover:bg-black/[0.04] hover:text-stone-950 dark:text-stone-400 dark:hover:bg-sky-400/10 dark:hover:text-sky-100" onPointerDown={(event) => event.stopPropagation()} onClick={(event) => { event.stopPropagation(); void connect(); }} aria-label="连接" title="连接">
                         {connecting ? <LoaderCircle className="size-4 animate-spin" /> : connected ? <CheckCircle2 className="size-4" /> : <PlugZap className="size-4" />}
                     </button>
-                    <button type="button" className="grid size-9 place-items-center rounded-xl text-stone-500 transition hover:bg-black/[0.04] hover:text-stone-950 dark:text-stone-400 dark:hover:bg-sky-400/10 dark:hover:text-sky-100" onClick={() => setSettingsOpen(true)} aria-label="配置" title="配置">
+                    <button type="button" className="grid size-9 place-items-center rounded-xl text-stone-500 transition hover:bg-black/[0.04] hover:text-stone-950 dark:text-stone-400 dark:hover:bg-sky-400/10 dark:hover:text-sky-100" onPointerDown={(event) => event.stopPropagation()} onClick={(event) => { event.stopPropagation(); setSettingsOpen(true); }} aria-label="配置" title="配置">
                         <Settings2 className="size-4" />
                     </button>
                 </div>
@@ -1865,11 +1961,18 @@ export function CodexRemoteConsole() {
                                 {codexBusy || runStatus ? <LoaderCircle className="size-4 shrink-0 animate-spin text-sky-500" /> : <ListTodo className="size-4 shrink-0 text-stone-500 dark:text-stone-300" />}
                                 <span className="truncate">{codexBusy || runStatus ? runStatus || (remoteBusy && !sending ? "当前会话运行中" : "Codex 后台执行中") : pendingGuides.length ? `${pendingGuides.length} 条待引导` : activeQueueCount ? `${activeQueueCount} 条任务排队中` : "任务队列"}</span>
                             </div>
-                            {queuedTasks.some((task) => task.status === "done" || task.status === "failed") ? (
-                                <button type="button" className="shrink-0 text-xs font-medium text-stone-500 transition hover:text-stone-950 dark:text-stone-400 dark:hover:text-stone-100" onClick={clearFinishedQueue}>
-                                    清理
-                                </button>
-                            ) : null}
+                            <div className="flex shrink-0 items-center gap-2">
+                                {codexBusy || runStatus ? (
+                                    <button type="button" className="rounded-full border border-red-500/20 bg-red-500/10 px-2.5 py-1 text-xs font-semibold text-red-700 transition hover:bg-red-500/15 active:scale-95 dark:text-red-200" onClick={() => stopBackgroundSync()} title="只停止手机端同步，不会强行终止电脑上的 Codex 任务">
+                                        停止同步
+                                    </button>
+                                ) : null}
+                                {queuedTasks.some((task) => task.status === "done" || task.status === "failed") ? (
+                                    <button type="button" className="text-xs font-medium text-stone-500 transition hover:text-stone-950 dark:text-stone-400 dark:hover:text-stone-100" onClick={clearFinishedQueue}>
+                                        清理
+                                    </button>
+                                ) : null}
+                            </div>
                         </div>
 
                         {pendingGuides.length ? (
@@ -2215,7 +2318,7 @@ export function CodexRemoteConsole() {
                                                         );
                                                     })}
 
-                                                    {!threads.length ? <div className="rounded-xl bg-black/[0.04] px-3 py-3 text-xs leading-5 text-stone-500 dark:bg-white/[0.05] dark:text-stone-400">连接或刷新后，会列出这个项目 workspace 下的其他 Codex 会话。</div> : null}
+                                                    {!projectThreadGroups.length ? <div className="rounded-xl bg-black/[0.04] px-3 py-3 text-xs leading-5 text-stone-500 dark:bg-white/[0.05] dark:text-stone-400">连接或刷新后，会列出这个项目 workspace 下的其他 Codex 会话。</div> : null}
                                                 </div>
                                             ) : null}
                                         </div>
@@ -2287,6 +2390,29 @@ export function CodexRemoteConsole() {
                             <p className="rounded-2xl border border-sky-500/15 bg-sky-500/10 px-3 py-2 text-xs leading-5 text-sky-800 dark:text-sky-100">
                                 只填上面两项即可。连接成功后会自动列出电脑上的项目，点项目就能进入对应 Codex 会话。
                             </p>
+
+                            <div className="rounded-2xl border border-black/10 bg-white/60 p-3 dark:border-white/10 dark:bg-white/[0.05]">
+                                <div className="text-sm font-medium">接收内容</div>
+                                <div className="mt-3 grid grid-cols-3 gap-1 rounded-xl bg-black/[0.05] p-1 dark:bg-black/30">
+                                    {([
+                                        ["full", "完整"],
+                                        ["text", "仅文字"],
+                                        ["final", "仅最终"],
+                                    ] as const).map(([value, label]) => (
+                                        <button
+                                            key={value}
+                                            type="button"
+                                            className={`h-9 rounded-lg text-xs font-semibold transition ${settings.receiveMode === value ? "bg-white text-stone-950 shadow-sm dark:bg-white/15 dark:text-white" : "text-stone-500 hover:text-stone-950 dark:text-stone-400 dark:hover:text-white"}`}
+                                            onClick={() => updateSettings({ receiveMode: value })}
+                                        >
+                                            {label}
+                                        </button>
+                                    ))}
+                                </div>
+                                <p className="mt-2 text-xs leading-5 text-stone-500 dark:text-stone-400">
+                                    {settings.receiveMode === "full" ? "显示回复、命令、文件变更和工具过程。" : settings.receiveMode === "text" ? "只显示 Codex 文字回复，隐藏命令和工具过程。" : "运行时只显示状态，完成后同步每轮最后一条回复。"}
+                                </p>
+                            </div>
 
                             <details className="rounded-2xl border border-black/10 bg-white/60 p-3 text-sm dark:border-white/10 dark:bg-white/[0.05]">
                                 <summary className="cursor-pointer select-none font-medium">高级：手动指定会话 / 模型</summary>

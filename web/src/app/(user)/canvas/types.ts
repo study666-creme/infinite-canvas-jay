@@ -23,6 +23,10 @@ export type CanvasImageGenerationType = "generation" | "edit";
 export type CreativeProjectStage = "brief" | "story" | "episodes" | "script" | "assets" | "storyboard" | "review" | "preview" | "generation" | "rework";
 export type CreativeArtifactStatus = "missing" | "draft" | "review" | "approved" | "blocked";
 export type CreativeArtifactKind = "project_blackboard" | "activity_constraints" | "story" | "episodes" | "script" | "asset_manifest" | "character_assets" | "scene_assets" | "prop_assets" | "storyboard" | "storyboard_review" | "preview_grid" | "video_batch" | "rework_log";
+export type CreativeProjectMode = "standard" | "activity";
+export type CreativeProductionType = "unspecified" | "series" | "short_film";
+export type CreativeActionKind = "clarify" | "choose" | "create" | "review" | "revise" | "generate" | "ready";
+export type CreativeActionStatus = "suggested" | "awaiting_user_confirmation" | "approved" | "rejected" | "executed";
 
 export type CreativeArtifactMetadata = {
     kind: CreativeArtifactKind;
@@ -34,14 +38,44 @@ export type CreativeArtifactMetadata = {
     updatedAt?: string;
 };
 
+export type CreativeArtifactRecord = CreativeArtifactMetadata & {
+    id: string;
+    nodeId?: string;
+    title: string;
+    contentFingerprint?: string;
+    source: "declared" | "node_metadata" | "title_inference";
+};
+
+export type CreativeProjectAction = {
+    id: string;
+    kind: CreativeActionKind;
+    status: CreativeActionStatus;
+    stage: CreativeProjectStage;
+    label: string;
+    reason: string;
+    ownerAgents: string[];
+    targetArtifactKinds: CreativeArtifactKind[];
+    proposedAt: string;
+    decidedAt?: string;
+};
+
 export type CreativeProjectState = {
-    schemaVersion: 1;
+    schemaVersion: 2;
+    mode: CreativeProjectMode;
+    productionType: CreativeProductionType;
     currentStage: CreativeProjectStage;
     completion: number;
+    targetDeliverables: CreativeArtifactKind[];
+    artifacts: CreativeArtifactRecord[];
     confirmedConstants: string[];
     activityConstraints: string[];
     openQuestions: string[];
     nextGap: string;
+    recommendedAction: CreativeProjectAction;
+    pendingAction?: CreativeProjectAction;
+    lastConfirmedActionId?: string;
+    awaitingUserConfirmation: boolean;
+    /** @deprecated Use awaitingUserConfirmation and artifact-level approval. */
     userConfirmed: boolean;
     updatedAt: string;
 };
@@ -104,6 +138,7 @@ export type CanvasNodeMetadata = {
         slot: number;
         dramaticFunction?: string;
         source?: "3d-director-stage";
+        batchId?: string;
     };
 };
 

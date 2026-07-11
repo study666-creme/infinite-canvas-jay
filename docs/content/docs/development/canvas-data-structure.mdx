@@ -35,10 +35,15 @@ type CanvasProject = {
   backgroundMode: "lines" | "dots" | "blank";
   showImageInfo: boolean;
   viewport: { x: number; y: number; k: number };
+  creativeProjectState: CreativeProjectState;
 };
 ```
 
 项目列表和项目详情目前仍保存在同一个持久化对象中。项目、节点和聊天大量增长后会拖慢 `/canvas` 首屏，后续应拆分索引与详情。
+
+`creativeProjectState` v2 是创作状态的主记录，保存 `productionType`、目标产物、产物版本和确认状态、活动约束、建议动作及待确认动作。`productionType` 可为 `series`（分集 AI 短剧）、`short_film`（单片 AI 短片）或 `unspecified`；活动/参赛仍由独立的 `mode` 与 `activityConstraints` 表达。画布中的“项目黑板”节点只单向镜像该状态，便于人和 Agent 共同查看；旧项目只有在顶层字段缺失时才从黑板迁移。项目导入导出、撤销和两类 Agent 快照都携带该字段。
+
+实质创作操作与纯布局操作分开判定。创建/删除节点、内容或标题变化、生成、连线与引用变化、未知元数据变化均需用户确认；视口、选区和明确的纯几何/运行状态更新可以由“全部确认”开关控制。页面刷新后不可恢复的待确认工具上下文会标记过期并要求重新提案。
 
 ## 节点结构
 
@@ -61,7 +66,7 @@ type CanvasNodeData = {
 - 图片批次与节点组：`batchRootId`、`batchChildIds`、`primaryImageId`、`groupRootId`、`groupMemberIds`。
 - 视频：`videoTaskId`、`videoProvider`、`seconds`、`vquality`、`generateAudio`、`watermark`。
 - 创作状态：`creativeArtifact`、`creativeProjectState`。
-- 导演台截图：`directorStage.shotId`、`slot`、`dramaticFunction`。
+- 导演台截图：`directorStage.shotId`、`slot`、`dramaticFunction`、`batchId`；同时带 `creativeArtifact.kind = preview_grid`。
 
 ## 媒体写入
 

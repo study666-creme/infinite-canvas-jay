@@ -1,7 +1,7 @@
 import { nanoid } from "nanoid";
 
 import { getNodeSpec } from "../constants";
-import { CanvasNodeType, type CanvasConnection, type CanvasNodeData, type CanvasNodeMetadata, type ViewportTransform } from "../types";
+import { CanvasNodeType, type CanvasConnection, type CanvasNodeData, type CanvasNodeMetadata, type CreativeProjectState, type ViewportTransform } from "../types";
 
 export type CanvasAgentOp =
     | { type: "add_node"; id?: string; nodeType?: CanvasNodeType; title?: string; position?: { x: number; y: number }; x?: number; y?: number; width?: number; height?: number; metadata?: CanvasNodeMetadata }
@@ -20,6 +20,7 @@ export type CanvasAgentSnapshot = {
     connections: CanvasConnection[];
     selectedNodeIds: string[];
     viewport: ViewportTransform;
+    creativeProjectState?: CreativeProjectState;
 };
 
 export function summarizeCanvasAgentOps(ops?: CanvasAgentOp[]) {

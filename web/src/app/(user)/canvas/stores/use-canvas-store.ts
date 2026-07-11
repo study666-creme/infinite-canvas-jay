@@ -6,7 +6,8 @@ import { localForageStorage } from "@/lib/localforage-storage";
 import { accountScopedStorageKey, currentPromptHubStorageKey, promptHubStorageUserKey } from "@/lib/prompt-hub-auth";
 import type { PromptHubSession } from "@/services/prompt-hub";
 import type { CanvasBackgroundMode } from "@/lib/canvas-theme";
-import type { CanvasAssistantSession, CanvasConnection, CanvasNodeData, ViewportTransform } from "../types";
+import type { CanvasAssistantSession, CanvasConnection, CanvasNodeData, CreativeProjectState, ViewportTransform } from "../types";
+import { createInitialCreativeProjectState, deriveCreativeProjectState } from "../utils/creative-project-state";
 
 export type CanvasProject = {
     id: string;
@@ -20,6 +21,7 @@ export type CanvasProject = {
     backgroundMode: CanvasBackgroundMode;
     showImageInfo: boolean;
     viewport: ViewportTransform;
+    creativeProjectState: CreativeProjectState;
 };
 
 type CanvasStore = {
@@ -31,7 +33,7 @@ type CanvasStore = {
     renameProject: (id: string, title: string) => void;
     deleteProjects: (ids: string[]) => void;
     replaceProjects: (projects: CanvasProject[]) => void;
-    updateProject: (id: string, patch: Partial<Pick<CanvasProject, "nodes" | "connections" | "chatSessions" | "activeChatId" | "backgroundMode" | "showImageInfo" | "viewport">>) => void;
+    updateProject: (id: string, patch: Partial<Pick<CanvasProject, "nodes" | "connections" | "chatSessions" | "activeChatId" | "backgroundMode" | "showImageInfo" | "viewport" | "creativeProjectState">>) => void;
 };
 
 const initialViewport: ViewportTransform = { x: 0, y: 0, k: 1 };
@@ -53,7 +55,8 @@ function normalizeCanvasProjectTitle(title: string) {
 function normalizeCanvasProjects(projects: CanvasProject[]) {
     return projects.map((project) => {
         const title = normalizeCanvasProjectTitle(project.title);
-        return title === project.title ? project : { ...project, title };
+        const creativeProjectState = deriveCreativeProjectState(project.nodes || [], project.creativeProjectState);
+        return { ...project, title, creativeProjectState };
     });
 }
 
@@ -167,6 +170,7 @@ export const useCanvasStore = create<CanvasStore>()(
                     backgroundMode: "lines",
                     showImageInfo: false,
                     viewport: initialViewport,
+                    creativeProjectState: createInitialCreativeProjectState(),
                 };
                 set((state) => ({ projects: [project, ...state.projects] }));
                 return id;
@@ -185,6 +189,7 @@ export const useCanvasStore = create<CanvasStore>()(
                     backgroundMode: source.backgroundMode || "lines",
                     showImageInfo: source.showImageInfo || false,
                     viewport: source.viewport || initialViewport,
+                    creativeProjectState: deriveCreativeProjectState(source.nodes || [], source.creativeProjectState),
                 };
                 set((state) => ({ projects: [project, ...state.projects] }));
                 return project.id;
@@ -201,7 +206,7 @@ export const useCanvasStore = create<CanvasStore>()(
                     const projects = state.projects.filter((project) => !ids.includes(project.id));
                     return { projects };
                 }),
-            replaceProjects: (projects) => set({ projects }),
+            replaceProjects: (projects) => set({ projects: normalizeCanvasProjects(projects) }),
             updateProject: (id, patch) =>
                 set((state) => ({
                     projects: state.projects.map((project) => (project.id === id ? { ...project, ...patch, updatedAt: new Date().toISOString() } : project)),

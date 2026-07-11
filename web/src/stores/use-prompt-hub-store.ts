@@ -8,6 +8,7 @@ import {
     checkPromptHubStatus,
     getValidPromptHubSession,
     loginPromptHub,
+    type PromptHubCatalogModel,
     type PromptHubImageModel,
     type PromptHubSession,
 } from "@/services/prompt-hub";
@@ -20,6 +21,7 @@ type PromptHubStore = {
     credits: number | null;
     imageModel: string;
     imageModels: PromptHubImageModel[];
+    models: PromptHubCatalogModel[];
     setApiBase: (apiBase: string) => void;
     setEmail: (email: string) => void;
     setSession: (session: PromptHubSession | null) => void;
@@ -30,6 +32,8 @@ type PromptHubStore = {
     verifySession: () => Promise<boolean>;
     refreshGenerationAccount: () => Promise<void>;
 };
+
+let generationAccountRefresh: Promise<void> | null = null;
 
 function normalizePromptHubApiBase(value: string) {
     const fallback = PROMPT_HUB_DEFAULTS.apiBase;
@@ -63,12 +67,13 @@ export const usePromptHubStore = create<PromptHubStore>()(
             session: null,
             email: "",
             credits: null,
-            imageModel: "gpt-image-2",
+            imageModel: "image2",
             imageModels: [],
+            models: [],
             setApiBase: (apiBase) => set({ apiBase: apiBase.trim() || PROMPT_HUB_DEFAULTS.apiBase }),
             setEmail: (email) => set({ email }),
             setSession: (session) => set({ session }),
-            setImageModel: (imageModel) => set({ imageModel: imageModel.trim() || "gpt-image-2" }),
+            setImageModel: (imageModel) => set({ imageModel: imageModel.trim() || "image2" }),
             login: async (email, password) => {
                 const configuredApiBase = normalizePromptHubApiBase(get().apiBase);
                 let activeApiBase = configuredApiBase;
@@ -84,13 +89,13 @@ export const usePromptHubStore = create<PromptHubStore>()(
                 await get().refreshGenerationAccount();
                 return session;
             },
-            logout: () => set({ session: null, credits: null, imageModels: [] }),
+            logout: () => set({ session: null, credits: null, imageModels: [], models: [] }),
             getSession: async () => {
                 const { session, apiBase } = get();
                 if (!session?.access_token) return null;
                 const next = await getValidPromptHubSession(session, { apiBase });
                 if (!next) {
-                    set({ session: null, credits: null, imageModels: [] });
+                    set({ session: null, credits: null, imageModels: [], models: [] });
                     return null;
                 }
                 if (next.access_token !== session.access_token) set({ session: next });
@@ -103,25 +108,32 @@ export const usePromptHubStore = create<PromptHubStore>()(
                     await checkPromptHubStatus(session, { apiBase: get().apiBase });
                     return true;
                 } catch {
-                    set({ session: null, credits: null, imageModels: [] });
+                    set({ session: null, credits: null, imageModels: [], models: [] });
                     return false;
                 }
             },
             refreshGenerationAccount: async () => {
-                const session = await get().getSession();
-                if (!session) return;
-                try {
-                    const account = await loadPromptHubGenerationAccount(session, { apiBase: get().apiBase });
-                    const current = get().imageModel;
-                    const hasCurrent = account.models.some((m) => m.id === current);
-                    set({
-                        credits: account.credits,
-                        imageModels: account.models,
-                        imageModel: hasCurrent ? current : account.defaultModel,
-                    });
-                } catch {
-                    /* ignore */
-                }
+                if (generationAccountRefresh) return generationAccountRefresh;
+                generationAccountRefresh = (async () => {
+                    const session = await get().getSession();
+                    if (!session) return;
+                    try {
+                        const account = await loadPromptHubGenerationAccount(session, { apiBase: get().apiBase });
+                        const current = get().imageModel;
+                        const hasCurrent = account.models.some((m) => m.id === current);
+                        set({
+                            credits: account.credits,
+                            imageModels: account.models,
+                            models: account.catalogModels,
+                            imageModel: hasCurrent ? current : account.defaultModel,
+                        });
+                    } catch {
+                        /* ignore */
+                    }
+                })().finally(() => {
+                    generationAccountRefresh = null;
+                });
+                return generationAccountRefresh;
             },
         }),
         {

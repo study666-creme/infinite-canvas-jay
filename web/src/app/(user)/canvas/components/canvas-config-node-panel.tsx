@@ -4,11 +4,12 @@ import type { CSSProperties } from "react";
 import { Image as ImageIcon, LoaderCircle, MessageSquare, Music2, Play, Settings2, Video } from "lucide-react";
 import { Button, Segmented } from "antd";
 
-import { ModelPicker } from "@/components/model-picker";
-import { PromptHubAwareImageModelPicker } from "@/components/prompt-hub-model-picker";
+import { PromptHubAwareImageModelPicker, PromptHubAwareModelPicker } from "@/components/prompt-hub-model-picker";
 import { defaultConfig, useConfigStore, useEffectiveConfig, type AiConfig } from "@/stores/use-config-store";
 import { CreditSymbol, requestCreditCost } from "@/constant/credits";
 import { useEffectiveModelPricing } from "@/services/model-pricing";
+import { parsePromptHubModelId, promptHubCatalogCredits, promptHubImageCredits } from "@/services/prompt-hub-models";
+import { usePromptHubStore } from "@/stores/use-prompt-hub-store";
 import { canvasThemes } from "@/lib/canvas-theme";
 import { useThemeStore } from "@/stores/use-theme-store";
 import { normalizeJimengQualityValue } from "@/components/image-settings-panel";
@@ -35,13 +36,29 @@ export function CanvasConfigNodePanel({ node, isRunning, inputSummary, onConfigC
     const config = buildNodeConfig(globalConfig, node, mode);
     const modelPricing = useEffectiveModelPricing(config.modelPricing);
     const count = Math.max(1, Math.min(15, Math.floor(Math.abs(Number(config.count)) || 1)));
-    const credits = requestCreditCost({
+    const promptHubModels = usePromptHubStore((state) => state.imageModels);
+    const promptHubCatalog = usePromptHubStore((state) => state.models);
+    const promptHubModelId = parsePromptHubModelId(config.model);
+    const promptHubModel = promptHubModelId ? promptHubModels.find((model) => model.id === promptHubModelId) : null;
+    const promptHubCatalogModel = promptHubModelId ? promptHubCatalog.find((model) => model.id === promptHubModelId) : null;
+    const promptHubCredits = promptHubImageCredits(promptHubModel, normalizeJimengQualityValue(config.quality));
+    const estimatedCredits = requestCreditCost({
         channelMode: config.channelMode,
         modelPricing,
         model: config.model,
         count: mode === "image" ? count : 1,
         videoSeconds: mode === "video" ? config.videoSeconds : undefined,
+        quality: config.quality,
+        resolution: config.quality,
     });
+    const catalogCredits = promptHubCatalogCredits(promptHubCatalogModel, {
+        duration: config.videoSeconds,
+        resolution: normalizeVideoResolutionLabel(config.vquality),
+        quality: config.quality,
+        count,
+    });
+    const credits = promptHubCredits != null && mode === "image" ? promptHubCredits * count : catalogCredits ?? estimatedCredits;
+    const isMeteredPricing = promptHubCatalogModel?.pricing?.mode === "token";
     const chipStyle = { background: theme.node.fill, borderColor: theme.node.stroke, color: theme.node.text };
     const hasAnyInput = Boolean(inputSummary.textCount || inputSummary.imageCount || inputSummary.videoCount || inputSummary.audioCount);
     const hasComposerContent = Boolean((node.metadata?.composerContent ?? node.metadata?.prompt ?? "").trim());
@@ -114,7 +131,7 @@ export function CanvasConfigNodePanel({ node, isRunning, inputSummary, onConfigC
                 {mode === "image" ? (
                     <PromptHubAwareImageModelPicker className="canvas-compact-control h-10" config={config} value={config.model} onChange={(model) => onConfigChange(node.id, { model })} onMissingConfig={() => openConfigDialog(true)} fullWidth />
                 ) : (
-                    <ModelPicker className="canvas-compact-control h-10" config={config} value={config.model} onChange={(model) => onConfigChange(node.id, { model })} capability={mode} onMissingConfig={() => openConfigDialog(true)} fullWidth />
+                    <PromptHubAwareModelPicker className="canvas-compact-control h-10" config={config} value={config.model} onChange={(model) => onConfigChange(node.id, { model })} capability={mode} onMissingConfig={() => openConfigDialog(true)} fullWidth />
                 )}
                 {mode === "video" ? (
                     <CanvasVideoSettingsPopover config={config} placement="topRight" buttonClassName="canvas-compact-control !h-10 !w-full !justify-start !rounded-lg !px-2" onConfigChange={(key, value) => onConfigChange(node.id, videoConfigPatch(key, value))} />
@@ -142,7 +159,7 @@ export function CanvasConfigNodePanel({ node, isRunning, inputSummary, onConfigC
                         <>
                             <span className="inline-flex items-center gap-1">
                                 <CreditSymbol />
-                                {credits.toLocaleString()}
+                                {isMeteredPricing ? "按量" : credits.toLocaleString()}
                             </span>
                             <Play className="size-4" />
                             <span>开始生成</span>
@@ -195,4 +212,12 @@ function audioConfigPatch(key: CanvasAudioSettingKey, value: string) {
     if (key === "audioFormat") return { audioFormat: value };
     if (key === "audioSpeed") return { audioSpeed: value };
     return { audioInstructions: value };
+}
+
+function normalizeVideoResolutionLabel(value: string) {
+    const resolution = String(value || "").toLowerCase();
+    if (resolution.includes("4k")) return "4k";
+    if (resolution.includes("1080")) return "1080p";
+    if (resolution.includes("480")) return "480p";
+    return "720p";
 }

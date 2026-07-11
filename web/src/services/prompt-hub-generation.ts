@@ -16,6 +16,7 @@ import {
     collectPromptHubJobImageUrls,
     fetchPromptHubGenerationCost,
     fetchPromptHubImageModels,
+    fetchPromptHubModels,
     pollPromptHubGenerationJob,
     PROMPT_HUB_DEFAULTS,
     submitPromptHubGeneration,
@@ -48,6 +49,8 @@ export type PromptHubCanvasGenerateOpts = {
     resolution?: "1k" | "2k" | "4k";
 
     quality?: "standard" | "high" | "ultra";
+
+    size?: string;
 
     referenceImages?: ReferenceImage[];
 
@@ -321,6 +324,14 @@ async function referenceImagesToRefUrls(session: PromptHubSession, references: R
 
 }
 
+export async function uploadPromptHubReferenceImages(
+    session: PromptHubSession,
+    references: ReferenceImage[],
+    opts: { apiBase?: string; signal?: AbortSignal; onStage?: (stage: PromptHubCanvasGenerationStage) => void } = {},
+) {
+    return referenceImagesToRefUrls(session, references, opts);
+}
+
 
 
 function blobToDataUrl(blob: Blob) {
@@ -580,6 +591,7 @@ async function runOnePromptHubJob(opts: PromptHubCanvasGenerateOpts, refImageUrl
         model: opts.model,
         resolution: opts.resolution,
         quality: opts.quality,
+        size: opts.size,
         count: jobCount > 1 ? jobCount : undefined,
         refImageUrls,
         apiBase: opts.apiBase,
@@ -664,17 +676,19 @@ export async function loadPromptHubGenerationAccount(
 
 ) {
 
-    const [status, models] = await Promise.all([
+    const [status, imageModels, models] = await Promise.all([
 
         checkPromptHubStatus(session, opts),
 
         fetchPromptHubImageModels(session, opts),
 
+        fetchPromptHubModels(session, opts).catch(() => []),
+
     ]);
 
     const credits = Number(status?.data?.credits);
 
-    const selectable = models.filter((m) => m.selectable !== false);
+    const selectable = imageModels.filter((m) => m.selectable !== false);
 
     return {
 
@@ -682,7 +696,9 @@ export async function loadPromptHubGenerationAccount(
 
         models: selectable,
 
-        defaultModel: selectable[0]?.id || "gpt-image-2",
+        catalogModels: models,
+
+        defaultModel: selectable.find((model) => model.id === "image2")?.id || selectable[0]?.id || "image2",
 
     };
 

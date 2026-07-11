@@ -6,14 +6,15 @@ import { ArrowUp, LoaderCircle } from "lucide-react";
 
 import { Button } from "antd";
 
-import { ModelPicker } from "@/components/model-picker";
-import { PromptHubAwareImageModelPicker } from "@/components/prompt-hub-model-picker";
+import { PromptHubAwareImageModelPicker, PromptHubAwareModelPicker } from "@/components/prompt-hub-model-picker";
 
 import { defaultConfig, useConfigStore, useEffectiveConfig, type AiConfig } from "@/stores/use-config-store";
 
 import { CreditSymbol, requestCreditCost } from "@/constant/credits";
 
 import { useEffectiveModelPricing } from "@/services/model-pricing";
+import { parsePromptHubModelId, promptHubCatalogCredits, promptHubImageCredits } from "@/services/prompt-hub-models";
+import { usePromptHubStore } from "@/stores/use-prompt-hub-store";
 
 import { canvasThemes } from "@/lib/canvas-theme";
 
@@ -69,14 +70,32 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
     const [prompt, setPrompt] = useState(isTextEditMode ? "" : node.metadata?.prompt || "");
     const promptInputRef = useRef<CanvasResourceMentionTextareaHandle>(null);
     const modelPricing = useEffectiveModelPricing(config.modelPricing);
+    const promptHubModels = usePromptHubStore((state) => state.imageModels);
+    const promptHubCatalog = usePromptHubStore((state) => state.models);
+    const promptHubModelId = parsePromptHubModelId(config.model);
+    const promptHubModel = promptHubModelId ? promptHubModels.find((model) => model.id === promptHubModelId) : null;
+    const promptHubCatalogModel = promptHubModelId ? promptHubCatalog.find((model) => model.id === promptHubModelId) : null;
+    const promptHubCredits = promptHubImageCredits(promptHubModel, normalizeJimengQualityValue(config.quality));
 
-    const credits = requestCreditCost({
+    const estimatedCredits = requestCreditCost({
         channelMode: config.channelMode,
         modelPricing,
         model: config.model,
         count: mode === "image" ? config.count : 1,
         videoSeconds: mode === "video" ? config.videoSeconds : undefined,
+        quality: config.quality,
+        resolution: config.quality,
     });
+    const catalogCredits = promptHubCatalogCredits(promptHubCatalogModel, {
+        duration: config.videoSeconds,
+        resolution: normalizeVideoResolutionLabel(config.vquality),
+        quality: config.quality,
+        count: config.count,
+    });
+    const credits = promptHubCredits != null && mode === "image"
+        ? promptHubCredits * Math.max(1, Math.floor(Math.abs(Number(config.count)) || 1))
+        : catalogCredits ?? estimatedCredits;
+    const isMeteredPricing = promptHubCatalogModel?.pricing?.mode === "token";
 
     const availableMediaReferences =
         mode === "video" || mode === "image"
@@ -173,20 +192,20 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
                         </>
                     ) : mode === "video" ? (
                         <>
-                            <ModelPicker config={config} value={config.model} onChange={(model) => onConfigChange(node.id, { model })} capability="video" onMissingConfig={() => openConfigDialog(true)} />
+                            <PromptHubAwareModelPicker config={config} value={config.model} onChange={(model) => onConfigChange(node.id, { model })} capability="video" onMissingConfig={() => openConfigDialog(true)} />
                             <CanvasVideoSettingsPopover config={config} variant="jimeng" onConfigChange={(key, value) => onConfigChange(node.id, videoConfigPatch(key, value))} />
                             <CanvasVideoDurationPopover config={config} onConfigChange={(key, value) => onConfigChange(node.id, videoConfigPatch(key, value))} />
                             <CanvasResourceMentionPicker references={activeMentionReferences} onSelect={insertReference} />
                         </>
                     ) : mode === "audio" ? (
                         <>
-                            <ModelPicker config={config} value={config.model} onChange={(model) => onConfigChange(node.id, { model })} capability="audio" onMissingConfig={() => openConfigDialog(true)} />
+                            <PromptHubAwareModelPicker config={config} value={config.model} onChange={(model) => onConfigChange(node.id, { model })} capability="audio" onMissingConfig={() => openConfigDialog(true)} />
                             <CanvasAudioSettingsPopover config={config} buttonClassName="!h-9 !max-w-[220px] !justify-start !rounded-full !px-3" onConfigChange={(key, value) => onConfigChange(node.id, audioConfigPatch(key, value))} />
                         </>
                     ) : (
                         <>
                             <CanvasPromptLibrary onSelect={updatePrompt} />
-                            <ModelPicker config={config} value={config.model} onChange={(model) => onConfigChange(node.id, { model })} capability="text" onMissingConfig={() => openConfigDialog(true)} />
+                            <PromptHubAwareModelPicker config={config} value={config.model} onChange={(model) => onConfigChange(node.id, { model })} capability="text" onMissingConfig={() => openConfigDialog(true)} />
                         </>
                     )}
                 </div>
@@ -208,7 +227,7 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
                             <>
                                 <span className="inline-flex items-center gap-1.5 text-base font-semibold tabular-nums">
                                     <CreditSymbol />
-                                    {credits.toLocaleString()}
+                                    {isMeteredPricing ? "按量" : credits.toLocaleString()}
                                 </span>
                                 <ArrowUp className="size-6" strokeWidth={2.5} />
                             </>
@@ -262,4 +281,12 @@ function audioConfigPatch(key: CanvasAudioSettingKey, value: string) {
     if (key === "audioFormat") return { audioFormat: value };
     if (key === "audioSpeed") return { audioSpeed: value };
     return { audioInstructions: value };
+}
+
+function normalizeVideoResolutionLabel(value: string) {
+    const resolution = String(value || "").toLowerCase();
+    if (resolution.includes("4k")) return "4k";
+    if (resolution.includes("1080")) return "1080p";
+    if (resolution.includes("480")) return "480p";
+    return "720p";
 }

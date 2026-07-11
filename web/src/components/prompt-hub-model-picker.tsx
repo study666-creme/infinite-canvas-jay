@@ -7,17 +7,15 @@ import { Select, SelectContent, SelectItem, SelectTrigger } from "@/components/u
 import { CreditSymbol, resolveModelPricingRule, type ModelPricingRule } from "@/constant/credits";
 import { cn } from "@/lib/utils";
 import {
-    builtInPromptHubImageModels,
     isPromptHubModelValue,
-    mergePromptHubImageModels,
-    parsePromptHubModelId,
+    promptHubImageCredits,
     promptHubModelPickerLabel,
     toPromptHubModelValue,
 } from "@/services/prompt-hub-models";
 import { formatCredits, useRemoteModelPricingRules } from "@/services/model-pricing";
 import { usePromptHubStore } from "@/stores/use-prompt-hub-store";
-import { modelOptionLabel, modelOptionName, selectableModelsByCapability, type AiConfig } from "@/stores/use-config-store";
-import type { PromptHubImageModel } from "@/services/prompt-hub";
+import { modelOptionLabel, modelOptionName, selectableModelsByCapability, type AiConfig, type ModelCapability } from "@/stores/use-config-store";
+import type { PromptHubCatalogModel, PromptHubImageModel } from "@/services/prompt-hub";
 
 type Props = {
     config: AiConfig;
@@ -29,6 +27,25 @@ type Props = {
     onMissingConfig?: () => void;
 };
 
+type CapabilityProps = Props & { capability: ModelCapability };
+
+export function PromptHubAwareModelPicker(props: CapabilityProps) {
+    if (props.capability === "image") return <PromptHubAwareImageModelPicker {...props} />;
+    return <PromptHubCatalogModelPicker {...props} />;
+}
+
+function PromptHubCatalogModelPicker({ capability, ...props }: CapabilityProps) {
+    const session = usePromptHubStore((state) => state.session);
+    const catalog = usePromptHubStore((state) => state.models);
+    const refreshGenerationAccount = usePromptHubStore((state) => state.refreshGenerationAccount);
+    const loggedIn = Boolean(session?.access_token);
+    const remoteModels = useMemo(() => catalog.filter((model) => model.modality === capability), [capability, catalog]);
+
+    usePromptHubPickerRefresh(loggedIn, refreshGenerationAccount);
+    if (!loggedIn || !remoteModels.length) return <PlainCapabilityModelPicker {...props} capability={capability} />;
+    return <MergedCapabilityModelPicker {...props} capability={capability} remoteModels={remoteModels} />;
+}
+
 /** 生图模型：已连接卡藏时在下拉中显示卡藏模型（ph-hub: 前缀）+ 本地模型 */
 export function PromptHubAwareImageModelPicker(props: Props) {
     const session = usePromptHubStore((s) => s.session);
@@ -36,20 +53,87 @@ export function PromptHubAwareImageModelPicker(props: Props) {
     const refreshGenerationAccount = usePromptHubStore((s) => s.refreshGenerationAccount);
     const remotePricing = useRemoteModelPricingRules();
     const loggedIn = Boolean(session?.access_token);
-    const mergedImageModels = useMemo(
-        () => mergePromptHubImageModels(imageModels, builtInPromptHubImageModels(remotePricing)),
-        [imageModels, remotePricing],
-    );
+    const catalogImageModels = useMemo(() => imageModels.filter((model) => model.modality === "image" && model.selectable !== false), [imageModels]);
 
-    useEffect(() => {
-        if (loggedIn) void refreshGenerationAccount();
-    }, [loggedIn, refreshGenerationAccount]);
+    usePromptHubPickerRefresh(loggedIn, refreshGenerationAccount);
 
-    if (!loggedIn || !mergedImageModels.length) {
+    if (!loggedIn || !catalogImageModels.length) {
         return <PlainImageModelPicker {...props} />;
     }
 
-    return <MergedImageModelPicker {...props} imageModels={mergedImageModels} remotePricing={remotePricing} />;
+    return <MergedImageModelPicker {...props} imageModels={catalogImageModels} remotePricing={remotePricing} />;
+}
+
+function usePromptHubPickerRefresh(loggedIn: boolean, refresh: () => Promise<void>) {
+    useEffect(() => {
+        if (!loggedIn) return;
+        void refresh();
+        const onPickerOpen = () => void refresh();
+        window.addEventListener("model-picker-open", onPickerOpen);
+        return () => window.removeEventListener("model-picker-open", onPickerOpen);
+    }, [loggedIn, refresh]);
+}
+
+function PlainCapabilityModelPicker({ config, capability, value, onChange, className, fullWidth, placeholder = "选择模型", onMissingConfig }: CapabilityProps) {
+    const options = useMemo(
+        () => Array.from(new Set(selectableModelsByCapability(config, capability).filter(Boolean))),
+        [capability, config],
+    );
+    return (
+        <BaseModelSelect
+            config={config}
+            value={value}
+            onChange={onChange}
+            className={className}
+            fullWidth={fullWidth}
+            placeholder={placeholder}
+            onMissingConfig={onMissingConfig}
+            options={options.map((model) => ({ value: model, label: modelOptionLabel(config, model), kind: "local" as const }))}
+        />
+    );
+}
+
+function MergedCapabilityModelPicker({
+    config,
+    capability,
+    value,
+    onChange,
+    className,
+    fullWidth,
+    placeholder = "选择模型",
+    onMissingConfig,
+    remoteModels,
+}: CapabilityProps & { remoteModels: PromptHubCatalogModel[] }) {
+    const localModels = useMemo(
+        () => Array.from(new Set(selectableModelsByCapability(config, capability).filter(Boolean))),
+        [capability, config],
+    );
+    const options = useMemo(() => [
+        ...remoteModels.map((model) => ({
+            value: toPromptHubModelValue(model.id),
+            label: promptHubModelPickerLabel(model.id, model.label),
+            kind: "ph" as const,
+            credits: model.pricing?.credits,
+            pricingUnit: model.pricing?.unit,
+        })),
+        ...localModels.map((model) => ({
+            value: model,
+            label: modelOptionLabel(config, model),
+            kind: "local" as const,
+        })),
+    ], [config, localModels, remoteModels]);
+    return (
+        <BaseModelSelect
+            config={config}
+            value={value}
+            onChange={onChange}
+            className={className}
+            fullWidth={fullWidth}
+            placeholder={placeholder}
+            onMissingConfig={onMissingConfig}
+            options={options}
+        />
+    );
 }
 
 function PlainImageModelPicker({ config, value, onChange, className, fullWidth, placeholder = "选择模型", onMissingConfig }: Props) {
@@ -126,7 +210,7 @@ function BaseModelSelect({
     onMissingConfig,
     options,
 }: Props & {
-    options: { value: string; label: string; kind: "ph" | "local"; credits?: number }[];
+    options: { value: string; label: string; kind: "ph" | "local"; credits?: number; pricingUnit?: "request" | "second" | "image" | "token" }[];
 }) {
     const pickerId = useId();
     const [open, setOpen] = useState(false);
@@ -188,10 +272,13 @@ function BaseModelSelect({
                                     <span className="flex min-w-0 items-center gap-2 pr-1">
                                         {opt.kind === "ph" ? <Sparkles className="size-4 shrink-0 text-amber-500" /> : <ModelIcon model={opt.value} />}
                                         <span className="min-w-0 flex-1 truncate">{opt.label}</span>
-                                        {typeof opt.credits === "number" ? (
+                                        {opt.pricingUnit === "token" ? (
+                                            <span className="shrink-0 text-[11px] opacity-70">按量计费</span>
+                                        ) : typeof opt.credits === "number" ? (
                                             <span className="inline-flex shrink-0 items-center gap-1 text-[11px] tabular-nums opacity-70">
                                                 <CreditSymbol className="size-3" />
                                                 {formatCredits(opt.credits)}
+                                                {opt.pricingUnit === "second" ? "/秒" : ""}
                                             </span>
                                         ) : null}
                                     </span>
@@ -210,8 +297,8 @@ function BaseModelSelect({
 }
 
 function promptHubImageModelCredits(model: PromptHubImageModel, remotePricing: ModelPricingRule[]) {
-    const direct = Number(model.cost?.credits);
-    if (Number.isFinite(direct) && direct > 0) return direct;
+    const direct = promptHubImageCredits(model, model.resolutions?.[0]);
+    if (direct != null) return direct;
     return resolveModelPricingRule(remotePricing, model.id)?.credits;
 }
 

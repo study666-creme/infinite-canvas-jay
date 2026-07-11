@@ -2,12 +2,12 @@
 
 import { App, Button, Form, Input, Select } from "antd";
 import { ExternalLink, LogIn, LogOut, Save } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 
-import { CreditSymbol, resolveModelPricingRule } from "@/constant/credits";
-import { formatCredits, useRemoteModelPricingRules } from "@/services/model-pricing";
+import { CreditSymbol } from "@/constant/credits";
+import { formatCredits } from "@/services/model-pricing";
 import { PROMPT_HUB_DEFAULTS } from "@/services/prompt-hub";
-import { builtInPromptHubImageModels, mergePromptHubImageModels } from "@/services/prompt-hub-models";
+import { promptHubImageCredits } from "@/services/prompt-hub-models";
 import { usePromptHubStore } from "@/stores/use-prompt-hub-store";
 
 export function PromptHubSettingsPanel() {
@@ -25,16 +25,12 @@ export function PromptHubSettingsPanel() {
     const logout = usePromptHubStore((state) => state.logout);
     const verifySession = usePromptHubStore((state) => state.verifySession);
     const refreshGenerationAccount = usePromptHubStore((state) => state.refreshGenerationAccount);
-    const remotePricing = useRemoteModelPricingRules();
     const [password, setPassword] = useState("");
     const [loading, setLoading] = useState(false);
 
     const loggedIn = Boolean(session?.access_token);
     const displayEmail = session?.user?.email || email;
-    const mergedImageModels = useMemo(
-        () => mergePromptHubImageModels(imageModels, builtInPromptHubImageModels(remotePricing)),
-        [imageModels, remotePricing],
-    );
+    const catalogImageModels = imageModels.filter((model) => model.modality === "image" && model.selectable !== false);
 
     useEffect(() => {
         if (loggedIn) void refreshGenerationAccount();
@@ -91,8 +87,8 @@ export function PromptHubSettingsPanel() {
                         <Form.Item label="卡藏生图模型" className="mb-4 md:col-span-2" extra="连接后画布图片生成优先使用此模型；积分从卡藏账户扣除。">
                             <Select
                                 value={imageModel}
-                                options={mergedImageModels.map((m) => {
-                                    const credits = Number(m.cost?.credits) || resolveModelPricingRule(remotePricing, m.id)?.credits;
+                                options={catalogImageModels.map((m) => {
+                                    const credits = promptHubImageCredits(m, m.resolutions?.[0]);
                                     return {
                                         value: m.id,
                                         label: (
@@ -109,8 +105,8 @@ export function PromptHubSettingsPanel() {
                                     };
                                 })}
                                 onChange={setImageModel}
-                                placeholder={mergedImageModels.length ? "选择模型" : "加载模型列表…"}
-                                loading={!mergedImageModels.length}
+                                placeholder={catalogImageModels.length ? "选择模型" : "加载模型列表…"}
+                                loading={!catalogImageModels.length}
                             />
                         </Form.Item>
                         <Form.Item label="卡藏积分余额" className="mb-4">

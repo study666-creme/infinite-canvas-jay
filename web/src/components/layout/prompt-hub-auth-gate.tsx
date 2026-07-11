@@ -14,6 +14,7 @@ import { PROMPT_HUB_DEFAULTS, type PromptHubSession } from "@/services/prompt-hu
 type AuthState = "checking" | "ready" | "authenticated";
 const authVerifiedAtKey = "infinite-canvas:prompt_hub_auth_verified_at";
 const authVerifyTtlMs = 30 * 60 * 1000;
+const catalogRefreshIntervalMs = 5 * 60 * 1000;
 
 export function PromptHubAuthGate({ children }: { children: ReactNode }) {
     const apiBase = usePromptHubStore((state) => state.apiBase);
@@ -23,6 +24,7 @@ export function PromptHubAuthGate({ children }: { children: ReactNode }) {
     const login = usePromptHubStore((state) => state.login);
     const logout = usePromptHubStore((state) => state.logout);
     const verifySession = usePromptHubStore((state) => state.verifySession);
+    const refreshGenerationAccount = usePromptHubStore((state) => state.refreshGenerationAccount);
     const setLocalUser = useUserStore((state) => state.setUser);
     const [email, setEmail] = useState(savedEmail);
     const [password, setPassword] = useState("");
@@ -69,6 +71,24 @@ export function PromptHubAuthGate({ children }: { children: ReactNode }) {
             cancelled = true;
         };
     }, [logout, session?.access_token, setLocalUser, verifySession]);
+
+    useEffect(() => {
+        if (state !== "authenticated" || !session?.access_token) return;
+        const refresh = () => {
+            if (document.visibilityState === "hidden") return;
+            void refreshGenerationAccount();
+        };
+        const onVisibilityChange = () => refresh();
+        refresh();
+        const interval = window.setInterval(refresh, catalogRefreshIntervalMs);
+        window.addEventListener("focus", refresh);
+        document.addEventListener("visibilitychange", onVisibilityChange);
+        return () => {
+            window.clearInterval(interval);
+            window.removeEventListener("focus", refresh);
+            document.removeEventListener("visibilitychange", onVisibilityChange);
+        };
+    }, [refreshGenerationAccount, session?.access_token, state]);
 
     const activateSession = async (activeSession: PromptHubSession) => {
         await Promise.all([prepareCanvasStorageForSession(activeSession), prepareAssetStorageForSession(activeSession)]);

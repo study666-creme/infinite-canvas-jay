@@ -3,9 +3,11 @@
 import { useEffect, useRef, useState, type RefObject } from "react";
 import { createPortal } from "react-dom";
 
-import { imageJimengSummaryParts, ImageSettingsPanel } from "@/components/image-settings-panel";
+import { imageJimengSummaryParts, ImageSettingsPanel, normalizeJimengQualityValue } from "@/components/image-settings-panel";
 import { JimengSummaryText } from "@/components/jimeng-settings-primitives";
 import { canvasThemes } from "@/lib/canvas-theme";
+import { parsePromptHubModelId, promptHubImageAspectRatios, promptHubImageResolutions } from "@/services/prompt-hub-models";
+import { usePromptHubStore } from "@/stores/use-prompt-hub-store";
 import { useThemeStore } from "@/stores/use-theme-store";
 import type { AiConfig } from "@/stores/use-config-store";
 
@@ -21,12 +23,28 @@ type CanvasImageSettingsPopoverProps = {
 
 export function CanvasImageSettingsPopover({ config, onConfigChange, onOpenChange, placement = "topLeft", variant = "jimeng" }: CanvasImageSettingsPopoverProps) {
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
+    const promptHubModels = usePromptHubStore((state) => state.imageModels);
     const buttonRef = useRef<HTMLButtonElement>(null);
     const panelRef = useRef<HTMLDivElement>(null);
     const [open, setOpen] = useState(false);
     const [buttonRect, setButtonRect] = useState<DOMRect | null>(null);
     const jimeng = variant === "jimeng";
-    const summaryParts = jimeng ? imageJimengSummaryParts(config) : [];
+    const promptHubModelId = parsePromptHubModelId(config.model);
+    const promptHubModel = promptHubModelId ? promptHubModels.find((model) => model.id === promptHubModelId) : null;
+    const aspectRatios = promptHubImageAspectRatios(promptHubModel);
+    const resolutions = promptHubImageResolutions(promptHubModel);
+    const summaryParts = jimeng ? imageJimengSummaryParts(config, { aspectRatios, resolutions }) : [];
+
+    useEffect(() => {
+        if (!promptHubModel) return;
+        const resolution = normalizeJimengQualityValue(config.quality || "");
+        if (resolutions.length && !resolutions.includes(resolution)) {
+            onConfigChange("quality", resolutions[0]);
+        }
+        if (aspectRatios.length && !aspectRatios.includes(config.size)) {
+            onConfigChange("size", aspectRatios.includes("auto") ? "auto" : aspectRatios[0]);
+        }
+    }, [aspectRatios, config.quality, config.size, onConfigChange, promptHubModel, resolutions]);
 
     const updateOpen = (nextOpen: boolean) => {
         setOpen(nextOpen);
@@ -55,7 +73,7 @@ export function CanvasImageSettingsPopover({ config, onConfigChange, onOpenChang
         };
     }, [open]);
 
-    const panel = open && buttonRect ? <ImageSettingsPortal buttonRect={buttonRect} panelRef={panelRef} placement={placement} theme={theme} config={config} onConfigChange={onConfigChange} variant={variant} /> : null;
+    const panel = open && buttonRect ? <ImageSettingsPortal buttonRect={buttonRect} panelRef={panelRef} placement={placement} theme={theme} config={config} onConfigChange={onConfigChange} variant={variant} aspectRatios={aspectRatios} resolutions={resolutions} /> : null;
 
     return (
         <>
@@ -83,6 +101,8 @@ function ImageSettingsPortal({
     config,
     onConfigChange,
     variant,
+    aspectRatios,
+    resolutions,
 }: {
     buttonRect: DOMRect;
     panelRef: RefObject<HTMLDivElement | null>;
@@ -91,8 +111,10 @@ function ImageSettingsPortal({
     config: AiConfig;
     onConfigChange: (key: keyof AiConfig, value: string) => void;
     variant: CanvasImageSettingsPopoverProps["variant"];
+    aspectRatios: string[];
+    resolutions: string[];
 }) {
-    const width = 420;
+    const width = Math.min(420, window.innerWidth - 24);
     const gap = 8;
     const margin = 12;
     const alignRight = placement?.endsWith("Right");
@@ -122,7 +144,7 @@ function ImageSettingsPortal({
             onMouseDown={(event) => event.stopPropagation()}
             onClick={(event) => event.stopPropagation()}
         >
-            <ImageSettingsPanel config={config} onConfigChange={(key, value) => onConfigChange(key, value)} theme={theme} variant={variant} className="space-y-4" showTitle={false} />
+            <ImageSettingsPanel config={config} onConfigChange={(key, value) => onConfigChange(key, value)} theme={theme} variant={variant} className="space-y-4" showTitle={false} aspectRatios={aspectRatios} resolutions={resolutions} />
         </div>,
         document.body,
     );

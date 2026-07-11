@@ -62,13 +62,63 @@ export type PromptHubCardFilters = {
     tag?: string;
 };
 
-export type PromptHubImageModel = {
+export type PromptHubCatalogPricingTier = {
+    when: Record<string, string | number | boolean>;
+    yuan: number;
+    credits: number;
+};
+
+export type PromptHubCatalogPricing = {
+    mode: "fixed" | "tiered" | "token";
+    unit: "request" | "second" | "image" | "token";
+    yuan?: number;
+    credits?: number;
+    tiers?: PromptHubCatalogPricingTier[];
+    quantityParameter?: string | null;
+    inputMultiplier?: number;
+    outputMultiplier?: number;
+    completionRatio?: number;
+    inputCreditsPerMillion?: number;
+    outputCreditsPerMillion?: number;
+};
+
+export type PromptHubCatalogModel = {
     id: string;
     label: string;
     description?: string;
+    modality: "text" | "image" | "video" | "audio";
+    operation?: "chat" | "generate";
+    endpoint?: { method?: string; path?: string; contentType?: string };
+    catalogVersion?: string | null;
+    pricingVersion?: string | null;
+    parameters?: PromptHubModelParameter[];
+    pricing?: PromptHubCatalogPricing;
+};
+
+export type PromptHubImageModel = PromptHubCatalogModel & {
+    modality: "image";
+    aspectRatios?: string[];
     resolutions?: string[];
+    pricingByResolution?: boolean;
+    creditsByResolution?: Record<string, number> | null;
+    costByResolution?: Record<string, { final?: number; listPrice?: number }> | null;
     selectable?: boolean;
     cost?: { credits?: number };
+};
+
+export type PromptHubModelParameter = {
+    name: string;
+    path: string;
+    label?: string;
+    type: "string" | "integer" | "number" | "boolean" | "array" | "object";
+    required?: boolean;
+    default?: unknown;
+    fixed?: unknown;
+    options?: unknown[];
+    min?: number;
+    max?: number;
+    min_items?: number;
+    max_items?: number;
 };
 
 export type PromptHubGenerationJob = {
@@ -80,6 +130,39 @@ export type PromptHubGenerationJob = {
     creditsRemaining?: number;
     errorMessage?: string;
     message?: string;
+};
+
+export type PromptHubVideoJob = {
+    jobId: string;
+    status: "processing" | "completed" | "failed";
+    model: string;
+    modelLabel?: string;
+    progress?: number;
+    videoUrl?: string | null;
+    errorMessage?: string | null;
+    creditsCharged?: number;
+    creditsRemaining?: number;
+};
+
+export type PromptHubChatToolCall = {
+    id: string;
+    type: "function";
+    function: { name: string; arguments: string };
+};
+
+export type PromptHubChatMessage =
+    | { role: "system" | "user"; content: string }
+    | { role: "assistant"; content?: string | null; tool_calls?: PromptHubChatToolCall[] }
+    | { role: "tool"; content: string; tool_call_id: string };
+
+export type PromptHubChatResult = {
+    reply: string;
+    toolCalls?: PromptHubChatToolCall[];
+    finishReason?: string | null;
+    creditsCharged: number;
+    creditsRemaining: number;
+    model: string;
+    modelLabel?: string;
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -224,7 +307,13 @@ export async function checkPromptHubStatus(session: PromptHubSession, opts: { ap
 export async function fetchPromptHubImageModels(session: PromptHubSession, opts: { apiBase?: string } = {}) {
     const data = await phAuthFetch("/api/v1/generate/models", session, opts);
     const models = Array.isArray(data.data?.models) ? (data.data.models as PromptHubImageModel[]) : [];
-    return models.filter((m) => m.selectable !== false);
+    return models.filter((model) => model.modality === "image" && model.selectable !== false);
+}
+
+export async function fetchPromptHubModels(session: PromptHubSession, opts: { apiBase?: string } = {}) {
+    const data = await phAuthFetch("/api/v1/models", session, opts);
+    const models = Array.isArray(data.data?.models) ? (data.data.models as PromptHubCatalogModel[]) : [];
+    return models.filter((model) => ["text", "image", "video", "audio"].includes(model.modality));
 }
 
 export async function fetchPromptHubGenerationCost(
@@ -247,6 +336,7 @@ export async function submitPromptHubGeneration(
         model: string;
         resolution?: "1k" | "2k" | "4k";
         quality?: "standard" | "high" | "ultra";
+        size?: string;
         count?: number;
         refImageUrls?: string[];
         apiBase?: string;
@@ -259,11 +349,12 @@ export async function submitPromptHubGeneration(
         resolution: payload.resolution || "1k",
         quality: payload.quality || "standard",
     };
+    if (payload.size) body.size = payload.size;
     if (payload.count && payload.count > 1) {
         body.count = Math.max(1, Math.min(8, Math.floor(payload.count)));
     }
     if (payload.refImageUrls?.length) {
-        body.refImageUrls = payload.refImageUrls.slice(0, 8);
+        body.refImageUrls = payload.refImageUrls.slice(0, 14);
     }
     const data = await phAuthFetch("/api/v1/generate", session, {
         apiBase: payload.apiBase,
@@ -272,6 +363,89 @@ export async function submitPromptHubGeneration(
         signal: payload.signal,
     });
     return data.data as { jobId: string; creditsRemaining?: number; status?: string };
+}
+
+export async function submitPromptHubVideo(
+    session: PromptHubSession,
+    payload: {
+        model: string;
+        prompt: string;
+        duration: number;
+        ratio: string;
+        resolution: string;
+        referenceImages?: string[];
+        referenceVideos?: string[];
+        referenceAudios?: string[];
+        apiBase?: string;
+        signal?: AbortSignal;
+    },
+) {
+    const data = await phAuthFetch("/api/v1/video", session, {
+        apiBase: payload.apiBase,
+        method: "POST",
+        body: {
+            model: payload.model,
+            prompt: payload.prompt,
+            duration: payload.duration,
+            ratio: payload.ratio,
+            resolution: payload.resolution,
+            referenceImages: payload.referenceImages,
+            referenceVideos: payload.referenceVideos,
+            referenceAudios: payload.referenceAudios,
+        },
+        signal: payload.signal,
+    });
+    return data.data as PromptHubVideoJob;
+}
+
+export async function fetchPromptHubVideoJob(session: PromptHubSession, jobId: string, opts: { apiBase?: string; signal?: AbortSignal } = {}) {
+    const data = await phAuthFetch(`/api/v1/video/jobs/${encodeURIComponent(jobId)}`, session, opts);
+    return data.data as PromptHubVideoJob;
+}
+
+export async function downloadPromptHubVideo(session: PromptHubSession, jobId: string, opts: { apiBase?: string; signal?: AbortSignal } = {}) {
+    const apiBase = normalizeApiBase(opts.apiBase || PROMPT_HUB_DEFAULTS.apiBase);
+    const response = await fetch(`${apiBase}/api/v1/video/jobs/${encodeURIComponent(jobId)}/content`, {
+        headers: { Authorization: `Bearer ${session.access_token}` },
+        signal: opts.signal,
+    });
+    if (!response.ok) {
+        const payload = await response.json().catch(() => ({}));
+        throw new Error(promptHubErrorMessage(payload, response.status));
+    }
+    return response.blob();
+}
+
+export async function submitPromptHubChat(
+    session: PromptHubSession,
+    payload: {
+        model: string;
+        messages: PromptHubChatMessage[];
+        reasoningEffort?: string;
+        temperature?: number;
+        maxTokens?: number;
+        tools?: Array<Record<string, unknown>>;
+        toolChoice?: unknown;
+        apiBase?: string;
+        signal?: AbortSignal;
+    },
+) {
+    const data = await phAuthFetch("/api/v1/chat", session, {
+        apiBase: payload.apiBase,
+        method: "POST",
+        body: {
+            model: payload.model,
+            messages: payload.messages,
+            reasoningEffort: payload.reasoningEffort,
+            temperature: payload.temperature,
+            maxTokens: payload.maxTokens,
+            tools: payload.tools,
+            toolChoice: payload.toolChoice,
+            noPreset: true,
+        },
+        signal: payload.signal,
+    });
+    return data.data as PromptHubChatResult;
 }
 
 export async function pollPromptHubGenerationJob(

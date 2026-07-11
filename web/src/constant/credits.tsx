@@ -16,8 +16,10 @@ export type ModelPricingUnit = "request" | "second" | "image";
 export type ModelPricingRule = {
     id: string;
     model: string;
+    modality?: "text" | "image" | "video" | "audio";
     unit: ModelPricingUnit;
     credits: number;
+    tiers?: Array<{ parameter: string; value: string; credits: number }>;
 };
 
 export type ModelCreditCost = {
@@ -52,14 +54,21 @@ export function requestCreditCost(options: {
     model: string;
     count?: string | number;
     videoSeconds?: string | number;
+    quality?: string;
+    resolution?: string;
 }) {
     const count = Math.max(1, Math.floor(Math.abs(Number(options.count)) || 1));
     const seconds = resolveBillableSeconds(options.videoSeconds);
     const rule = resolveModelPricingRule(options.modelPricing, options.model);
     if (rule) {
-        if (rule.unit === "second") return rule.credits * seconds;
-        if (rule.unit === "image") return rule.credits * count;
-        return rule.credits;
+        const tier = rule.tiers?.find((item) => {
+            const current = item.parameter === "quality" ? options.quality || options.resolution : options.resolution || options.quality;
+            return String(current || "").toLowerCase() === item.value.toLowerCase();
+        });
+        const credits = tier?.credits ?? rule.credits;
+        if (rule.unit === "second") return credits * seconds;
+        if (rule.unit === "image") return credits * count;
+        return credits;
     }
     const legacy = options.modelCosts?.find((item) => item.model === options.model)?.credits || 0;
     if (legacy) return legacy * count;

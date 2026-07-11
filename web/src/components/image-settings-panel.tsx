@@ -40,11 +40,13 @@ type ImageSettingsPanelProps = {
     maxCount?: number;
     quickCount?: number;
     variant?: "default" | "jimeng";
+    aspectRatios?: readonly string[];
+    resolutions?: readonly string[];
 };
 
 const jimengAspectValues = ["21:9", "16:9", "4:3", "1:1", "3:4", "9:16"] as const;
 
-export function ImageSettingsPanel({ config, onConfigChange, theme, showTitle = true, className = "w-[320px] space-y-4 rounded-2xl px-1 py-0.5", maxCount = 15, quickCount = 10, variant = "default" }: ImageSettingsPanelProps) {
+export function ImageSettingsPanel({ config, onConfigChange, theme, showTitle = true, className = "w-[320px] space-y-4 rounded-2xl px-1 py-0.5", maxCount = 15, quickCount = 10, variant = "default", aspectRatios, resolutions }: ImageSettingsPanelProps) {
     const [snapDimensionToStep, setSnapDimensionToStep] = useState(true);
     const quality = normalizeJimengQualityValue(config.quality || "2k");
     const count = Math.max(1, Math.min(maxCount, Math.floor(Math.abs(Number(config.count)) || 1)));
@@ -53,7 +55,7 @@ export function ImageSettingsPanel({ config, onConfigChange, theme, showTitle = 
     const dimensions = readSizeDimensions(activeSize, selectedAspect || aspectOptions[0]);
     const selectAspect = (value: string) => {
         const option = aspectOptions.find((item) => item.value === value);
-        onConfigChange("size", option?.size || option?.value || "auto");
+        onConfigChange("size", option?.size || option?.value || value || "auto");
     };
     const updateDimension = (key: "width" | "height", value: number | null) => {
         const next = Math.max(1, Math.floor(value || dimensions[key] || 1024));
@@ -63,17 +65,16 @@ export function ImageSettingsPanel({ config, onConfigChange, theme, showTitle = 
     };
 
     const jimeng = variant === "jimeng";
-    const jimengRatioOptions = jimengAspectValues.map((value) => {
+    const jimengRatioValues = aspectRatios?.length ? aspectRatios : jimengAspectValues;
+    const jimengRatioOptions = jimengRatioValues.map((value) => {
         const preview = ratioPreviewSize(value);
         return { value, label: preview.label, width: preview.width, height: preview.height };
     });
-    const jimengQualityOptions = [
-        { value: "4k", label: "4K" },
-        { value: "2k", label: "2K" },
-        { value: "1k", label: "1K" },
-    ];
-    const selectedJimengRatio = aspectOptions.find((item) => (item.size || item.value) === activeSize || item.value === activeSize)?.value || "16:9";
-    const selectedJimengQuality = quality;
+    const jimengResolutionValues = resolutions?.length ? resolutions : ["4k", "2k", "1k"];
+    const jimengQualityOptions = jimengResolutionValues.map((value) => ({ value, label: value.toUpperCase() }));
+    const activeAspectOption = aspectOptions.find((item) => (item.size || item.value) === activeSize || item.value === activeSize)?.value;
+    const selectedJimengRatio = jimengRatioValues.includes(activeSize) ? activeSize : activeAspectOption && jimengRatioValues.includes(activeAspectOption) ? activeAspectOption : jimengRatioValues[0] || "16:9";
+    const selectedJimengQuality = jimengResolutionValues.includes(quality) ? quality : jimengResolutionValues[0] || "1k";
 
     return (
         <ImageSettingsTheme theme={theme}>
@@ -96,7 +97,7 @@ export function ImageSettingsPanel({ config, onConfigChange, theme, showTitle = 
                                 value={selectedJimengRatio}
                                 theme={theme}
                                 columns={6}
-                                onChange={(value) => selectAspect(jimengAspectTarget(value))}
+                                onChange={selectAspect}
                             />
                         </div>
                         <div className="space-y-3">
@@ -211,18 +212,21 @@ export function normalizeJimengQualityValue(quality: string) {
     return "2k";
 }
 
-export function imageJimengSummaryParts(config: Pick<AiConfig, "size" | "quality" | "count">) {
+export function imageJimengSummaryParts(
+    config: Pick<AiConfig, "size" | "quality" | "count">,
+    capabilities?: { aspectRatios?: readonly string[]; resolutions?: readonly string[] },
+) {
     const activeSize = config.size || "auto";
-    const ratio = aspectOptions.find((item) => (item.size || item.value) === activeSize || item.value === activeSize)?.value || "16:9";
+    const configuredRatios = capabilities?.aspectRatios || [];
+    const knownRatio = aspectOptions.find((item) => (item.size || item.value) === activeSize || item.value === activeSize)?.value;
+    const ratio = configuredRatios.includes(activeSize) ? activeSize : knownRatio || configuredRatios[0] || "16:9";
     const ratioLabel = ratioPreviewSize(ratio).label;
-    const quality = normalizeJimengQualityValue(config.quality || "auto");
+    const normalizedQuality = normalizeJimengQualityValue(config.quality || "auto");
+    const quality = capabilities?.resolutions?.length && !capabilities.resolutions.includes(normalizedQuality)
+        ? capabilities.resolutions[0]
+        : normalizedQuality;
     const count = Math.max(1, Math.floor(Math.abs(Number(config.count)) || 1));
     return [ratioLabel, imageJimengQualityLabel(quality), String(count)];
-}
-
-function jimengAspectTarget(value: string) {
-    if (value === "21:9") return "16:9";
-    return aspectOptions.some((item) => item.value === value) ? value : "16:9";
 }
 
 export function imageSizeLabel(size: string) {

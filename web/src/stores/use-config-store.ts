@@ -69,6 +69,10 @@ export type ModelCapability = "image" | "video" | "text" | "audio";
 const CHANNEL_MODEL_SEPARATOR = "::";
 const OPENAI_BASE_URL = "https://api.openai.com";
 const GEMINI_BASE_URL = "https://generativelanguage.googleapis.com";
+const PROMPT_HUB_DEFAULT_IMAGE_MODEL = "ph-hub:image2";
+const PROMPT_HUB_DEFAULT_VIDEO_MODEL = "ph-hub:sd2.0";
+const PROMPT_HUB_DEFAULT_TEXT_MODEL = "ph-hub:creative-5-5";
+const LEGACY_BUILT_IN_MODEL_NAMES = new Set(["gpt-image-2", "grok-imagine-video", "gpt-5.5"]);
 
 export const defaultConfig: AiConfig = {
     channelMode: "local",
@@ -82,13 +86,13 @@ export const defaultConfig: AiConfig = {
             baseUrl: OPENAI_BASE_URL,
             apiKey: "",
             apiFormat: "openai",
-            models: ["gpt-image-2", "grok-imagine-video", "gpt-5.5", "gpt-4o-mini-tts"],
+            models: ["gpt-4o-mini-tts"],
         },
     ],
-    model: "default::gpt-image-2",
-    imageModel: "default::gpt-image-2",
-    videoModel: "default::grok-imagine-video",
-    textModel: "default::gpt-5.5",
+    model: PROMPT_HUB_DEFAULT_IMAGE_MODEL,
+    imageModel: PROMPT_HUB_DEFAULT_IMAGE_MODEL,
+    videoModel: PROMPT_HUB_DEFAULT_VIDEO_MODEL,
+    textModel: PROMPT_HUB_DEFAULT_TEXT_MODEL,
     audioModel: "default::gpt-4o-mini-tts",
     audioVoice: "alloy",
     audioFormat: "mp3",
@@ -99,10 +103,10 @@ export const defaultConfig: AiConfig = {
     videoGenerateAudio: "true",
     videoWatermark: "false",
     systemPrompt: "",
-    models: ["default::gpt-image-2", "default::grok-imagine-video", "default::gpt-5.5", "default::gpt-4o-mini-tts"],
-    imageModels: ["default::gpt-image-2"],
-    videoModels: ["default::grok-imagine-video"],
-    textModels: ["default::gpt-5.5"],
+    models: ["default::gpt-4o-mini-tts"],
+    imageModels: [],
+    videoModels: [],
+    textModels: [],
     audioModels: ["default::gpt-4o-mini-tts"],
     quality: "2k",
     size: "1:1",
@@ -139,6 +143,15 @@ type ConfigStore = {
     setConfigDialogOpen: (isOpen: boolean) => void;
     clearPromptContinue: () => void;
 };
+
+function migrateLegacyDefaultModel(value: string | undefined, capability: "image" | "video" | "text") {
+    const model = String(value || "").trim();
+    const name = modelOptionName(model).toLowerCase();
+    if (capability === "image" && ["gpt-image-2", "newapi-gpt-image-2", "image2"].includes(name)) return PROMPT_HUB_DEFAULT_IMAGE_MODEL;
+    if (capability === "video" && ["grok-imagine-video", "grok-video", "sd2.0"].includes(name)) return PROMPT_HUB_DEFAULT_VIDEO_MODEL;
+    if (capability === "text" && ["gpt-5.5", "gpt-5.6-sol"].includes(name)) return PROMPT_HUB_DEFAULT_TEXT_MODEL;
+    return model || (capability === "image" ? PROMPT_HUB_DEFAULT_IMAGE_MODEL : capability === "video" ? PROMPT_HUB_DEFAULT_VIDEO_MODEL : PROMPT_HUB_DEFAULT_TEXT_MODEL);
+}
 
 function isVideoModelName(model: string) {
     const value = modelOptionName(model).toLowerCase();
@@ -231,9 +244,9 @@ export const useConfigStore = create<ConfigStore>()(
                         apiFormat: normalizeApiFormat(config.apiFormat),
                         channels,
                         models,
-                        imageModel: normalizeModelOptionValue(config.imageModel || config.model, channels),
-                        videoModel: normalizeModelOptionValue(config.videoModel || "grok-imagine-video", channels),
-                        textModel: normalizeModelOptionValue(config.textModel || config.model, channels),
+                        imageModel: normalizeModelOptionValue(migrateLegacyDefaultModel(config.imageModel || config.model, "image"), channels),
+                        videoModel: normalizeModelOptionValue(migrateLegacyDefaultModel(config.videoModel, "video"), channels),
+                        textModel: normalizeModelOptionValue(migrateLegacyDefaultModel(config.textModel || config.model, "text"), channels),
                         audioModel: normalizeModelOptionValue(config.audioModel || defaultConfig.audioModel, channels),
                         audioVoice: config.audioVoice || defaultConfig.audioVoice,
                         audioFormat: config.audioFormat || defaultConfig.audioFormat,
@@ -372,7 +385,13 @@ function normalizeChannels(config: AiConfig) {
             }),
         );
     }
-    return channels.map((channel) => ({ ...channel, models: uniqueRawModels(channel.models) }));
+    return channels.map((channel) => ({
+        ...channel,
+        models: uniqueRawModels(channel.models).filter((model) => {
+            const untouchedLegacyDefault = channel.id === "default" && !channel.apiKey.trim() && channel.baseUrl.replace(/\/+$/, "") === OPENAI_BASE_URL;
+            return !untouchedLegacyDefault || !LEGACY_BUILT_IN_MODEL_NAMES.has(model.toLowerCase());
+        }),
+    }));
 }
 
 export function defaultBaseUrlForApiFormat(apiFormat: ApiCallFormat) {

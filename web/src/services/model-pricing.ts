@@ -26,6 +26,10 @@ function isPricingUnit(value: unknown): value is ModelPricingRule["unit"] {
     return value === "request" || value === "second" || value === "image";
 }
 
+function isModelModality(value: unknown): value is NonNullable<ModelPricingRule["modality"]> {
+    return value === "text" || value === "image" || value === "video" || value === "audio";
+}
+
 function normalizeRules(rules: unknown): ModelPricingRule[] {
     if (!Array.isArray(rules)) return [];
     return rules
@@ -40,6 +44,21 @@ function normalizeRules(rules: unknown): ModelPricingRule[] {
                 model,
                 unit: item.unit,
                 credits,
+                ...(isModelModality(item.modality) ? { modality: item.modality } : {}),
+                ...(Array.isArray(item.tiers)
+                    ? {
+                          tiers: item.tiers
+                              .map((tier) => {
+                                  if (!tier || typeof tier !== "object") return null;
+                                  const value = tier as { parameter?: unknown; value?: unknown; credits?: unknown };
+                                  const parameter = typeof value.parameter === "string" ? value.parameter : "";
+                                  const option = typeof value.value === "string" ? value.value : "";
+                                  const tierCredits = Number(value.credits);
+                                  return parameter && option && Number.isFinite(tierCredits) && tierCredits >= 0 ? { parameter, value: option, credits: tierCredits } : null;
+                              })
+                              .filter((tier): tier is { parameter: string; value: string; credits: number } => Boolean(tier)),
+                      }
+                    : {}),
             };
         })
         .filter((rule): rule is ModelPricingRule => Boolean(rule));

@@ -1,5 +1,4 @@
-import type { ModelPricingRule } from "@/constant/credits";
-import type { PromptHubImageModel } from "@/services/prompt-hub";
+import type { PromptHubCatalogModel, PromptHubImageModel } from "@/services/prompt-hub";
 
 /** Canvas node model field: ph-hub:<model id> means server-side Prompt Hub generation with credit billing. */
 export const PH_HUB_MODEL_PREFIX = "ph-hub:";
@@ -22,73 +21,63 @@ export function promptHubModelPickerLabel(modelId: string, label?: string) {
     return `卡藏 · ${name}`;
 }
 
-export function builtInPromptHubImageModels(pricingRules: ModelPricingRule[]) {
-    const byId = new Map<string, PromptHubImageModel>();
-    for (const rule of pricingRules) {
-        if (rule.unit !== "image" || rule.credits <= 0) continue;
-        const id = promptHubCatalogModelIdForPricingModel(rule.model);
-        if (!id) continue;
-        const existing = byId.get(id);
-        const next: PromptHubImageModel = {
-            id,
-            label: builtInImageModelLabel(id),
-            description: "内置计费模型，按卡藏积分扣费",
-            resolutions: imageModelResolutions(id),
-            selectable: true,
-            cost: { credits: existing?.cost?.credits ? Math.min(existing.cost.credits, rule.credits) : rule.credits },
-        };
-        byId.set(id, next);
+function parameterValues(model: PromptHubImageModel | null | undefined, names: string[]) {
+    const parameter = model?.parameters?.find((item) => names.includes(item.name));
+    if (!parameter) return [];
+    const values = parameter.options?.length
+        ? parameter.options
+        : Object.prototype.hasOwnProperty.call(parameter, "fixed")
+          ? [parameter.fixed]
+          : [];
+    return values.map((value) => String(value)).filter(Boolean);
+}
+
+export function promptHubImageAspectRatios(model: PromptHubImageModel | null | undefined) {
+    const declared = parameterValues(model, ["size"]);
+    return declared.length ? declared : (model?.aspectRatios || []).map(String).filter(Boolean);
+}
+
+export function promptHubImageResolutions(model: PromptHubImageModel | null | undefined) {
+    const declared = parameterValues(model, ["resolution", "quality"])
+        .map((value) => value.toLowerCase())
+        .filter((value) => value === "1k" || value === "2k" || value === "4k");
+    return declared.length ? declared : (model?.resolutions || []).map((value) => String(value).toLowerCase()).filter((value) => value === "1k" || value === "2k" || value === "4k");
+}
+
+export function promptHubImageMaxReferences(model: PromptHubImageModel | null | undefined) {
+    const multiple = model?.parameters?.find((parameter) => parameter.name === "images" || parameter.name === "refImageUrls");
+    if (typeof multiple?.max_items === "number") return multiple.max_items;
+    return model?.parameters?.some((parameter) => parameter.name === "image" || parameter.name === "refImageUrl") ? 1 : null;
+}
+
+export function promptHubImageCredits(model: PromptHubImageModel | null | undefined, resolution?: string) {
+    if (!model) return null;
+    const key = String(resolution || "").toLowerCase();
+    const tierCost = Number(model.costByResolution?.[key]?.final);
+    if (Number.isFinite(tierCost) && tierCost > 0) return tierCost;
+    const tierCredits = Number(model.creditsByResolution?.[key]);
+    if (Number.isFinite(tierCredits) && tierCredits > 0) return tierCredits;
+    const credits = Number(model.cost?.credits);
+    return Number.isFinite(credits) && credits > 0 ? credits : null;
+}
+
+export function promptHubCatalogCredits(
+    model: PromptHubCatalogModel | null | undefined,
+    options: { duration?: string | number; resolution?: string; quality?: string; count?: string | number } = {},
+) {
+    const pricing = model?.pricing;
+    if (!pricing || pricing.mode === "token" || pricing.credits == null) return null;
+    const tier = pricing.tiers?.find((candidate) =>
+        Object.entries(candidate.when).every(([key, expected]) => {
+            const actual = key === "quality" ? options.quality || options.resolution : key === "resolution" ? options.resolution || options.quality : undefined;
+            return String(actual || "").toLowerCase() === String(expected).toLowerCase();
+        }),
+    );
+    const credits = tier?.credits ?? pricing.credits;
+    if (pricing.unit === "second") {
+        const duration = Number(options.duration);
+        return credits * (duration > 0 ? duration : 5);
     }
-    return Array.from(byId.values());
-}
-
-export function mergePromptHubImageModels(serverModels: PromptHubImageModel[], builtInModels: PromptHubImageModel[]) {
-    const byId = new Map<string, PromptHubImageModel>();
-    for (const model of serverModels) {
-        if (model.id) byId.set(model.id, model);
-    }
-    for (const model of builtInModels) {
-        const existing = byId.get(model.id);
-        byId.set(model.id, {
-            ...model,
-            ...(existing ? { label: existing.label || model.label, description: existing.description || model.description, resolutions: existing.resolutions || model.resolutions } : {}),
-            cost: model.cost,
-            selectable: true,
-        });
-    }
-    return Array.from(byId.values()).filter((model) => model.selectable !== false);
-}
-
-function builtInImageModelLabel(model: string) {
-    const value = model.toLowerCase();
-    if (value === "newapi-gpt-image-2-official-budget") return "GPT-Image-2 官方低价";
-    if (value === "gpt-image-2" || value === "newapi-gpt-image-2") return "GPT-Image-2";
-    if (value.includes("gpt-image-2-ext-1k")) return "GPT-Image-2 Ext 1K";
-    if (value.includes("gpt-image-2-ext-2k")) return "GPT-Image-2 Ext 2K";
-    if (value.includes("gpt-image-2-ext-4k")) return "GPT-Image-2 Ext 4K";
-    if (value.includes("nano-banana-2")) return "Nano Banana 2";
-    if (value.includes("nano-banana-pro")) return "Nano Banana Pro";
-    if (value.includes("nano-banana-fast")) return "Nano Banana Fast";
-    if (value.includes("nano-banana")) return "Nano Banana";
-    return model;
-}
-
-function promptHubCatalogModelIdForPricingModel(model: string) {
-    const value = model.trim().toLowerCase();
-    if (!value) return null;
-    if (value.startsWith("newapi-")) return value;
-    if (value === "gpt-image-2") return "newapi-gpt-image-2";
-    if (/^gpt-image-2-ext-(1k|2k|4k)$/.test(value)) return `newapi-${value}`;
-    if (/^gpt-image-2-official(?:-(1k|2k|4k))?$/.test(value)) return "newapi-gpt-image-2-official-budget";
-    if (["nano-banana-fast", "nano-banana-2", "nano-banana-pro", "nano-banana"].includes(value)) return `newapi-${value}`;
-    return null;
-}
-
-function imageModelResolutions(model: string) {
-    const value = model.toLowerCase();
-    if (value === "newapi-gpt-image-2-official-budget") return ["1k", "2k", "4k"];
-    if (value.includes("1k")) return ["1k"];
-    if (value.includes("2k")) return ["2k"];
-    if (value.includes("4k")) return ["4k"];
-    return ["1k", "2k", "4k"];
+    if (pricing.unit === "image") return credits * Math.max(1, Number(options.count) || 1);
+    return credits;
 }

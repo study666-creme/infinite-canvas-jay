@@ -4,7 +4,7 @@ import { App, Button, Form, Input, Modal, Progress, Segmented, Select, Tabs } fr
 import { CircleAlert, Cloud, Plus, RefreshCw, Trash2, Wifi } from "lucide-react";
 import { useState } from "react";
 
-import { ModelPicker } from "@/components/model-picker";
+import { PromptHubAwareModelPicker } from "@/components/prompt-hub-model-picker";
 import { ExportFolderSettingsPanel, ModelPricingSettingsPanel } from "@/components/layout/export-pricing-settings";
 import { PromptHubSettingsPanel } from "@/components/layout/prompt-hub-settings-panel";
 import { fetchChannelModels } from "@/services/api/image";
@@ -329,7 +329,7 @@ export function AppConfigModal() {
                                 <div className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
                                     {modelGroups.map((group) => (
                                         <Form.Item key={group.modelKey} label={group.defaultLabel} className="mb-0">
-                                            <ModelPicker config={config} value={config[group.modelKey]} onChange={(model) => updateConfig(group.modelKey, model)} capability={group.capability} fullWidth />
+                                            <PromptHubAwareModelPicker config={config} value={config[group.modelKey]} onChange={(model) => updateConfig(group.modelKey, model)} capability={group.capability} fullWidth />
                                         </Form.Item>
                                     ))}
                                 </div>

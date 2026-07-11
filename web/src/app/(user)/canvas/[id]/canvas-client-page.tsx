@@ -20,6 +20,8 @@ import {
     savePromptHubQuickCard,
 } from "@/services/prompt-hub";
 import { requestPromptHubCanvasImages } from "@/services/prompt-hub-generation";
+import { requestPromptHubCanvasVideo } from "@/services/prompt-hub-video";
+import { requestPromptHubText } from "@/services/prompt-hub-text";
 import { parsePromptHubModelId } from "@/services/prompt-hub-models";
 import { usePromptHubStore } from "@/stores/use-prompt-hub-store";
 import { resolveMediaUrl, uploadMediaFile, type UploadedFile } from "@/services/file-storage";
@@ -63,6 +65,7 @@ import { CanvasDirectorStage, type CanvasDirectorStageHandle } from "../componen
 import { useCanvasAgentStore } from "../stores/use-canvas-agent-store";
 import { useCanvasStore, flushCanvasStore, subscribeCanvasPersistStatus } from "../stores/use-canvas-store";
 import { applyCanvasAgentOps, type CanvasAgentOp, type CanvasAgentSnapshot } from "../utils/canvas-agent-ops";
+import { createInitialCreativeProjectState, deriveCreativeProjectState, mirrorCreativeProjectBlackboard, reconcileCreativeProjectState } from "../utils/creative-project-state";
 import type { DirectorStageActionHandler, DirectorStageCapture } from "../utils/director-stage-types";
 import { buildCanvasResourceReferences, buildNodeMentionReferences } from "../utils/canvas-resource-references";
 import { getCanvasViewBounds, isConnectionInView, isNodeInView } from "../utils/canvas-viewport";
@@ -93,6 +96,7 @@ import {
     type CanvasImageGenerationType,
     type CanvasNodeData,
     type CanvasNodeMetadata,
+    type CreativeProjectState,
     type ConnectionHandle,
     type ContextMenuState,
     type Position,
@@ -122,6 +126,7 @@ type CanvasHistoryEntry = Pick<CanvasClipboard, "nodes" | "connections"> & {
     activeChatId: string | null;
     backgroundMode: CanvasBackgroundMode;
     showImageInfo: boolean;
+    creativeProjectState: CreativeProjectState;
 };
 
 type CanvasGenerationRequest = {
@@ -347,6 +352,7 @@ function InfiniteCanvasPage() {
     const [isMiniMapOpen, setIsMiniMapOpen] = useState(false);
     const [backgroundMode, setBackgroundMode] = useState<CanvasBackgroundMode>("lines");
     const [showImageInfo, setShowImageInfo] = useState(false);
+    const [creativeProjectState, setCreativeProjectState] = useState<CreativeProjectState>(() => createInitialCreativeProjectState());
     const [clearConfirmOpen, setClearConfirmOpen] = useState(false);
     const [assetDrawerOpen, setAssetDrawerOpen] = useState(false);
     const [projectLoaded, setProjectLoaded] = useState(false);
@@ -386,6 +392,7 @@ function InfiniteCanvasPage() {
     const connectionsRef = useRef(connections);
     const selectedNodeIdsRef = useRef(selectedNodeIds);
     const viewportRef = useRef(viewport);
+    const creativeProjectStateRef = useRef(creativeProjectState);
     const generateNodeRef = useRef<((nodeId: string, mode: CanvasNodeGenerationMode, prompt: string) => Promise<void>) | null>(null);
     const nodeResizingRef = useRef(false);
     const connectingParamsRef = useRef(connectingParams);
@@ -398,6 +405,7 @@ function InfiniteCanvasPage() {
     const projectLoadedRef = useRef(projectLoaded);
     const projectIdRef = useRef(projectId);
     const directorStageRef = useRef<CanvasDirectorStageHandle>(null);
+    const applyAgentOpsRef = useRef<((ops?: CanvasAgentOp[]) => CanvasAgentSnapshot) | null>(null);
 
     const createHistoryEntry = useCallback(
         (): CanvasHistoryEntry => ({
@@ -407,6 +415,7 @@ function InfiniteCanvasPage() {
             activeChatId,
             backgroundMode,
             showImageInfo,
+            creativeProjectState: creativeProjectStateRef.current,
         }),
         [activeChatId, backgroundMode, chatSessions, showImageInfo],
     );
@@ -506,13 +515,16 @@ function InfiniteCanvasPage() {
 
         const restore = async () => {
             const restoredNodes = await hydrateCanvasImages(resetInterruptedGeneration(project.nodes));
-            const restoredSessions = await hydrateAssistantImages(project.chatSessions || []);
+            const restoredSessions = expirePendingAssistantSessions(await hydrateAssistantImages(project.chatSessions || []));
+            const restoredProjectState = expireRestoredCreativeAction(reconcileCreativeProjectState(restoredNodes, project.creativeProjectState));
             setNodes(restoredNodes);
             setConnections(project.connections);
             setChatSessions(restoredSessions);
             setActiveChatId(project.activeChatId || null);
             setBackgroundMode(project.backgroundMode);
             setShowImageInfo(project.showImageInfo || false);
+            creativeProjectStateRef.current = restoredProjectState;
+            setCreativeProjectState(restoredProjectState);
             didInitialCenterRef.current = true;
             viewportRef.current = project.viewport;
             setViewport(project.viewport);
@@ -528,6 +540,7 @@ function InfiniteCanvasPage() {
                 activeChatId: project.activeChatId || null,
                 backgroundMode: project.backgroundMode,
                 showImageInfo: project.showImageInfo || false,
+                creativeProjectState: restoredProjectState,
             };
             setHistoryState({ canUndo: false, canRedo: false });
             setProjectLoaded(true);
@@ -548,7 +561,7 @@ function InfiniteCanvasPage() {
         if (!projectLoaded || applyingHistoryRef.current || historyPausedRef.current) return;
         const next = createHistoryEntry();
         const previous = lastHistoryRef.current;
-        if (previous?.nodes === next.nodes && previous.connections === next.connections && previous.chatSessions === next.chatSessions && previous.activeChatId === next.activeChatId && previous.backgroundMode === next.backgroundMode && previous.showImageInfo === next.showImageInfo) return;
+        if (previous?.nodes === next.nodes && previous.connections === next.connections && previous.chatSessions === next.chatSessions && previous.activeChatId === next.activeChatId && previous.backgroundMode === next.backgroundMode && previous.showImageInfo === next.showImageInfo && previous.creativeProjectState === next.creativeProjectState) return;
 
         if (historyCommitTimerRef.current) clearTimeout(historyCommitTimerRef.current);
         historyCommitTimerRef.current = setTimeout(() => {
@@ -568,7 +581,7 @@ function InfiniteCanvasPage() {
                 historyCommitTimerRef.current = null;
             }
         };
-    }, [activeChatId, backgroundMode, chatSessions, connections, createHistoryEntry, nodes, projectLoaded, showImageInfo]);
+    }, [activeChatId, backgroundMode, chatSessions, connections, createHistoryEntry, creativeProjectState, nodes, projectLoaded, showImageInfo]);
 
     useEffect(
         () => () => {
@@ -578,10 +591,22 @@ function InfiniteCanvasPage() {
     );
 
     useEffect(() => {
+        if (!projectLoaded || applyingHistoryRef.current || historyPausedRef.current) return;
+        const nextState = reconcileCreativeProjectState(nodes, creativeProjectStateRef.current);
+        const stateChanged = JSON.stringify(nextState) !== JSON.stringify(creativeProjectStateRef.current);
+        if (stateChanged) {
+            creativeProjectStateRef.current = nextState;
+            setCreativeProjectState(nextState);
+        }
+        const mirroredNodes = mirrorCreativeProjectBlackboard(nodes, nextState);
+        if (mirroredNodes !== nodes) setNodes(mirroredNodes);
+    }, [nodes, projectLoaded]);
+
+    useEffect(() => {
         if (!projectLoaded || historyPausedRef.current) return;
         if (projectSaveTimerRef.current) clearTimeout(projectSaveTimerRef.current);
         projectSaveTimerRef.current = setTimeout(() => {
-            updateProject(projectId, { nodes, connections, chatSessions, activeChatId, backgroundMode, showImageInfo });
+            updateProject(projectId, { nodes, connections, chatSessions, activeChatId, backgroundMode, showImageInfo, creativeProjectState });
             projectSaveTimerRef.current = null;
         }, 300);
         return () => {
@@ -590,7 +615,7 @@ function InfiniteCanvasPage() {
                 projectSaveTimerRef.current = null;
             }
         };
-    }, [activeChatId, backgroundMode, chatSessions, connections, nodes, projectId, projectLoaded, showImageInfo, updateProject]);
+    }, [activeChatId, backgroundMode, chatSessions, connections, creativeProjectState, nodes, projectId, projectLoaded, showImageInfo, updateProject]);
 
     useEffect(() => {
         toolbarImageSettingsOpenRef.current = toolbarImageSettingsOpen;
@@ -634,6 +659,7 @@ function InfiniteCanvasPage() {
                 backgroundMode: meta.backgroundMode,
                 showImageInfo: meta.showImageInfo,
                 viewport: viewportRef.current,
+                creativeProjectState: creativeProjectStateRef.current,
             });
             await flushCanvasStore();
             if (showToast) message.success("画布已保存");
@@ -663,10 +689,11 @@ function InfiniteCanvasPage() {
         connectionTargetNodeIdRef.current = connectionTargetNodeId;
         pendingConnectionCreateRef.current = pendingConnectionCreate;
         toolbarNodeIdRef.current = toolbarNodeId;
+        creativeProjectStateRef.current = creativeProjectState;
         projectMetaRef.current = { chatSessions, activeChatId, backgroundMode, showImageInfo };
         projectLoadedRef.current = projectLoaded;
         projectIdRef.current = projectId;
-    }, [nodes, connections, selectedNodeIds, viewport, connectingParams, connectionTargetNodeId, pendingConnectionCreate, toolbarNodeId, chatSessions, activeChatId, backgroundMode, showImageInfo, projectLoaded, projectId]);
+    }, [nodes, connections, selectedNodeIds, viewport, connectingParams, connectionTargetNodeId, pendingConnectionCreate, toolbarNodeId, chatSessions, activeChatId, backgroundMode, showImageInfo, creativeProjectState, projectLoaded, projectId]);
 
     useLayoutEffect(() => {
         selectionBoxRef.current = selectionBox;
@@ -1031,8 +1058,8 @@ function InfiniteCanvasPage() {
         return ids;
     }, [nodeGroups, selectedNodeIds]);
     const agentSnapshot = useMemo<CanvasAgentSnapshot>(
-        () => ({ projectId, title: currentProject?.title || "未命名画布", nodes, connections, selectedNodeIds: Array.from(selectedNodeIds), viewport }),
-        [connections, currentProject?.title, nodes, projectId, selectedNodeIds, viewport],
+        () => ({ projectId, title: currentProject?.title || "未命名画布", nodes, connections, selectedNodeIds: Array.from(selectedNodeIds), viewport, creativeProjectState }),
+        [connections, creativeProjectState, currentProject?.title, nodes, projectId, selectedNodeIds, viewport],
     );
     const addDirectorStageCaptures = useCallback(
         async (captures: DirectorStageCapture[]) => {
@@ -1047,27 +1074,46 @@ function InfiniteCanvasPage() {
             const height = 180;
             const gap = 34;
             const columns = Math.min(4, captures.length);
+            const batchId = `preview-${Date.now()}-${nanoid(6)}`;
             const capturedNodes: CanvasNodeData[] = captures.map((capture, index) => ({
                 id: `director-shot-${capture.shotId}-${nanoid(6)}`,
                 type: CanvasNodeType.Image,
-                title: `分镜 ${String(capture.slot).padStart(2, "0")} · ${capture.title}`,
+                title: `分镜预览 ${String(capture.slot).padStart(2, "0")} · ${capture.title}`,
                 position: { x: baseX + (index % columns) * (width + gap), y: baseY + Math.floor(index / columns) * (height + 76) },
                 width,
                 height,
                 metadata: {
                     ...imageMetadata(images[index]),
                     prompt: capture.prompt,
-                    directorStage: { shotId: capture.shotId, slot: capture.slot, dramaticFunction: capture.title, source: "3d-director-stage" },
+                    creativeArtifact: {
+                        kind: "preview_grid",
+                        version: 1,
+                        status: "review",
+                        ownerAgent: "分镜预览 Agent",
+                        userConfirmed: false,
+                        qualityGate: ["节奏密度可读", "镜头内容不过载", "空间与上下文连续", "平台审核风险可接受"],
+                        updatedAt: new Date().toISOString(),
+                    },
+                    directorStage: { shotId: capture.shotId, slot: capture.slot, dramaticFunction: capture.title, source: "3d-director-stage", batchId },
                 },
             }));
-            const nextNodes = [...currentNodes, ...capturedNodes];
-            nodesRef.current = nextNodes;
-            setNodes(nextNodes);
             const ids = capturedNodes.map((node) => node.id);
-            selectedNodeIdsRef.current = new Set(ids);
-            setSelectedNodeIds(new Set(ids));
-            setSelectedConnectionId(null);
-            setContextMenu(null);
+            const ops: CanvasAgentOp[] = [
+                ...capturedNodes.map((node): CanvasAgentOp => ({
+                    type: "add_node",
+                    id: node.id,
+                    nodeType: node.type,
+                    title: node.title,
+                    position: node.position,
+                    width: node.width,
+                    height: node.height,
+                    metadata: node.metadata,
+                })),
+                { type: "select_nodes", ids },
+            ];
+            const apply = applyAgentOpsRef.current;
+            if (!apply) throw new Error("画布事务尚未就绪");
+            apply(ops);
             return ids;
         },
         [getCanvasCenter],
@@ -1075,24 +1121,40 @@ function InfiniteCanvasPage() {
     const executeDirectorStageAction = useCallback<DirectorStageActionHandler>(async (name, input) => {
         const stage = directorStageRef.current;
         if (!stage) throw new Error("3D 导演台尚未就绪");
-        return stage.execute(name, input);
-    }, []);
+        const result = await stage.execute(name, input);
+        if (name !== "canvas_director_capture_shot" && name !== "canvas_director_capture_all") return result;
+        const canvasSnapshot: CanvasAgentSnapshot = {
+            projectId,
+            title: currentProject?.title || "未命名画布",
+            nodes: nodesRef.current,
+            connections: connectionsRef.current,
+            selectedNodeIds: Array.from(selectedNodeIdsRef.current),
+            viewport: viewportRef.current,
+            creativeProjectState: creativeProjectStateRef.current,
+        };
+        return result && typeof result === "object" && !Array.isArray(result) ? { ...result, canvasSnapshot } : { result, canvasSnapshot };
+    }, [currentProject?.title, projectId]);
     const applyAgentOps = useCallback(
         (ops?: CanvasAgentOp[]) => {
             const safeOps = Array.isArray(ops) ? ops.filter((op) => op?.type) : [];
-            const before = { projectId, title: currentProject?.title || "未命名画布", nodes: nodesRef.current, connections: connectionsRef.current, selectedNodeIds: Array.from(selectedNodeIdsRef.current), viewport: viewportRef.current };
+            const before = { projectId, title: currentProject?.title || "未命名画布", nodes: nodesRef.current, connections: connectionsRef.current, selectedNodeIds: Array.from(selectedNodeIdsRef.current), viewport: viewportRef.current, creativeProjectState: creativeProjectStateRef.current };
             const generationOps = safeOps.filter((op): op is Extract<CanvasAgentOp, { type: "run_generation" }> => op.type === "run_generation" && Boolean(op.nodeId));
             const next = applyCanvasAgentOps(before, safeOps.filter((op) => op.type !== "run_generation"));
+            const explicitProjectState = creativeProjectStateFromOps(safeOps);
+            const nextProjectState = reconcileCreativeProjectState(next.nodes, explicitProjectState || creativeProjectStateRef.current);
+            next.creativeProjectState = nextProjectState;
             nodesRef.current = next.nodes;
             connectionsRef.current = next.connections;
             selectedNodeIdsRef.current = new Set(next.selectedNodeIds);
             viewportRef.current = next.viewport;
+            creativeProjectStateRef.current = nextProjectState;
             setAgentUndoSnapshot(before);
             setNodes(next.nodes);
             setConnections(next.connections);
             setSelectedNodeIds(new Set(next.selectedNodeIds));
             setSelectedConnectionId(null);
             setViewport(next.viewport);
+            setCreativeProjectState(nextProjectState);
             setContextMenu(null);
             if (generationOps.length) {
                 queueMicrotask(() =>
@@ -1107,20 +1169,26 @@ function InfiniteCanvasPage() {
         },
         [currentProject?.title, projectId],
     );
+    useLayoutEffect(() => {
+        applyAgentOpsRef.current = applyAgentOps;
+    }, [applyAgentOps]);
     const undoAgentOps = useCallback(() => {
         if (!agentUndoSnapshot) return null;
         nodesRef.current = agentUndoSnapshot.nodes;
         connectionsRef.current = agentUndoSnapshot.connections;
         selectedNodeIdsRef.current = new Set(agentUndoSnapshot.selectedNodeIds);
         viewportRef.current = agentUndoSnapshot.viewport;
+        const restoredProjectState = reconcileCreativeProjectState(agentUndoSnapshot.nodes, agentUndoSnapshot.creativeProjectState);
+        creativeProjectStateRef.current = restoredProjectState;
         setNodes(agentUndoSnapshot.nodes);
         setConnections(agentUndoSnapshot.connections);
         setSelectedNodeIds(new Set(agentUndoSnapshot.selectedNodeIds));
         setSelectedConnectionId(null);
         setViewport(agentUndoSnapshot.viewport);
+        setCreativeProjectState(restoredProjectState);
         setContextMenu(null);
         setAgentUndoSnapshot(null);
-        return { ...agentUndoSnapshot, projectId, title: currentProject?.title || "未命名画布" };
+        return { ...agentUndoSnapshot, projectId, title: currentProject?.title || "未命名画布", creativeProjectState: restoredProjectState };
     }, [agentUndoSnapshot, currentProject?.title, projectId]);
     const createNode = useCallback(
         (type: CanvasNodeType, position?: Position) => {
@@ -1405,6 +1473,8 @@ function InfiniteCanvasPage() {
         setActiveChatId(entry.activeChatId);
         setBackgroundMode(entry.backgroundMode);
         setShowImageInfo(entry.showImageInfo);
+        creativeProjectStateRef.current = entry.creativeProjectState;
+        setCreativeProjectState(entry.creativeProjectState);
         setSelectedNodeIds(new Set());
         setSelectedConnectionId(null);
         setContextMenu(null);
@@ -2635,9 +2705,9 @@ function InfiniteCanvasPage() {
         async (nodeId: string, mode: CanvasNodeGenerationMode, prompt: string) => {
             const sourceNode = nodesRef.current.find((node) => node.id === nodeId);
             const generationConfig = buildGenerationConfig(effectiveConfig, sourceNode, mode);
-            const promptHubSession = mode === "image" ? await usePromptHubStore.getState().getSession() : null;
-            const phModelId = mode === "image" ? parsePromptHubModelId(generationConfig.model) : null;
-            const usePromptHubGen = mode === "image" && !!promptHubSession && !!phModelId;
+            const phModelId = parsePromptHubModelId(generationConfig.model);
+            const promptHubSession = phModelId ? await usePromptHubStore.getState().getSession() : null;
+            const usePromptHubGen = !!promptHubSession && !!phModelId;
             if (!usePromptHubGen && !isAiConfigReady(generationConfig, generationConfig.model)) {
                 openConfigDialog(true);
                 return;
@@ -2832,6 +2902,7 @@ function InfiniteCanvasPage() {
                                   count,
                                   model: phModelId,
                                   resolution: mapPromptHubResolution(generationConfig),
+                                  size: generationConfig.size,
                                   referenceImages: referenceImages.length ? referenceImages : undefined,
                                   signal: controller.signal,
                                   onStage: ({ progress, stage }) => updateProgressNodes(progress, stage),
@@ -3147,18 +3218,40 @@ function InfiniteCanvasPage() {
                     if (!isEmptyVideoNode) setConnections((prev) => [...prev, { id: nanoid(), fromNodeId: nodeId, toNodeId: videoId }]);
                     const controller = startGenerationRequest(videoId, nodeId, nodeId, runController);
                     try {
-                        const generated = await requestVideoGeneration(generationConfig, effectivePrompt, generationContext.referenceImages, generationContext.referenceVideos, generationContext.referenceAudios, {
-                            signal: controller.signal,
-                            onProgress: (progress) => {
-                                setNodes((prev) =>
-                                    prev.map((node) =>
-                                        node.id === videoId
-                                            ? { ...node, metadata: { ...node.metadata, generationProgress: progress.percent, generationStage: progress.message } }
-                                            : node,
-                                    ),
-                                );
-                            },
-                        });
+                        const updateVideoProgress = (percent: number, stage: string) => {
+                            setNodes((prev) =>
+                                prev.map((node) =>
+                                    node.id === videoId
+                                        ? { ...node, metadata: { ...node.metadata, generationProgress: percent, generationStage: stage } }
+                                        : node,
+                                ),
+                            );
+                        };
+                        let generated: VideoGenerationResult;
+                        if (usePromptHubGen && promptHubSession && phModelId) {
+                            const phStore = usePromptHubStore.getState();
+                            const result = await requestPromptHubCanvasVideo({
+                                session: promptHubSession,
+                                apiBase: phStore.apiBase,
+                                model: phModelId,
+                                prompt: effectivePrompt,
+                                duration: promptHubVideoDuration(generationConfig),
+                                ratio: promptHubVideoRatio(generationConfig),
+                                resolution: promptHubVideoResolution(generationConfig),
+                                referenceImages: generationContext.referenceImages,
+                                referenceVideos: generationContext.referenceVideos,
+                                referenceAudios: generationContext.referenceAudios,
+                                signal: controller.signal,
+                                onStage: ({ progress, stage }) => updateVideoProgress(progress, stage),
+                            });
+                            generated = { blob: result.blob, taskId: result.job.jobId, provider: "openai", model: generationConfig.model, mimeType: result.blob.type || "video/mp4" };
+                            void phStore.refreshGenerationAccount();
+                        } else {
+                            generated = await requestVideoGeneration(generationConfig, effectivePrompt, generationContext.referenceImages, generationContext.referenceVideos, generationContext.referenceAudios, {
+                                signal: controller.signal,
+                                onProgress: (progress) => updateVideoProgress(progress.percent, progress.message),
+                            });
+                        }
                         if (!isGenerationRequestActive(videoId, controller)) return;
                         setNodes((prev) =>
                             prev.map((node) =>
@@ -3242,17 +3335,24 @@ function InfiniteCanvasPage() {
                 const controller = runController;
                 const textTargetIds = childIds.length ? childIds : [nodeId];
                 textTargetIds.forEach((targetNodeId) => startGenerationRequest(targetNodeId, nodeId, nodeId, controller));
+                const responseMessages = buildNodeResponseMessages({ ...generationContext, prompt: effectivePrompt });
                 const answers = await Promise.all(
                     textTargetIds.map((targetNodeId) => {
                         let localStreamed = "";
-                        return requestImageQuestion(generationConfig, buildNodeResponseMessages({ ...generationContext, prompt: effectivePrompt }), (text) => {
-                            localStreamed = text;
-                            streamed = text;
-                            if (isConfigNode) return;
-                            setNodes((prev) => prev.map((node) => (node.id === targetNodeId ? { ...node, type: CanvasNodeType.Text, metadata: { ...node.metadata, content: text, status: NODE_STATUS_LOADING } } : node)));
-                        }, { signal: controller.signal }).then((answer) => ({ nodeId: targetNodeId, content: answer || localStreamed })).finally(() => finishGenerationRequest(targetNodeId, controller));
+                        const request = usePromptHubGen && promptHubSession && phModelId
+                            ? requestPromptHubText(promptHubSession, phModelId, responseMessages, { apiBase: usePromptHubStore.getState().apiBase, signal: controller.signal })
+                            : requestImageQuestion(generationConfig, responseMessages, (text) => {
+                                  localStreamed = text;
+                                  streamed = text;
+                                  if (isConfigNode) return;
+                                  setNodes((prev) => prev.map((node) => (node.id === targetNodeId ? { ...node, type: CanvasNodeType.Text, metadata: { ...node.metadata, content: text, status: NODE_STATUS_LOADING } } : node)));
+                              }, { signal: controller.signal });
+                        return request
+                            .then((answer) => ({ nodeId: targetNodeId, content: answer || localStreamed }))
+                            .finally(() => finishGenerationRequest(targetNodeId, controller));
                     }),
                 );
+                if (usePromptHubGen) void usePromptHubStore.getState().refreshGenerationAccount();
                 if (controller.signal.aborted) return;
                 const answerByNodeId = new Map(answers.map((item) => [item.nodeId, item.content]));
                 setNodes((prev) =>
@@ -3300,7 +3400,10 @@ function InfiniteCanvasPage() {
                           count: "1",
                       }
                     : { ...buildGenerationConfig(effectiveConfig, sourceNode, node.type === CanvasNodeType.Text ? "text" : node.type === CanvasNodeType.Video ? "video" : node.type === CanvasNodeType.Audio ? "audio" : "image"), count: "1" };
-            if (!isAiConfigReady(generationConfig, generationConfig.model)) {
+            const phModelId = parsePromptHubModelId(generationConfig.model);
+            const promptHubSession = phModelId ? await usePromptHubStore.getState().getSession() : null;
+            const usePromptHubGen = Boolean(phModelId && promptHubSession);
+            if (!usePromptHubGen && !isAiConfigReady(generationConfig, generationConfig.model)) {
                 openConfigDialog(true);
                 return;
             }
@@ -3331,26 +3434,43 @@ function InfiniteCanvasPage() {
                 if (node.type === CanvasNodeType.Text) {
                     if (!context) return;
                     let streamed = "";
-                    const answer = await requestImageQuestion(generationConfig, buildNodeResponseMessages({ ...context, prompt }), (text) => {
-                        streamed = text;
-                        setNodes((prev) => prev.map((item) => (item.id === node.id ? { ...item, type: CanvasNodeType.Text, metadata: { ...item.metadata, content: text, status: NODE_STATUS_LOADING } } : item)));
-                    }, { signal: controller.signal });
+                    const messages = buildNodeResponseMessages({ ...context, prompt });
+                    const answer = usePromptHubGen && promptHubSession && phModelId
+                        ? await requestPromptHubText(promptHubSession, phModelId, messages, { apiBase: usePromptHubStore.getState().apiBase, signal: controller.signal })
+                        : await requestImageQuestion(generationConfig, messages, (text) => {
+                              streamed = text;
+                              setNodes((prev) => prev.map((item) => (item.id === node.id ? { ...item, type: CanvasNodeType.Text, metadata: { ...item.metadata, content: text, status: NODE_STATUS_LOADING } } : item)));
+                          }, { signal: controller.signal });
                     if (!isGenerationRequestActive(node.id, controller)) return;
                     setNodes((prev) => prev.map((item) => (item.id === node.id ? { ...item, type: CanvasNodeType.Text, metadata: { ...item.metadata, content: answer || streamed, prompt, status: NODE_STATUS_SUCCESS } } : item)));
                     return;
                 }
                 if (node.type === CanvasNodeType.Video) {
                     setNodes((prev) => prev.map((item) => (item.id === node.id ? { ...item, metadata: { ...item.metadata, ...loadingProgressMetadata(0, "准备生成") } } : item)));
-                    const generated = await requestVideoGeneration(generationConfig, prompt, retryImages, context?.referenceVideos || [], context?.referenceAudios || [], {
-                        signal: controller.signal,
-                        onProgress: (progress) => {
-                            setNodes((prev) =>
-                                prev.map((item) =>
-                                    item.id === node.id ? { ...item, metadata: { ...item.metadata, generationProgress: progress.percent, generationStage: progress.message } } : item,
-                                ),
-                            );
-                        },
-                    });
+                    const updateProgress = (percent: number, stage: string) => setNodes((prev) => prev.map((item) => item.id === node.id ? { ...item, metadata: { ...item.metadata, generationProgress: percent, generationStage: stage } } : item));
+                    let generated: VideoGenerationResult;
+                    if (usePromptHubGen && promptHubSession && phModelId) {
+                        const result = await requestPromptHubCanvasVideo({
+                            session: promptHubSession,
+                            apiBase: usePromptHubStore.getState().apiBase,
+                            model: phModelId,
+                            prompt,
+                            duration: promptHubVideoDuration(generationConfig),
+                            ratio: promptHubVideoRatio(generationConfig),
+                            resolution: promptHubVideoResolution(generationConfig),
+                            referenceImages: retryImages,
+                            referenceVideos: context?.referenceVideos || [],
+                            referenceAudios: context?.referenceAudios || [],
+                            signal: controller.signal,
+                            onStage: ({ progress, stage }) => updateProgress(progress, stage),
+                        });
+                        generated = { blob: result.blob, taskId: result.job.jobId, provider: "openai", model: generationConfig.model, mimeType: result.blob.type || "video/mp4" };
+                    } else {
+                        generated = await requestVideoGeneration(generationConfig, prompt, retryImages, context?.referenceVideos || [], context?.referenceAudios || [], {
+                            signal: controller.signal,
+                            onProgress: (progress) => updateProgress(progress.percent, progress.message),
+                        });
+                    }
                     if (!isGenerationRequestActive(node.id, controller)) return;
                     setNodes((prev) =>
                         prev.map((item) =>
@@ -3380,9 +3500,21 @@ function InfiniteCanvasPage() {
                         ),
                     );
                 }, { stage: "生成中" });
-                const items: GeneratedImageItem[] = useReferenceImages
-                    ? await requestEdit(generationConfig, prompt, retryImages, undefined, { signal: controller.signal })
-                    : await requestGeneration(generationConfig, prompt, { signal: controller.signal });
+                const items: GeneratedImageItem[] = usePromptHubGen && promptHubSession && phModelId
+                    ? await requestPromptHubCanvasImages({
+                          session: promptHubSession,
+                          apiBase: usePromptHubStore.getState().apiBase,
+                          prompt,
+                          count: 1,
+                          model: phModelId,
+                          resolution: mapPromptHubResolution(generationConfig),
+                          size: generationConfig.size,
+                          referenceImages: retryImages,
+                          signal: controller.signal,
+                      })
+                    : useReferenceImages
+                      ? await requestEdit(generationConfig, prompt, retryImages, undefined, { signal: controller.signal })
+                      : await requestGeneration(generationConfig, prompt, { signal: controller.signal });
                 stopProgressTicker?.();
                 stopProgressTicker = null;
                 if (!isGenerationRequestActive(node.id, controller)) return;
@@ -3503,6 +3635,7 @@ function InfiniteCanvasPage() {
                 setNodes((prev) => prev.map((item) => (item.id === node.id ? { ...item, metadata: { ...item.metadata, status: NODE_STATUS_ERROR, errorDetails } } : item)));
             } finally {
                 stopProgressTicker?.();
+                if (usePromptHubGen) void usePromptHubStore.getState().refreshGenerationAccount();
                 finishGenerationRequest(node.id, controller);
                 setRunningNodeId(null);
             }
@@ -4333,6 +4466,44 @@ function CompactAgentStatus({ status, onClick }: { status: { connected: boolean;
     );
 }
 
+function creativeProjectStateFromOps(ops: CanvasAgentOp[]) {
+    for (let index = ops.length - 1; index >= 0; index -= 1) {
+        const op = ops[index];
+        if (op.type !== "add_node" && op.type !== "update_node") continue;
+        const state = op.type === "add_node" ? op.metadata?.creativeProjectState : op.metadata?.creativeProjectState || op.patch?.metadata?.creativeProjectState;
+        if (state?.schemaVersion === 2) return state;
+    }
+    return undefined;
+}
+
+function expireRestoredCreativeAction(state: CreativeProjectState): CreativeProjectState {
+    if (state.pendingAction?.status !== "awaiting_user_confirmation") return state;
+    return {
+        ...state,
+        pendingAction: undefined,
+        awaitingUserConfirmation: false,
+        userConfirmed: false,
+        nextGap: state.recommendedAction.label,
+        updatedAt: new Date().toISOString(),
+    };
+}
+
+function expirePendingAssistantSessions(sessions: CanvasAssistantSession[]) {
+    return sessions.map((session) => ({
+        ...session,
+        messages: session.messages.map((item) => {
+            const detail = item.detail && typeof item.detail === "object" && !Array.isArray(item.detail) ? item.detail as Record<string, unknown> : null;
+            if (item.role !== "tool" || detail?.status !== "pending") return item;
+            return {
+                ...item,
+                title: "确认已过期",
+                text: "页面刷新后执行上下文已失效，请让 Agent 重新提出该动作。",
+                detail: { ...detail, status: "expired" },
+            };
+        }),
+    }));
+}
+
 function imageExtension(dataUrl: string) {
     return dataUrl.match(/^data:image[/]([^;]+)/)?.[1] || dataUrl.match(/image[/]([^;]+)/)?.[1] || "png";
 }
@@ -4582,6 +4753,24 @@ function mapPromptHubResolution(config: AiConfig): "1k" | "2k" | "4k" {
     if (s.includes("4k") || s.includes("4096")) return "4k";
     if (s.includes("2k") || s.includes("2048")) return "2k";
     return "1k";
+}
+
+function promptHubVideoDuration(config: AiConfig) {
+    const seconds = Math.round(Number(config.videoSeconds) || 0);
+    return seconds > 0 ? Math.min(60, seconds) : 5;
+}
+
+function promptHubVideoRatio(config: AiConfig) {
+    const value = String(config.size || "").trim();
+    return ["16:9", "9:16", "1:1"].includes(value) ? value : "16:9";
+}
+
+function promptHubVideoResolution(config: AiConfig) {
+    const value = String(config.vquality || "").trim().toLowerCase();
+    if (value.includes("4k")) return "4k";
+    if (value.includes("1080")) return "1080p";
+    if (value.includes("480")) return "480p";
+    return "720p";
 }
 
 function normalizeConnection(firstNodeId: string, secondNodeId: string, nodes: CanvasNodeData[], firstHandleType: "source" | "target") {

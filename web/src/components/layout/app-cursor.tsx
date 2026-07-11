@@ -2,11 +2,12 @@
 
 import { useEffect, useRef, useState } from "react";
 import type { CSSProperties } from "react";
+import { Hand } from "lucide-react";
 
 import { canvasThemes } from "@/lib/canvas-theme";
 import { useThemeStore } from "@/stores/use-theme-store";
 
-type CursorMode = "default" | "link" | "drag" | "text";
+type CursorMode = "default" | "link" | "drag" | "pan" | "text";
 
 function cursorModeFromTarget(target: EventTarget | null): CursorMode {
     if (!(target instanceof Element)) return "default";
@@ -19,6 +20,7 @@ function cursorModeFromTarget(target: EventTarget | null): CursorMode {
 function applyMode(root: HTMLElement, mode: CursorMode) {
     root.classList.toggle("is-link", mode === "link");
     root.classList.toggle("is-drag", mode === "drag");
+    root.classList.toggle("is-pan", mode === "pan");
     root.classList.toggle("is-text", mode === "text");
 }
 
@@ -57,6 +59,7 @@ export function AppCursor() {
         let targetY = window.innerHeight / 2;
         let lastTarget: EventTarget | null = null;
         let currentMode: CursorMode = "default";
+        let spacePanActive = false;
 
         const show = () => root.classList.add("is-visible");
         const hide = () => root.classList.remove("is-visible");
@@ -73,9 +76,16 @@ export function AppCursor() {
             pointer.style.transform = `translate3d(${targetX - 4}px, ${targetY - 3}px, 0)`;
             if (event.target !== lastTarget) {
                 lastTarget = event.target;
-                setMode(cursorModeFromTarget(event.target));
+                setMode(spacePanActive ? "pan" : cursorModeFromTarget(event.target));
             }
             show();
+        };
+
+        const syncCanvasPanState = (event: Event) => {
+            const detail = (event as CustomEvent<{ active?: boolean; panning?: boolean }>).detail;
+            spacePanActive = Boolean(detail?.active || detail?.panning);
+            setMode(spacePanActive ? "pan" : cursorModeFromTarget(lastTarget));
+            root.classList.toggle("is-pan-grabbing", Boolean(detail?.panning));
         };
 
         const down = () => {
@@ -90,6 +100,7 @@ export function AppCursor() {
         window.addEventListener("pointerdown", down, { passive: true });
         window.addEventListener("pointerup", up, { passive: true });
         window.addEventListener("pointercancel", up, { passive: true });
+        window.addEventListener("canvas-space-pan-state", syncCanvasPanState);
         document.addEventListener("mouseleave", hide);
         document.addEventListener("mouseenter", show);
 
@@ -99,6 +110,7 @@ export function AppCursor() {
             window.removeEventListener("pointerdown", down);
             window.removeEventListener("pointerup", up);
             window.removeEventListener("pointercancel", up);
+            window.removeEventListener("canvas-space-pan-state", syncCanvasPanState);
             document.removeEventListener("mouseleave", hide);
             document.removeEventListener("mouseenter", show);
         };
@@ -127,6 +139,7 @@ export function AppCursor() {
                     <path className="app-cursor-arrow-shell" d="M4.3 3.1 23.2 18.4l-8.1 1.1-4.4 8.8L4.3 3.1Z" />
                     <path className="app-cursor-arrow-core" d="M6.9 8.1 18 17.1l-5.1.7-2.8 5.7L6.9 8.1Z" />
                 </svg>
+                <Hand className="app-cursor-hand" strokeWidth={1.9} />
                 <span className="app-cursor-textbar" />
             </div>
         </div>

@@ -74,7 +74,7 @@ const PROMPT_HUB_DEFAULT_IMAGE_MODEL = "ph-hub:image2";
 const PROMPT_HUB_DEFAULT_VIDEO_MODEL = "ph-hub:sd2.0";
 const PROMPT_HUB_DEFAULT_TEXT_MODEL = "ph-hub:creative-5-5";
 const PROMPT_HUB_MODEL_PREFIX = "ph-hub:";
-const CATALOG_MODEL_SELECTION_VERSION = 1;
+const CATALOG_MODEL_SELECTION_VERSION = 2;
 export const DEFAULT_PROMPT_HUB_MODEL_SELECTIONS: Record<ModelCapability, string[]> = {
     image: ["ph-hub:image2", "ph-hub:image2-pro", "ph-hub:image2-hd", "ph-hub:lingtu-fast"],
     video: ["ph-hub:sd2.0", "ph-hub:sd2.0-fast", "ph-hub:sd2.0-mini", "ph-hub:sd2.0四图版", "ph-hub:sd2.0fast四图版", "ph-hub:sd1080-4k", "ph-hub:motion-video", "ph-hub:motion-video-1-5"],
@@ -454,9 +454,7 @@ function normalizeChannels(config: AiConfig) {
 
 function isUnusedDefaultChannel(channel: ModelChannel, index: number) {
     const defaultIdentity = channel.id === "default" || (index === 0 && channel.name === "默认渠道");
-    const baseUrl = channel.baseUrl.replace(/\/+$/, "");
-    const untouchedBaseUrl = baseUrl === OPENAI_BASE_URL || baseUrl === GEMINI_BASE_URL;
-    return defaultIdentity && !channel.apiKey.trim() && untouchedBaseUrl;
+    return defaultIdentity && !channel.apiKey.trim();
 }
 
 function normalizeCapabilityModelList(models: string[], channels: ModelChannel[], capability: ModelCapability) {

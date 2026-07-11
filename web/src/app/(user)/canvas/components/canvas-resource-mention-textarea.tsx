@@ -1,7 +1,7 @@
 "use client";
 
 import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
-import type { CSSProperties, HTMLAttributes, KeyboardEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent } from "react";
+import type { ClipboardEvent as ReactClipboardEvent, CSSProperties, HTMLAttributes, KeyboardEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent } from "react";
 import { createPortal } from "react-dom";
 import { FileText, Image as ImageIcon, Maximize2, Music2, Video } from "lucide-react";
 
@@ -180,6 +180,14 @@ export const CanvasResourceMentionTextarea = forwardRef<CanvasResourceMentionTex
         onKeyDown?.(event);
     };
 
+    const handlePaste = (event: ReactClipboardEvent<HTMLDivElement>) => {
+        event.preventDefault();
+        const plainText = event.clipboardData.getData("text/plain");
+        if (!plainText || !editorRef.current) return;
+        insertPlainTextAtSelection(editorRef.current, plainText);
+        emitChange();
+    };
+
     useEffect(() => {
         if (!fullscreenOpen) return;
         const frame = requestAnimationFrame(() => fullscreenEditorRef.current?.focusEditor());
@@ -230,11 +238,12 @@ export const CanvasResourceMentionTextarea = forwardRef<CanvasResourceMentionTex
                     }}
                     role="textbox"
                     aria-multiline="true"
-                    contentEditable
+                    contentEditable="plaintext-only"
                     suppressContentEditableWarning
                     className={`${className || ""} relative z-10 cursor-text outline-none`}
                     style={style as CSSProperties}
                     onInput={() => emitChange()}
+                    onPaste={handlePaste}
                     onKeyDown={handleKeyDown}
                     onKeyUp={() => syncMentionFromEditor()}
                     onPointerUp={() => syncMentionFromEditor()}
@@ -284,6 +293,24 @@ function serializeEditor(root: HTMLElement) {
         }
     });
     return result.replace(/\u00a0/g, " ");
+}
+
+function insertPlainTextAtSelection(root: HTMLElement, text: string) {
+    const selection = window.getSelection();
+    if (!selection?.rangeCount || !selection.anchorNode || !root.contains(selection.anchorNode)) {
+        root.appendChild(document.createTextNode(text));
+        placeCaretAtEnd(root);
+        return;
+    }
+
+    const range = selection.getRangeAt(0);
+    range.deleteContents();
+    const textNode = document.createTextNode(text);
+    range.insertNode(textNode);
+    range.setStartAfter(textNode);
+    range.collapse(true);
+    selection.removeAllRanges();
+    selection.addRange(range);
 }
 
 function serializeFragment(fragment: DocumentFragment) {

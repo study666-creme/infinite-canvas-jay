@@ -126,7 +126,7 @@ function SelectItem({
           <CheckIcon className="pointer-events-none" />
         </SelectPrimitive.ItemIndicator>
       </span>
-      <SelectPrimitive.ItemText>{children}</SelectPrimitive.ItemText>
+      <SelectPrimitive.ItemText className="min-w-0 flex-1 overflow-hidden">{children}</SelectPrimitive.ItemText>
     </SelectPrimitive.Item>
   )
 }

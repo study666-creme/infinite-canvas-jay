@@ -17,6 +17,7 @@ const authVerifyTtlMs = 30 * 60 * 1000;
 const catalogRefreshIntervalMs = 5 * 60 * 1000;
 
 export function PromptHubAuthGate({ children }: { children: ReactNode }) {
+    const hydrated = usePromptHubStore((state) => state.hydrated);
     const apiBase = usePromptHubStore((state) => state.apiBase);
     const savedEmail = usePromptHubStore((state) => state.email);
     const session = usePromptHubStore((state) => state.session);
@@ -37,6 +38,7 @@ export function PromptHubAuthGate({ children }: { children: ReactNode }) {
     useEffect(() => setEmail((value) => value || savedEmail), [savedEmail]);
 
     useEffect(() => {
+        if (!hydrated) return;
         let cancelled = false;
         const bootstrap = async () => {
             if (!session?.access_token) {
@@ -70,7 +72,7 @@ export function PromptHubAuthGate({ children }: { children: ReactNode }) {
         return () => {
             cancelled = true;
         };
-    }, [logout, session?.access_token, setLocalUser, verifySession]);
+    }, [hydrated, logout, session?.access_token, setLocalUser, verifySession]);
 
     useEffect(() => {
         if (state !== "authenticated" || !session?.access_token) return;

@@ -61,6 +61,7 @@ function PromptHubCatalogModelPicker({ capability, ...props }: CapabilityProps) 
 export function PromptHubAwareImageModelPicker(props: Props) {
     const session = usePromptHubStore((s) => s.session);
     const imageModels = usePromptHubStore((s) => s.imageModels);
+    const catalog = usePromptHubStore((s) => s.models);
     const refreshGenerationAccount = usePromptHubStore((s) => s.refreshGenerationAccount);
     const remotePricing = useRemoteModelPricingRules();
     const loggedIn = Boolean(session?.access_token);
@@ -69,8 +70,10 @@ export function PromptHubAwareImageModelPicker(props: Props) {
         [props.config.imageModels],
     );
     const catalogImageModels = useMemo(
-        () => imageModels.filter((model) => model.modality === "image" && model.selectable !== false && enabledIds.has(model.id)),
-        [enabledIds, imageModels],
+        () => [...imageModels, ...catalog.filter((model): model is PromptHubImageModel => model.modality === "image")]
+            .filter((model, index, list) => list.findIndex((candidate) => candidate.id === model.id) === index)
+            .filter((model) => model.selectable !== false && model.uiFamily !== "midjourney" && enabledIds.has(model.id)),
+        [catalog, enabledIds, imageModels],
     );
 
     usePromptHubPickerRefresh(loggedIn, refreshGenerationAccount);
@@ -290,20 +293,22 @@ function BaseModelSelect({
                                 {showLocalHeader && options.some((o) => o.kind === "ph") ? (
                                     <div className="mt-1 border-t border-border/60 pt-1 px-2 py-1 text-[11px] font-medium text-stone-500">本地 / 第三方 API</div>
                                 ) : null}
-                                <SelectItem value={opt.value} textValue={opt.label}>
-                                    <span className="flex min-w-0 items-center gap-2 pr-1">
+                                <SelectItem value={opt.value} textValue={opt.label} className="min-w-0 overflow-hidden py-1.5" title={opt.label}>
+                                    <span className="flex w-full min-w-0 items-center gap-2 pr-1">
                                         {opt.kind === "ph" ? <Sparkles className="size-4 shrink-0 text-amber-500" /> : <ModelIcon model={opt.value} />}
-                                        <span className="min-w-0 flex-1 truncate">{opt.label}</span>
-                                        {opt.pricingUnit === "token" ? (
-                                            <span className="shrink-0 text-[11px] opacity-70">按量计费</span>
-                                        ) : typeof opt.credits === "number" ? (
-                                            <span className="inline-flex shrink-0 items-center gap-1 text-[11px] tabular-nums opacity-70">
-                                                <CreditSymbol className="size-3" />
-                                                {formatCredits(opt.credits)} 积分
-                                                {opt.pricingUnit === "second" ? "/秒" : ""}
-                                                {typeof opt.yuan === "number" ? <span>（¥{formatYuan(opt.yuan)}）</span> : null}
-                                            </span>
-                                        ) : null}
+                                        <span className="grid min-w-0 flex-1 grid-cols-[minmax(0,1fr)_auto] items-center gap-2">
+                                            <span className="min-w-0 truncate">{opt.label}</span>
+                                            {opt.pricingUnit === "token" ? (
+                                                <span className="shrink-0 whitespace-nowrap text-[11px] opacity-70">按量计费</span>
+                                            ) : typeof opt.credits === "number" ? (
+                                                <span className="inline-flex shrink-0 items-center gap-1 whitespace-nowrap text-[11px] tabular-nums opacity-70">
+                                                    <CreditSymbol className="size-3" />
+                                                    {formatCredits(opt.credits)} 积分
+                                                    {opt.pricingUnit === "second" ? "/秒" : ""}
+                                                    {typeof opt.yuan === "number" ? <span>（¥{formatYuan(opt.yuan)}）</span> : null}
+                                                </span>
+                                            ) : null}
+                                        </span>
                                     </span>
                                 </SelectItem>
                             </div>

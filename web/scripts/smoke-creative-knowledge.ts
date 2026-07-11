@@ -1,66 +1,47 @@
 import assert from "node:assert/strict";
 import fs from "node:fs/promises";
 import path from "node:path";
-import { CREATIVE_IMPORTED_KNOWLEDGE_META } from "../src/app/(user)/canvas/utils/creative-knowledge-pack.generated";
-import { buildCreativeAgentKnowledgeContext, explainCreativeKnowledgeRetrieval, retrieveCreativeKnowledgeCards } from "../src/app/(user)/canvas/utils/short-drama-agent-prompt";
 
-const scenarios = [
-    {
-        name: "人物视角衔接",
-        mode: "short_drama" as const,
-        prompt: "检查第一人称或第三人称限知叙事里的感知与反应链，避免人物知道不该知道的信息。",
-    },
-    {
-        name: "世界观规则",
-        mode: "short_drama" as const,
-        prompt: "为仙侠短剧建立可执行的世界规则、资源限制和跨集冲突，不要只堆设定名词。",
-    },
-    {
-        name: "声音叙事",
-        mode: "general" as const,
-        prompt: "设计一部无对白短片的声音桥、主观听点、环境声和音乐进入时机。",
-    },
-    {
-        name: "演员调度",
-        mode: "general" as const,
-        prompt: "检查双人对话场景的演员调度、走位、空间关系、对白重叠和即时反应。",
-    },
-    {
-        name: "服装与色彩",
-        mode: "short_drama" as const,
-        prompt: "按角色弧光设计服装轮廓、色彩、材质和表面处理，并控制制作预算。",
-    },
-];
+import { inspectPrivateCanvasContext, privateCanvasContextStatus } from "../../canvas-agent/src/private-context.js";
 
-assert.equal(CREATIVE_IMPORTED_KNOWLEDGE_META.cardCount, 173);
-assert.equal(CREATIVE_IMPORTED_KNOWLEDGE_META.activeCardCount, 173);
+type SmokeScenario = { name: string; prompt: string; minHits?: number; maxHits?: number; expectedTitles?: string[] };
+type SmokeConfig = { expectedActiveCardCount?: number; scenarios?: SmokeScenario[] };
+
+const configFile = path.resolve(process.env.CANVAS_AGENT_PRIVATE_SMOKE_SCENARIOS || path.join(process.cwd(), "knowledge", "creative", "retrieval-smoke-scenarios.json"));
+let config: SmokeConfig;
+try {
+    config = JSON.parse(await fs.readFile(configFile, "utf8")) as SmokeConfig;
+} catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+        console.log(`Private knowledge smoke skipped: no local scenario file at ${configFile}`);
+        process.exit(0);
+    }
+    throw error;
+}
+
+const scenarios = Array.isArray(config.scenarios) ? config.scenarios : [];
+assert.ok(scenarios.length > 0, "私有检索场景文件没有有效场景");
+const status = privateCanvasContextStatus();
+assert.equal(status.enabled, true, "本机私有扩展未启用");
+assert.equal(status.knowledgeLoaded, true, "本机私有知识报告未加载");
+if (config.expectedActiveCardCount !== undefined) assert.equal(status.activeCardCount, config.expectedActiveCardCount);
+
 const auditScenarios = [];
-
 for (const scenario of scenarios) {
-    const cards = retrieveCreativeKnowledgeCards(scenario.prompt, scenario.mode, 5);
-    const imported = cards.filter((card) => !card.sourceIds.includes("built-in-core"));
-    assert.ok(cards.length > 0 && cards.length <= 5, `${scenario.name} 没有按 1-5 张预算召回`);
-    assert.equal(new Set(cards.map((card) => card.id)).size, cards.length, `${scenario.name} 召回了重复卡`);
-    assert.ok(
-        cards.every((card) => card.status === "verified"),
-        `${scenario.name} 召回了未确认卡`,
-    );
-    assert.ok(imported.length > 0, `${scenario.name} 没有命中本次导入知识`);
-
-    const context = buildCreativeAgentKnowledgeContext(scenario.prompt, scenario.mode, 5);
-    assert.match(context, new RegExp(imported[0].title.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
-    const explanation = explainCreativeKnowledgeRetrieval(scenario.prompt, scenario.mode, 5);
-    assert.equal(explanation.length, cards.length);
-    assert.ok(
-        explanation.every((hit) => hit.matchedTerms.length > 0 && hit.sources.length > 0),
-        `${scenario.name} 缺少可解释命中信息`,
-    );
-    auditScenarios.push({ ...scenario, hits: explanation });
-    console.log(`${scenario.name}: ${cards.map((card) => card.title).join(" | ")}`);
+    const result = inspectPrivateCanvasContext(scenario.prompt);
+    const minHits = Math.max(0, scenario.minHits ?? 1);
+    const maxHits = Math.max(minHits, Math.min(5, scenario.maxHits ?? 5));
+    assert.equal(result.relevant, true, `${scenario.name} 没有启用相关私有上下文`);
+    assert.ok(result.hits.length >= minHits && result.hits.length <= maxHits, `${scenario.name} 应召回 ${minHits}-${maxHits} 张，实际 ${result.hits.length} 张`);
+    assert.equal(new Set(result.hits.map((hit) => hit.id)).size, result.hits.length, `${scenario.name} 召回了重复卡`);
+    assert.ok(result.hits.every((hit) => hit.matchedTerms.length > 0 && hit.sources.length > 0), `${scenario.name} 缺少可解释命中信息`);
+    for (const title of scenario.expectedTitles || []) assert.ok(result.hits.some((hit) => hit.title === title), `${scenario.name} 未命中预期卡：${title}`);
+    auditScenarios.push({ name: scenario.name, prompt: scenario.prompt, hits: result.hits });
+    console.log(`${scenario.name}: ${result.hits.map((hit) => hit.title).join(" | ")}`);
 }
 
 const reportFile = path.join(process.cwd(), "knowledge", "creative", ".tmp", "creative-knowledge-retrieval-audit.json");
 await fs.mkdir(path.dirname(reportFile), { recursive: true });
-await fs.writeFile(reportFile, JSON.stringify({ generatedAt: new Date().toISOString(), activeImportedCards: CREATIVE_IMPORTED_KNOWLEDGE_META.activeCardCount, scenarios: auditScenarios }, null, 2), "utf8");
-console.log(`Knowledge smoke passed: ${scenarios.length} scenarios, ${CREATIVE_IMPORTED_KNOWLEDGE_META.activeCardCount} active imported cards.`);
+await fs.writeFile(reportFile, JSON.stringify({ generatedAt: new Date().toISOString(), privateExtension: status, scenarios: auditScenarios }, null, 2), "utf8");
+console.log(`Private knowledge smoke passed: ${scenarios.length} scenarios, ${status.activeCardCount} active cards.`);
 console.log(`Audit report: ${reportFile}`);

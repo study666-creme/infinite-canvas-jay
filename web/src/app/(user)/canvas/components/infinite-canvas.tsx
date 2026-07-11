@@ -53,6 +53,21 @@ export function InfiniteCanvas({ containerRef, worldLayerRef, viewport, backgrou
     const [isPanning, setIsPanning] = useState(false);
 
     useEffect(() => {
+        window.dispatchEvent(
+            new CustomEvent("canvas-space-pan-state", {
+                detail: { active: isSpacePressed, panning: isPanning },
+            }),
+        );
+    }, [isPanning, isSpacePressed]);
+
+    useEffect(
+        () => () => {
+            window.dispatchEvent(new CustomEvent("canvas-space-pan-state", { detail: { active: false, panning: false } }));
+        },
+        [],
+    );
+
+    useEffect(() => {
         scaleRef.current = viewport.k;
         viewportRef.current = viewport;
     }, [viewport]);
@@ -255,8 +270,9 @@ export function InfiniteCanvas({ containerRef, worldLayerRef, viewport, backgrou
 
     const handlePointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
         const target = event.target instanceof Element ? event.target : null;
-        if (shouldIgnoreCanvasPointer(target)) return;
-        if (target?.closest("[data-connection-create-menu],[data-connection-handle]")) return;
+        const isSpaceMousePan = event.pointerType === "mouse" && event.button === 0 && isSpacePressed;
+        if (!isSpaceMousePan && shouldIgnoreCanvasPointer(target)) return;
+        if (!isSpaceMousePan && target?.closest("[data-connection-create-menu],[data-connection-handle]")) return;
         const isBackgroundClick = !target?.closest("[data-node-id],[data-connection-id],[data-group-frame]");
 
         if (event.pointerType !== "mouse" && event.button === 0 && isBackgroundClick) {
@@ -290,8 +306,9 @@ export function InfiniteCanvas({ containerRef, worldLayerRef, viewport, backgrou
             return;
         }
 
-        if (event.button === 1 || (event.button === 0 && isSpacePressed && isBackgroundClick)) {
+        if (event.button === 1 || isSpaceMousePan) {
             event.preventDefault();
+            event.stopPropagation();
             event.currentTarget.setPointerCapture(event.pointerId);
             panState.current = {
                 isPanning: true,
@@ -408,6 +425,7 @@ export function InfiniteCanvas({ containerRef, worldLayerRef, viewport, backgrou
     return (
         <div
             ref={containerRef}
+            data-canvas-surface="true"
             className={`relative h-full w-full select-none overflow-hidden ${isPanning ? "cursor-grabbing" : isSpacePressed ? "cursor-grab" : "cursor-default"}`}
             style={{ background: theme.canvas.background, touchAction: "none" }}
             onPointerDown={handlePointerDown}

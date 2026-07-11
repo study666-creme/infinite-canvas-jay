@@ -15,6 +15,7 @@ import {
 import { loadPromptHubGenerationAccount } from "@/services/prompt-hub-generation";
 
 type PromptHubStore = {
+    hydrated: boolean;
     apiBase: string;
     session: PromptHubSession | null;
     email: string;
@@ -31,6 +32,7 @@ type PromptHubStore = {
     getSession: () => Promise<PromptHubSession | null>;
     verifySession: () => Promise<boolean>;
     refreshGenerationAccount: () => Promise<void>;
+    setHydrated: (hydrated: boolean) => void;
 };
 
 let generationAccountRefresh: Promise<void> | null = null;
@@ -63,6 +65,7 @@ function normalizePromptHubApiBase(value: string) {
 export const usePromptHubStore = create<PromptHubStore>()(
     persist(
         (set, get) => ({
+            hydrated: false,
             apiBase: PROMPT_HUB_DEFAULTS.apiBase,
             session: null,
             email: "",
@@ -74,6 +77,7 @@ export const usePromptHubStore = create<PromptHubStore>()(
             setEmail: (email) => set({ email }),
             setSession: (session) => set({ session }),
             setImageModel: (imageModel) => set({ imageModel: imageModel.trim() || "image2" }),
+            setHydrated: (hydrated) => set({ hydrated }),
             login: async (email, password) => {
                 const configuredApiBase = normalizePromptHubApiBase(get().apiBase);
                 let activeApiBase = configuredApiBase;
@@ -152,6 +156,9 @@ export const usePromptHubStore = create<PromptHubStore>()(
                 email: state.email,
                 imageModel: state.imageModel,
             }),
+            onRehydrateStorage: () => (state) => {
+                state?.setHydrated(true);
+            },
         },
     ),
 );

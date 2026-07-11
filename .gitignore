@@ -30,6 +30,7 @@ web/knowledge/creative/videos/inbox/*
 web/knowledge/creative/creative-knowledge-report.json
 web/knowledge/creative/知识卡-*
 web/knowledge/creative/agent-context.md
+web/knowledge/creative/retrieval-smoke-scenarios.json
 web/src/app/(user)/canvas/utils/creative-knowledge-pack.generated.ts
 web/src/app/(user)/canvas/utils/creative-case-library.generated.ts
 web/src/app/(user)/canvas/utils/short-drama-agent-prompt.ts

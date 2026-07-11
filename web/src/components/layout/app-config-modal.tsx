@@ -2,7 +2,7 @@
 
 import { App, Button, Form, Input, Modal, Progress, Segmented, Select, Tabs } from "antd";
 import { CircleAlert, Cloud, Plus, RefreshCw, Trash2, Wifi } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import { PromptHubAwareModelPicker } from "@/components/prompt-hub-model-picker";
 import { ExportFolderSettingsPanel, ModelPricingSettingsPanel } from "@/components/layout/export-pricing-settings";
@@ -10,7 +10,7 @@ import { fetchChannelModels } from "@/services/api/image";
 import { syncAppDataToWebdav, type AppSyncDomainKey, type AppSyncProgressEvent } from "@/services/app-sync";
 import { testWebdavConnection, WEBDAV_MANIFEST_FILE_NAME } from "@/services/webdav-sync";
 import { audioFormatOptions, audioVoiceOptions, normalizeAudioSpeedValue } from "@/lib/audio-generation";
-import { isPromptHubModelValue, promptHubModelPickerLabel, toPromptHubModelValue } from "@/services/prompt-hub-models";
+import { isPromptHubModelValue, parsePromptHubModelId, promptHubModelPickerLabel, toPromptHubModelValue } from "@/services/prompt-hub-models";
 import type { PromptHubCatalogModel, PromptHubImageModel } from "@/services/prompt-hub";
 import { usePromptHubStore } from "@/stores/use-prompt-hub-store";
 import { createModelChannel, defaultBaseUrlForApiFormat, filterModelsByCapability, modelOptionLabel, modelOptionsFromChannels, normalizeModelOptionValue, useConfigStore, type AiConfig, type ApiCallFormat, type ModelCapability, type ModelChannel } from "@/stores/use-config-store";
@@ -79,7 +79,12 @@ export function AppConfigModal() {
     const clearPromptContinue = useConfigStore((state) => state.clearPromptContinue);
     const promptHubImageModels = usePromptHubStore((state) => state.imageModels);
     const promptHubCatalogModels = usePromptHubStore((state) => state.models);
+    const refreshGenerationAccount = usePromptHubStore((state) => state.refreshGenerationAccount);
     const webdavReady = Boolean(webdav.url.trim());
+
+    useEffect(() => {
+        if (isConfigOpen) void refreshGenerationAccount();
+    }, [isConfigOpen, refreshGenerationAccount]);
 
     const saveConfig = (nextConfig: AiConfig) => {
         (Object.keys(nextConfig) as Array<keyof AiConfig>).forEach((key) => updateConfig(key, nextConfig[key]));
@@ -311,7 +316,7 @@ export function AppConfigModal() {
                                 <div className="grid gap-4 md:grid-cols-2">
                                     {modelGroups.map((group) => {
                                         const values = config[group.modelsKey];
-                                        const promptHubOptions = promptHubModelOptions(group.capability, promptHubImageModels, promptHubCatalogModels);
+                                        const promptHubOptions = promptHubModelOptions(group.capability, promptHubImageModels, promptHubCatalogModels, values);
                                         const localOptions = filterModelsByCapability(config.models, group.capability).map((model) => ({ label: modelOptionLabel(config, model), value: model }));
                                         const options = [
                                             ...(promptHubOptions.length ? [{ label: "卡藏 API", options: promptHubOptions }] : []),
@@ -461,14 +466,20 @@ function promptHubModelOptions(
     capability: ModelCapability,
     imageModels: PromptHubImageModel[],
     catalogModels: PromptHubCatalogModel[],
+    selectedModels: string[],
 ) {
+    const catalogImageModels = catalogModels.filter((model): model is PromptHubImageModel => model.modality === "image");
     const source: PromptHubCatalogModel[] = capability === "image"
-        ? imageModels
+        ? [...imageModels, ...catalogImageModels].filter((model) => model.selectable !== false && model.uiFamily !== "midjourney")
         : catalogModels.filter((model) => {
               if (model.modality !== capability) return false;
               return capability === "text" ? model.operation !== "generate" : model.operation !== "chat";
           });
-    return source
+    const selectedFallbacks = selectedModels.flatMap((value) => {
+        const id = parsePromptHubModelId(value);
+        return id ? [{ id, label: promptHubModelPickerLabel(id) }] : [];
+    });
+    return [...source, ...selectedFallbacks]
         .filter((model, index, list) => list.findIndex((candidate) => candidate.id === model.id) === index)
         .map((model) => ({
             value: toPromptHubModelValue(model.id),

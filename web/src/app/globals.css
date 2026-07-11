@@ -263,6 +263,27 @@
             transform 100ms cubic-bezier(0.2, 0.9, 0.2, 1);
     }
 
+    .app-cursor-hand {
+        position: absolute;
+        left: -7px;
+        top: -8px;
+        width: 30px;
+        height: 30px;
+        color: var(--app-cursor-fill);
+        fill: color-mix(in srgb, var(--app-cursor-accent) 16%, transparent);
+        filter:
+            drop-shadow(0 1px 2px rgba(0, 0, 0, 0.32))
+            drop-shadow(0 7px 14px var(--app-cursor-shadow));
+        opacity: 0;
+        transform: rotate(-10deg) scale(0.78);
+        transform-origin: 50% 55%;
+        transition:
+            color 100ms ease,
+            fill 100ms ease,
+            opacity 90ms ease,
+            transform 110ms cubic-bezier(0.2, 0.9, 0.2, 1);
+    }
+
     .app-cursor.is-link .app-cursor-arrow {
         transform: scale(0.84);
         filter:
@@ -289,6 +310,24 @@
         width: 15px;
         opacity: 0.84;
         transform: translate3d(1px, -2px, 0) rotate(-18deg);
+    }
+
+    .app-cursor.is-pan .app-cursor-arrow,
+    .app-cursor.is-pan .app-cursor-pointer::after,
+    .app-cursor.is-pan .app-cursor-textbar {
+        opacity: 0;
+    }
+
+    .app-cursor.is-pan .app-cursor-hand {
+        opacity: 1;
+        transform: rotate(-5deg) scale(1);
+    }
+
+    .app-cursor.is-pan.is-down .app-cursor-hand,
+    .app-cursor.is-pan.is-pan-grabbing .app-cursor-hand {
+        color: color-mix(in srgb, var(--app-cursor-fill) 76%, var(--app-cursor-accent));
+        fill: color-mix(in srgb, var(--app-cursor-accent) 34%, transparent);
+        transform: translate3d(1px, 1px, 0) rotate(-2deg) scale(0.88);
     }
 
     .app-cursor.is-text .app-cursor-arrow {

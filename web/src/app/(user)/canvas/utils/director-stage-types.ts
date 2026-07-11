@@ -59,6 +59,9 @@ export type DirectorStageCapture = {
     height: number;
 };
 
+export const DIRECTOR_STAGE_PREVIEW_BATCH_SIZE = 10;
+export const DIRECTOR_STAGE_MAX_PACKET_SLOTS = 60;
+
 export const DIRECTOR_STAGE_ACTIONS = [
     "canvas_director_get_state",
     "canvas_director_load_packet",
@@ -90,7 +93,8 @@ export function directorStageActionLabel(value: string) {
 
 export function normalizeDirectorStagePacket(value: unknown): DirectorStagePacket {
     const packet = record(value);
-    const rawSlots = Array.isArray(packet.slots) ? packet.slots.slice(0, 10) : [];
+    const rawSlots = Array.isArray(packet.slots) ? packet.slots : [];
+    if (rawSlots.length > DIRECTOR_STAGE_MAX_PACKET_SLOTS) throw new Error(`单个分镜包最多支持 ${DIRECTOR_STAGE_MAX_PACKET_SLOTS} 个镜头，请拆成多个分镜包后再导入`);
     if (!rawSlots.length) throw new Error("导演台分镜包至少需要一个镜头槽位");
 
     const usedIds = new Set<string>();

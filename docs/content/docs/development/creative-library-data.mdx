@@ -5,7 +5,7 @@ description: 本地摄取、SQLite 审核状态与前端静态索引
 
 # 创作资料库数据
 
-本地数据库位于 `web/data/creative-library.sqlite`，只用于摄取缓存、审核状态和失败重试。浏览器与 Vercel 读取生成后的 TypeScript 静态索引，不直接连接 SQLite。
+本地数据库位于 `web/data/creative-library.sqlite`，只用于摄取缓存、审核状态和失败重试。该流程是可选的私有扩展；公开浏览器 Agent 与 Vercel 部署不会读取 SQLite，也不会自动加载生成索引。
 
 原始材料分别保留在：
 
@@ -25,14 +25,18 @@ web/knowledge/creative/videos/inbox/ 视频收件箱
 - `story_cases`：人物、关系、故事发动机、真实钩子、节奏和禁止照搬项，不保存完整原文。
 - `ingest_jobs`：知识、案例和字幕任务的成功、失败与重试记录。
 
-只有 `verified` 和 `auto_verified` 知识卡进入运行时检索。模型失败或证据不足的内容保留为 `candidate`。
+只有经过用户明确确认的 `verified` 知识卡和故事案例进入运行时检索。`auto_verified` 仅表示已经独立审核、仍待用户确认，并与普通 `candidate` 一样留在候选区；模型失败或证据不足的内容也不得进入运行时。
+
+受控 Agent 蒸馏使用两阶段审核：候选代理逐来源生成草稿，独立审核代理再逐卡给出 `keep`、中文 `auditReason` 和可追溯 `evidenceSummary`。SRT/VTT 代表分块保留时间范围；证据摘要必须包含视频 ID 与时段。视觉依赖、低覆盖或严重 ASR 错词不能仅凭字幕通过审核。
+
+来源权威度与召回作用域分开保存：`core` 用于通用创作骨架，`specialist` 按领域触发，`extension` 只在明确相关任务中触发，`corroboration` 只做术语和证据校核。完整书籍可产生多于五张卡；五张只是每轮创作召回的上限。
 
 ## 生成索引
 
 - `creative-knowledge-pack.generated.ts`：审核后的方法卡。
 - `creative-case-library.generated.ts`：审核后的故事案例结构。
 
-项目黑板中的用户确认事实和活动硬约束始终高于知识与案例。
+这些文件默认不提交，公开构建也不包含。仓库内的本机 `canvas-agent` 可在私有说明或报告实际存在时按任务加载，并提供受 token 保护的命中预览；用户确认的项目事实和约束始终高于知识与案例。
 
 ## 常用命令
 

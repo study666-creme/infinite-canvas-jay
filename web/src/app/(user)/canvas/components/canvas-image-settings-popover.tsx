@@ -6,7 +6,7 @@ import { createPortal } from "react-dom";
 import { imageJimengSummaryParts, ImageSettingsPanel, normalizeJimengQualityValue } from "@/components/image-settings-panel";
 import { JimengSummaryText } from "@/components/jimeng-settings-primitives";
 import { canvasThemes } from "@/lib/canvas-theme";
-import { parsePromptHubModelId, promptHubImageAspectRatios, promptHubImageResolutions } from "@/services/prompt-hub-models";
+import { parsePromptHubModelId, promptHubImageAspectRatios, promptHubImageCountRange, promptHubImageResolutions } from "@/services/prompt-hub-models";
 import { usePromptHubStore } from "@/stores/use-prompt-hub-store";
 import { useThemeStore } from "@/stores/use-theme-store";
 import type { AiConfig } from "@/stores/use-config-store";
@@ -33,7 +33,8 @@ export function CanvasImageSettingsPopover({ config, onConfigChange, onOpenChang
     const promptHubModel = promptHubModelId ? promptHubModels.find((model) => model.id === promptHubModelId) : null;
     const aspectRatios = promptHubImageAspectRatios(promptHubModel);
     const resolutions = promptHubImageResolutions(promptHubModel);
-    const summaryParts = jimeng ? imageJimengSummaryParts(config, { aspectRatios, resolutions }) : [];
+    const countRange = promptHubModel ? promptHubImageCountRange(promptHubModel) : { min: 1, max: 15, fixed: null };
+    const summaryParts = jimeng ? imageJimengSummaryParts(config, { aspectRatios, resolutions, minCount: countRange.min, maxCount: countRange.max }) : [];
 
     useEffect(() => {
         if (!promptHubModel) return;
@@ -44,7 +45,12 @@ export function CanvasImageSettingsPopover({ config, onConfigChange, onOpenChang
         if (aspectRatios.length && !aspectRatios.includes(config.size)) {
             onConfigChange("size", aspectRatios.includes("auto") ? "auto" : aspectRatios[0]);
         }
-    }, [aspectRatios, config.quality, config.size, onConfigChange, promptHubModel, resolutions]);
+        const count = Math.floor(Number(config.count) || countRange.min);
+        const normalizedCount = Math.max(countRange.min, Math.min(countRange.max, count));
+        if (String(normalizedCount) !== String(config.count)) {
+            onConfigChange("count", String(normalizedCount));
+        }
+    }, [aspectRatios, config.count, config.quality, config.size, countRange.max, countRange.min, onConfigChange, promptHubModel, resolutions]);
 
     const updateOpen = (nextOpen: boolean) => {
         setOpen(nextOpen);
@@ -73,7 +79,7 @@ export function CanvasImageSettingsPopover({ config, onConfigChange, onOpenChang
         };
     }, [open]);
 
-    const panel = open && buttonRect ? <ImageSettingsPortal buttonRect={buttonRect} panelRef={panelRef} placement={placement} theme={theme} config={config} onConfigChange={onConfigChange} variant={variant} aspectRatios={aspectRatios} resolutions={resolutions} /> : null;
+    const panel = open && buttonRect ? <ImageSettingsPortal buttonRect={buttonRect} panelRef={panelRef} placement={placement} theme={theme} config={config} onConfigChange={onConfigChange} variant={variant} aspectRatios={aspectRatios} resolutions={resolutions} minCount={countRange.min} maxCount={countRange.max} /> : null;
 
     return (
         <>
@@ -103,6 +109,8 @@ function ImageSettingsPortal({
     variant,
     aspectRatios,
     resolutions,
+    minCount,
+    maxCount,
 }: {
     buttonRect: DOMRect;
     panelRef: RefObject<HTMLDivElement | null>;
@@ -113,6 +121,8 @@ function ImageSettingsPortal({
     variant: CanvasImageSettingsPopoverProps["variant"];
     aspectRatios: string[];
     resolutions: string[];
+    minCount: number;
+    maxCount: number;
 }) {
     const width = Math.min(420, window.innerWidth - 24);
     const gap = 8;
@@ -144,7 +154,7 @@ function ImageSettingsPortal({
             onMouseDown={(event) => event.stopPropagation()}
             onClick={(event) => event.stopPropagation()}
         >
-            <ImageSettingsPanel config={config} onConfigChange={(key, value) => onConfigChange(key, value)} theme={theme} variant={variant} className="space-y-4" showTitle={false} aspectRatios={aspectRatios} resolutions={resolutions} />
+            <ImageSettingsPanel config={config} onConfigChange={(key, value) => onConfigChange(key, value)} theme={theme} variant={variant} className="space-y-4" showTitle={false} aspectRatios={aspectRatios} resolutions={resolutions} minCount={minCount} maxCount={maxCount} />
         </div>,
         document.body,
     );

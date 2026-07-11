@@ -10,12 +10,11 @@ import { motion } from "motion/react";
 import { canvasThemes } from "@/lib/canvas-theme";
 import { useThemeStore } from "@/stores/use-theme-store";
 import { useUserStore } from "@/stores/use-user-store";
-import { useCanvasAgentStore, type AgentAttachment, type AgentChatItem, type AgentEventLog, type AgentPanelTab, type AgentPendingToolCall, type AgentThreadSummary, type CanvasAgentCreativeMode } from "../stores/use-canvas-agent-store";
+import { useCanvasAgentStore, type AgentAttachment, type AgentChatItem, type AgentEventLog, type AgentPanelTab, type AgentPendingToolCall, type AgentThreadSummary } from "../stores/use-canvas-agent-store";
 import { summarizeCanvasAgentOps, type CanvasAgentOp, type CanvasAgentSnapshot } from "../utils/canvas-agent-ops";
 import { directorStageActionLabel, isDirectorStageActionName, isDirectorStageReadAction, type DirectorStageActionHandler } from "../utils/director-stage-types";
-import { applyShortDramaAgentMode, isShortDramaAgentPresetPrompt } from "../utils/short-drama-agent-prompt";
+import { buildCreativeToolAction, isSubstantiveCreativeOps, updateCreativeActionStatusOps, updateCreativeProjectBlackboardOps, type CreativeProjectStatePatch } from "../utils/creative-project-state";
 import { AgentChatComposer, AgentChatMessage, AgentPanelTabs, AgentPendingToolCard, AgentWorkingMessage, type CanvasAgentChatAttachment } from "./canvas-agent-chat-ui";
-import { ShortDramaAgentPresetButton } from "./short-drama-agent-preset-button";
 
 const PANEL_MOTION_SECONDS = 0.5;
 const MAX_ATTACHMENTS = 6;
@@ -49,7 +48,7 @@ export function CanvasLocalAgentPanel({ snapshot, canUndoOps, collapsed, embedde
     const user = useUserStore((state) => state.user);
     const { message, modal } = App.useApp();
     const searchParams = useSearchParams();
-    const { width, url, token, connected, enabled, prompt, attachments, sending, waiting, messages, eventLogs, threads, activeThreadId, workspacePath, loadingThreads, activeTab, creativeMode, confirmTools, activity, connectError, pendingTool, setAgentState, addMessage: pushMessage, addEventLog: pushEventLog, clearEventLogs } = useCanvasAgentStore();
+    const { width, url, token, connected, enabled, prompt, attachments, sending, waiting, messages, eventLogs, threads, activeThreadId, workspacePath, loadingThreads, activeTab, confirmTools, activity, connectError, pendingTool, setAgentState, addMessage: pushMessage, addEventLog: pushEventLog, clearEventLogs } = useCanvasAgentStore();
     const [resizing, setResizing] = useState(false);
     const listRef = useRef<HTMLDivElement>(null);
     const snapshotRef = useRef(snapshot);
@@ -145,18 +144,14 @@ export function CanvasLocalAgentPanel({ snapshot, canUndoOps, collapsed, embedde
         });
         source.onerror = () => {
             const wasConnected = connectedRef.current;
-            const text = wasConnected ? "本地 Agent 连接失败或已断开" : "连接失败，请检查地址和 token";
+            const text = wasConnected ? "本地 Agent 已断开，正在重连" : "等待本地 Agent 启动或检查连接配置";
             if (!errorLoggedRef.current || wasConnected) {
                 addEventLog(wasConnected ? "连接断开" : "连接失败", { endpoint, error: text });
-                if (!headless) message.error(text);
+                if (!headless && wasConnected) message.warning(text);
             }
             errorLoggedRef.current = true;
             connectedRef.current = false;
-            clearAgentSession({ activity: wasConnected ? "连接断开" : "连接失败", connected: false, connectError: text });
-            if (!wasConnected) {
-                source.close();
-                setAgentState({ enabled: false });
-            }
+            setAgentState({ activity: wasConnected ? "正在重连" : "等待连接", connected: false, connectError: text, waiting: false, sending: false });
         };
         return () => {
             source.close();
@@ -178,14 +173,13 @@ export function CanvasLocalAgentPanel({ snapshot, canUndoOps, collapsed, embedde
     const sendPrompt = async () => {
         const text = prompt.trim();
         const files = attachments;
-        const requestCreativeMode: CanvasAgentCreativeMode = isShortDramaAgentPresetPrompt(text) ? "short_drama" : creativeMode;
-        const requestPrompt = promptWithAttachments(applyShortDramaAgentMode(text, requestCreativeMode), files);
+        const requestPrompt = promptWithAttachments(text, files);
         if (!connected || !requestPrompt || sending || waiting) return;
         if (attachmentPayloadBytes(files) > MAX_ATTACHMENT_PAYLOAD_BYTES) {
             addMessage({ role: "error", title: "图片过大", text: "图片附件超过 30MB，请删减后再发送。" });
             return;
         }
-        setAgentState({ activity: "发送中", sending: true, waiting: true, ...(requestCreativeMode !== creativeMode ? { creativeMode: requestCreativeMode } : {}) });
+        setAgentState({ activity: "发送中", sending: true, waiting: true });
         addMessage({ role: "user", text: text || "发送了图片", attachments: files });
         addEventLog("用户发送", { text, attachments: files.map(({ name, type, size }) => ({ name, type, size })) });
         try {
@@ -243,30 +237,40 @@ export function CanvasLocalAgentPanel({ snapshot, canUndoOps, collapsed, embedde
         setAgentState({ attachments: attachments.filter((item) => item.id !== id) });
     };
 
-    const toggleShortDramaMode = (active: boolean) => {
-        const nextMode: CanvasAgentCreativeMode = active ? "short_drama" : "general";
-        pendingToolRef.current = null;
-        setAgentState({
-            activeTab: "chat",
-            creativeMode: nextMode,
-            activeThreadId: "",
-            pendingTool: null,
-            waiting: false,
-            sending: false,
-            activity: active ? "短剧创作总监" : "就绪",
-            ...(isShortDramaAgentPresetPrompt(prompt) ? { prompt: "" } : {}),
-        });
+    const applyCreativeStateOps = (ops: CanvasAgentOp[]) => {
+        if (!ops.length) return snapshotRef.current;
+        const result = onApplyOpsRef.current(ops);
+        if (isCanvasAgentSnapshot(result)) snapshotRef.current = result;
+        return snapshotRef.current;
+    };
+
+    const markCreativeAction = (actionId: string | undefined, status: "approved" | "rejected" | "executed") => {
+        if (!actionId) return;
+        applyCreativeStateOps(updateCreativeActionStatusOps(snapshotRef.current, actionId, status));
     };
 
     const handleToolCall = async (endpoint: string, token: string, payload: AgentPendingToolCall) => {
-        if (confirmToolsRef.current && (payload.name === "canvas_apply_ops" || (isDirectorStageActionName(payload.name) && !isDirectorStageReadAction(payload.name)))) {
+        const writable = payload.name === "canvas_apply_ops" || payload.name === "canvas_update_project_blackboard" || (isDirectorStageActionName(payload.name) && !isDirectorStageReadAction(payload.name));
+        const mandatoryCreativeConfirmation = requiresLocalCreativeConfirmation(payload);
+        if ((confirmToolsRef.current || mandatoryCreativeConfirmation) && writable) {
             if (pendingToolRef.current) {
                 await postToolResult(endpoint, token, clientIdRef.current, { requestId: payload.requestId, error: "仍有待确认的画布工具调用" });
                 return;
             }
-            pendingToolRef.current = payload;
-            setAgentState({ pendingTool: payload, activity: "等待确认", waiting: false });
-            addEventLog("等待确认", payload, payload);
+            const pending = mandatoryCreativeConfirmation
+                ? {
+                      ...payload,
+                      creativeActionId: payload.requestId,
+                      mandatoryCreativeConfirmation: true,
+                  }
+                : payload;
+            if (mandatoryCreativeConfirmation) {
+                const action = buildCreativeToolAction(snapshotRef.current, { id: payload.requestId, toolNames: [payload.name], ops: payload.input?.ops });
+                applyCreativeStateOps(updateCreativeProjectBlackboardOps(snapshotRef.current, { pendingAction: action, userConfirmed: false }));
+            }
+            pendingToolRef.current = pending;
+            setAgentState({ pendingTool: pending, activity: "等待确认", waiting: false });
+            addEventLog(mandatoryCreativeConfirmation ? "等待用户确认创作动作" : "等待确认", pending, pending);
             return;
         }
         await runToolCall(endpoint, token, payload);
@@ -279,13 +283,21 @@ export function CanvasLocalAgentPanel({ snapshot, canUndoOps, collapsed, embedde
             setAgentState({ activity: directorAction ? directorStageActionLabel(payload.name) : payload.name === "canvas_apply_ops" ? "执行画布操作" : "读取画布", waiting: true });
             addEventLog(toolName(payload.name), payload, payload);
             let result: unknown;
-            if (isDirectorStageActionName(payload.name)) result = await onDirectorActionRef.current(payload.name, input);
+            if (isDirectorStageActionName(payload.name)) {
+                result = await onDirectorActionRef.current(payload.name, input);
+                const updatedSnapshot = directorResultSnapshot(result);
+                if (updatedSnapshot) snapshotRef.current = updatedSnapshot;
+            }
+            else if (payload.name === "canvas_update_project_blackboard") result = onApplyOpsRef.current(updateCreativeProjectBlackboardOps(snapshotRef.current, input as CreativeProjectStatePatch));
             else result = payload.name === "canvas_apply_ops" ? onApplyOpsRef.current(input.ops || []) : snapshotRef.current;
+            if ((payload.name === "canvas_apply_ops" || payload.name === "canvas_update_project_blackboard") && isCanvasAgentSnapshot(result)) snapshotRef.current = result;
+            markCreativeAction(payload.creativeActionId, "executed");
+            if (payload.name === "canvas_apply_ops" || payload.name === "canvas_update_project_blackboard") result = snapshotRef.current;
             await postToolResult(endpoint, token, clientIdRef.current, { requestId: payload.requestId, result });
-            if (payload.name === "canvas_apply_ops") void postState(endpoint, token, clientIdRef.current, result as CanvasAgentSnapshot);
+            if (payload.name === "canvas_apply_ops" || payload.name === "canvas_update_project_blackboard" || directorResultSnapshot(result)) void postState(endpoint, token, clientIdRef.current, snapshotRef.current);
             setAgentState({ activity: "工具完成", waiting: true });
             addEventLog(`${toolName(payload.name)}完成`, result, result);
-            addMessage({ role: "tool", title: `${toolName(payload.name)}完成`, text: directorAction ? directorStageActionLabel(payload.name) : payload.name === "canvas_apply_ops" ? summarizeCanvasAgentOps(input.ops || []) || "画布操作" : "已完成", detail: { requestId: payload.requestId, name: payload.name, input, result } });
+            addMessage({ role: "tool", title: `${toolName(payload.name)}完成`, text: directorAction ? directorStageActionLabel(payload.name) : payload.name === "canvas_apply_ops" ? summarizeCanvasAgentOps(input.ops || []) || "画布操作" : payload.name === "canvas_update_project_blackboard" ? "项目状态已更新" : "已完成", detail: { requestId: payload.requestId, name: payload.name, input, result } });
         } catch (error) {
             const message = error instanceof Error ? error.message : "画布操作失败";
             setAgentState({ activity: "工具失败", waiting: false });
@@ -296,6 +308,7 @@ export function CanvasLocalAgentPanel({ snapshot, canUndoOps, collapsed, embedde
 
     const rejectPendingTool = async () => {
         if (!pendingTool) return;
+        markCreativeAction(pendingTool.creativeActionId, "rejected");
         await postToolResult(endpoint, token, clientIdRef.current, { requestId: pendingTool.requestId, error: "用户取消了画布工具调用" });
         setAgentState({ activity: "已取消", waiting: false });
         addMessage({ role: "tool", title: "拒绝执行", text: toolName(pendingTool.name), detail: { requestId: pendingTool.requestId, name: pendingTool.name, input: pendingTool.input } });
@@ -306,6 +319,7 @@ export function CanvasLocalAgentPanel({ snapshot, canUndoOps, collapsed, embedde
     const approvePendingTool = async () => {
         if (!pendingTool) return;
         const tool = pendingTool;
+        markCreativeAction(tool.creativeActionId, "approved");
         pendingToolRef.current = null;
         setAgentState({ pendingTool: null });
         await runToolCall(endpoint, token, tool);
@@ -569,7 +583,7 @@ export function CanvasLocalAgentPanel({ snapshot, canUndoOps, collapsed, embedde
                         {messages.map((item) => (
                             <AgentChatMessage key={item.id} item={agentMessageToChatMessage(item)} theme={theme} user={user} />
                         ))}
-                        {pendingTool ? <AgentPendingToolCard summary={summarizeCanvasAgentOps(pendingTool.input?.ops || []) || toolName(pendingTool.name)} detail={{ requestId: pendingTool.requestId, name: pendingTool.name, input: pendingTool.input }} theme={theme} onReject={rejectPendingTool} onApprove={approvePendingTool} /> : null}
+                        {pendingTool ? <AgentPendingToolCard title={pendingTool.mandatoryCreativeConfirmation ? "确认创作动作" : "确认工具调用"} summary={summarizeCanvasAgentOps(pendingTool.input?.ops || []) || toolName(pendingTool.name)} detail={{ requestId: pendingTool.requestId, name: pendingTool.name, input: pendingTool.input, mandatoryCreativeConfirmation: pendingTool.mandatoryCreativeConfirmation }} theme={theme} onReject={rejectPendingTool} onApprove={approvePendingTool} /> : null}
                         {waiting && !pendingTool ? <AgentWorkingMessage theme={theme} /> : null}
                     </div>
                     <AgentChatComposer
@@ -583,12 +597,7 @@ export function CanvasLocalAgentPanel({ snapshot, canUndoOps, collapsed, embedde
                         onSubmit={sendPrompt}
                         onAddFiles={addAttachments}
                         onRemoveAttachment={removeAttachment}
-                        left={
-                            <>
-                                <ShortDramaAgentPresetButton active={creativeMode === "short_drama"} disabled={sending || waiting} onToggle={toggleShortDramaMode} />
-                                {attachments.length ? <span className="text-[11px]" style={{ color: theme.node.muted }}>{formatBytes(attachmentPayloadBytes(attachments))} / 30MB</span> : null}
-                            </>
-                        }
+                        left={attachments.length ? <span className="text-[11px]" style={{ color: theme.node.muted }}>{formatBytes(attachmentPayloadBytes(attachments))} / 30MB</span> : null}
                     />
                 </>
             )}
@@ -909,6 +918,24 @@ function shouldLogAgentEvent(event: AgentEventPayload) {
 
 function isConnectionErrorMessage(item: AgentChatItem) {
     return item.role === "error" && /连接失败|无法连接本地 Agent|本地 Agent 连接失败/.test(item.text);
+}
+
+function requiresLocalCreativeConfirmation(payload: AgentPendingToolCall) {
+    if (isDirectorStageActionName(payload.name)) return !isDirectorStageReadAction(payload.name);
+    if (payload.name === "canvas_update_project_blackboard") return true;
+    return payload.name === "canvas_apply_ops" && isSubstantiveCreativeOps(payload.input?.ops);
+}
+
+function isCanvasAgentSnapshot(value: unknown): value is CanvasAgentSnapshot {
+    if (!value || typeof value !== "object") return false;
+    const snapshot = value as Partial<CanvasAgentSnapshot>;
+    return Array.isArray(snapshot.nodes) && Array.isArray(snapshot.connections) && Array.isArray(snapshot.selectedNodeIds) && Boolean(snapshot.viewport);
+}
+
+function directorResultSnapshot(value: unknown): CanvasAgentSnapshot | undefined {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+    const snapshot = (value as { canvasSnapshot?: unknown }).canvasSnapshot;
+    return isCanvasAgentSnapshot(snapshot) ? snapshot : undefined;
 }
 
 function toolName(name: string) {

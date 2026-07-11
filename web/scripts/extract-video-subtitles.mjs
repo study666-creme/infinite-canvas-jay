@@ -17,7 +17,22 @@ const videoExts = new Set([".mp4", ".mov", ".mkv", ".avi", ".webm", ".m4v", ".ts
 const browserNames = new Set(["edge", "chrome", "firefox"]);
 const defaultMaxVideos = 200;
 const defaultIntervalSeconds = 2.5;
+const defaultItemRetries = 2;
+const itemRetryDelayMs = 3_000;
+const ytDlpTimeoutMs = Object.freeze({
+    probe: 15_000,
+    expand: 120_000,
+    metadata: 90_000,
+    subtitle: 180_000,
+    audio: 15 * 60_000,
+});
 let detectedBrowsers;
+let activeTask = null;
+let terminating = false;
+
+for (const signal of ["SIGINT", "SIGTERM"]) {
+    process.once(signal, () => terminateFromSignal(signal));
+}
 
 try {
     await main();
@@ -27,15 +42,23 @@ try {
 }
 
 async function main() {
-    const args = parseArgs(process.argv.slice(2));
+    const argv = process.argv.slice(2);
+    if (argv.includes("--help") || argv.includes("-h")) {
+        printHelp();
+        return;
+    }
+    const args = parseArgs(argv);
     const options = await normalizeOptions(args);
     const outputDir = path.resolve(appRoot, args.output || defaultOutputDir);
     await fs.mkdir(inboxDir, { recursive: true });
     await fs.mkdir(outputDir, { recursive: true });
 
     const sources = await collectInputs(args);
-    if (!sources.localInputs.length && !sources.remoteUrls.length && process.platform === "win32" && process.stdin.isTTY && !args["no-picker"]) {
+    if (!sources.localInputs.length && !sources.remoteUrls.length && process.platform === "win32" && process.stdin.isTTY && !args["no-picker"] && !options.expandOnly) {
         sources.localInputs.push(...pickVideoFiles());
+    }
+    if (options.expandOnly && sources.localInputs.length) {
+        throw new Error("--expand-only 仅接受远程 URL，不能与本地视频输入同时使用");
     }
     if (!sources.localInputs.length && !sources.remoteUrls.length) {
         console.log(`没有找到视频。可以把视频放到：${inboxDir}`);
@@ -44,9 +67,10 @@ async function main() {
         return;
     }
 
-    const ffmpeg = resolveCommand("ffmpeg");
+    const ffmpeg = resolveCommand("ffmpeg") || "";
     const ffprobe = sources.localInputs.length ? resolveCommand("ffprobe") : "";
-    if (!ffmpeg || (sources.localInputs.length && !ffprobe)) {
+    const needsFfmpeg = sources.localInputs.length > 0 || (sources.remoteUrls.length > 0 && !options.expandOnly);
+    if ((needsFfmpeg && !ffmpeg) || (sources.localInputs.length && !ffprobe)) {
         throw new Error("未找到 FFmpeg/ffprobe。请安装 Gyan.FFmpeg 后重试。");
     }
 
@@ -67,6 +91,9 @@ async function main() {
                 try {
                     const result = expandRemoteUrl({ ytDlp, sourceUrl, ffmpeg, options });
                     expanded.push(...result.entries.map((entry) => ({ ...entry, preferredAuth: result.preferredAuth })));
+                    console.log(
+                        `[合集展开] ${remoteHost(sourceUrl)}：实际条目 ${result.entries.length}，唯一 ID ${countUniqueRemoteIds(result.entries)}，认证候选 ${describeAuth(result.preferredAuth)}`,
+                    );
                 } catch (error) {
                     counters.total += 1;
                     counters.failed += 1;
@@ -74,7 +101,15 @@ async function main() {
                 }
             }
 
+            console.log(`[合集展开汇总] 实际条目 ${expanded.length}，唯一 ID ${countUniqueRemoteIds(expanded)}`);
             const namedEntries = assignRemoteOutputStems(expanded);
+            const availableEntries = namedEntries.slice(options.startIndex - 1);
+            const availableUniqueIds = countUniqueRemoteIds(availableEntries);
+            if (args["max-videos"] !== undefined && options.maxVideos === 60 && (availableEntries.length < 60 || availableUniqueIds < 60)) {
+                throw new Error(
+                    `--max-videos 60 要求从第 ${options.startIndex} 条起至少有 60 条唯一视频，但合集实际展开 ${expanded.length} 条、唯一 ID ${countUniqueRemoteIds(expanded)} 个；该起点后仅 ${availableEntries.length} 条、${availableUniqueIds} 个唯一 ID`,
+                );
+            }
             const selected = namedEntries.slice(options.startIndex - 1, options.startIndex - 1 + options.maxVideos);
             if (expanded.length && !selected.length) {
                 console.log(`[URL 字幕] --start-index ${options.startIndex} 超出已展开的 ${expanded.length} 条视频，未处理远程条目。`);
@@ -82,9 +117,25 @@ async function main() {
                 console.log(`[URL 字幕] 已按 --max-videos 限制为 ${selected.length} 条（共展开 ${expanded.length} 条）。`);
             }
 
+            if (options.expandOnly) {
+                console.log(`[合集展开完成] 将处理 ${selected.length} 条；--expand-only 未下载字幕、音频或视频。`);
+                if (counters.failed) process.exitCode = 2;
+                return;
+            }
+
             for (let index = 0; index < selected.length; index += 1) {
                 counters.total += 1;
-                const status = await processRemoteVideo({ item: selected[index], outputDir, ffmpeg, ytDlp, args, options, db });
+                const status = await processRemoteVideoWithRetries({
+                    item: selected[index],
+                    itemPosition: index + 1,
+                    itemTotal: selected.length,
+                    outputDir,
+                    ffmpeg,
+                    ytDlp,
+                    args,
+                    options,
+                    db,
+                });
                 if (status === "completed") counters.succeeded += 1;
                 if (status === "failed") counters.failed += 1;
                 if (index < selected.length - 1 && options.intervalSeconds > 0) await sleep(options.intervalSeconds * 1000);
@@ -96,6 +147,33 @@ async function main() {
 
     console.log(`字幕任务完成：${counters.succeeded}/${counters.total}。输出目录：${outputDir}`);
     if (counters.failed) process.exitCode = 2;
+}
+
+function printHelp() {
+    console.log(`用法：npm run knowledge:subtitle -- [选项] [视频文件或 URL...]
+
+远程合集选项：
+  --url <URL>             添加视频、播放列表或合集 URL，可重复
+  --url-file <文件>       从文件读取 URL，每行一条
+  --start-index <N>       从展开结果的第 N 条开始，默认 1
+  --max-videos <N>        最多处理 N 条；指定 60 时，展开不足 60 条会失败
+  --expand-only           只展开和校验条目数量，不下载任何媒体
+  --item-retries <N>      每条失败后的外层重试次数，默认 ${defaultItemRetries}
+  --interval <秒>         条目之间的等待时间，默认 ${defaultIntervalSeconds}
+
+认证选项：
+  --cookies <文件>        使用 cookies.txt，失败或超时后回退匿名访问
+  --browser <名称>        使用 edge、chrome 或 firefox，之后回退匿名访问
+
+输出选项：
+  --output <目录>         SRT 输出目录
+  --language <语言>       首选字幕或转写语言
+  --model <名称>          faster-whisper 模型，默认 small
+  --force                 重新生成已有字幕
+  --embedded-only         没有文本字幕时不做语音转写
+  --no-install            不自动安装 Python 依赖
+  --no-picker             没有输入时不打开文件选择器
+  -h, --help              显示帮助`);
 }
 
 function parseArgs(argv) {
@@ -112,8 +190,9 @@ function parseArgs(argv) {
         "start-index",
         "max-videos",
         "interval",
+        "item-retries",
     ]);
-    const booleanOptions = new Set(["force", "embedded-only", "no-install", "no-picker"]);
+    const booleanOptions = new Set(["force", "embedded-only", "no-install", "no-picker", "expand-only"]);
     let positionalOnly = false;
 
     for (let index = 0; index < argv.length; index += 1) {
@@ -157,8 +236,10 @@ async function normalizeOptions(args) {
         startIndex: positiveIntegerArg(args["start-index"], 1, "--start-index"),
         maxVideos: positiveIntegerArg(args["max-videos"], defaultMaxVideos, "--max-videos"),
         intervalSeconds: nonNegativeNumberArg(args.interval, defaultIntervalSeconds, "--interval"),
+        itemRetries: nonNegativeIntegerArg(args["item-retries"], defaultItemRetries, "--item-retries"),
         cookies: args.cookies ? path.resolve(String(args.cookies)) : "",
         browser: String(args.browser || "").toLowerCase(),
+        expandOnly: Boolean(args["expand-only"]),
     };
     if (options.cookies && options.browser) throw new Error("--cookies 与 --browser 只能选择一种登录态来源");
     if (options.browser && !browserNames.has(options.browser)) throw new Error("--browser 仅支持 edge、chrome 或 firefox");
@@ -170,6 +251,13 @@ async function normalizeOptions(args) {
         }
     }
     return options;
+}
+
+function nonNegativeIntegerArg(value, fallback, name) {
+    if (value === undefined) return fallback;
+    const parsed = Number(value);
+    if (!Number.isInteger(parsed) || parsed < 0) throw new Error(`${name} 必须是大于等于 0 的整数`);
+    return parsed;
 }
 
 function positiveIntegerArg(value, fallback, name) {
@@ -241,6 +329,8 @@ async function processLocalVideo({ input, outputDir, ffmpeg, ffprobe, args, db }
         return "skipped";
     }
     const jobId = startIngestJob(db, { jobType: "subtitle", sourceKey: input, sourcePath: input });
+    beginActiveTask({ db, jobId, label: path.basename(input) });
+    let outputPart = "";
     try {
         await fs.access(input);
         await waitForStableFile(input);
@@ -250,35 +340,45 @@ async function processLocalVideo({ input, outputDir, ffmpeg, ffprobe, args, db }
         const output = uniqueOutputPath(outputDir, input, language);
         if (!args.force && (await outputIsCurrent(input, output))) {
             finishIngestJob(db, jobId, { status: "completed" });
+            markActiveTaskFinished(jobId);
             console.log(`[字幕跳过] 已是最新：${path.relative(appRoot, output)}`);
             return "completed";
         }
 
+        outputPart = subtitlePartPath(output);
+        registerActivePart(outputPart);
+        await fs.rm(outputPart, { force: true });
         let method = "embedded";
         if (stream) {
-            const result = spawnSync(ffmpeg, ["-y", "-v", "error", "-i", input, "-map", `0:${stream.index}`, "-c:s", "srt", output], {
+            const result = spawnSync(ffmpeg, ["-y", "-v", "error", "-i", input, "-map", `0:${stream.index}`, "-c:s", "srt", "-f", "srt", outputPart], {
                 encoding: "utf8",
                 maxBuffer: 20 * 1024 * 1024,
             });
             if (result.status !== 0) {
                 if (args["embedded-only"]) throw new Error(result.stderr || "内嵌字幕轨无法转换为 SRT");
                 method = "speech-to-text";
-                transcribe(input, output, args);
+                await fs.rm(outputPart, { force: true });
+                transcribe(input, outputPart, args);
             }
         } else {
             if (args["embedded-only"]) throw new Error("视频没有可提取的内嵌字幕轨");
             method = "speech-to-text";
-            transcribe(input, output, args);
+            transcribe(input, outputPart, args);
         }
-        await assertSubtitleFile(output);
+        await publishSubtitle(outputPart, output);
         finishIngestJob(db, jobId, { status: "completed" });
+        markActiveTaskFinished(jobId);
         console.log(`[字幕完成] ${path.basename(input)} -> ${path.relative(appRoot, output)} (${method})`);
         return "completed";
     } catch (error) {
         const message = safeErrorMessage(error);
         finishIngestJob(db, jobId, { status: "failed", error: message });
+        markActiveTaskFinished(jobId);
         console.error(`[字幕失败] ${path.basename(input)}: ${message}`);
         return "failed";
+    } finally {
+        if (outputPart) await fs.rm(outputPart, { force: true }).catch(() => {});
+        endActiveTask(jobId);
     }
 }
 
@@ -310,7 +410,12 @@ function findPythonCommands() {
 }
 
 function probeCommand(command, commandArgs) {
-    const result = spawnSync(command, commandArgs, { encoding: "utf8", windowsHide: true });
+    const result = spawnSync(command, commandArgs, {
+        encoding: "utf8",
+        windowsHide: true,
+        timeout: ytDlpTimeoutMs.probe,
+        killSignal: "SIGTERM",
+    });
     return result.status === 0;
 }
 
@@ -320,7 +425,7 @@ function expandRemoteUrl({ ytDlp, sourceUrl, ffmpeg, options }) {
         console.log(`[B站登录态] ${candidates.map(describeAuth).join(" -> ")}`);
     }
     const diagnostics = [];
-    for (const candidate of candidates) {
+    for (const [candidateIndex, candidate] of candidates.entries()) {
         const result = runYtDlp(ytDlp, [
             ...ytDlpBaseArgs(ffmpeg),
             ...authArgs(candidate),
@@ -329,7 +434,13 @@ function expandRemoteUrl({ ytDlp, sourceUrl, ffmpeg, options }) {
             "--skip-download",
             "--ignore-errors",
             sourceUrl,
-        ]);
+        ], {
+            stage: "展开合集",
+            timeoutMs: ytDlpTimeoutMs.expand,
+            candidate,
+            candidateIndex,
+            candidateTotal: candidates.length,
+        });
         if (result.status !== 0) {
             diagnostics.push(resultDiagnostic(result));
             continue;
@@ -384,11 +495,42 @@ function remoteEntryUrl(entry, parentUrl) {
     return "";
 }
 
+function extractBvid(...values) {
+    for (const value of values) {
+        const match = String(value || "").match(/BV[0-9A-Za-z]{10}/i);
+        if (match) return `BV${match[0].slice(2)}`;
+    }
+    return "";
+}
+
+function remoteEntryIdentity(entry) {
+    const bvid = extractBvid(entry?.id, entry?.url, entry?.sourceUrl);
+    if (bvid) return bvid.toLowerCase();
+    const id = String(entry?.id || "").trim();
+    return (id || shortUrlId(entry?.url || entry?.sourceUrl)).toLowerCase();
+}
+
+function countUniqueRemoteIds(entries) {
+    return new Set(entries.map(remoteEntryIdentity)).size;
+}
+
+function remoteSourceKey(item) {
+    const bvid = extractBvid(item.id, item.url, item.sourceUrl);
+    if (bvid) return `bilibili:${bvid.toLowerCase()}`;
+    return item.useSourcePlaylist ? `${item.url}#playlist-index=${item.playlistIndex}` : item.url;
+}
+
+function remoteItemLabel(item) {
+    const title = sanitizeFilenamePart(item?.title, 110, "remote-video");
+    const id = extractBvid(item?.id, item?.url, item?.sourceUrl) || sanitizeFilenamePart(item?.id, 56, shortUrlId(item?.url));
+    return `${title} [${id}]`;
+}
+
 function assignRemoteOutputStems(entries) {
     const counts = new Map();
     return entries.map((entry) => {
         const title = sanitizeFilenamePart(entry.title, 110, "remote-video");
-        const id = sanitizeFilenamePart(entry.id, 56, shortUrlId(entry.url));
+        const id = sanitizeFilenamePart(extractBvid(entry.id, entry.url, entry.sourceUrl) || entry.id, 56, shortUrlId(entry.url));
         const base = `${title} [${id}]`;
         const count = (counts.get(base.toLowerCase()) || 0) + 1;
         counts.set(base.toLowerCase(), count);
@@ -398,49 +540,77 @@ function assignRemoteOutputStems(entries) {
     });
 }
 
-async function processRemoteVideo({ item, outputDir, ffmpeg, ytDlp, args, options, db }) {
-    const sourceKey = item.useSourcePlaylist ? `${item.url}#playlist-index=${item.playlistIndex}` : item.url;
+async function processRemoteVideoWithRetries(params) {
+    const maxAttempts = params.options.itemRetries + 1;
+    for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+        const context = { position: params.itemPosition, total: params.itemTotal, attempt, maxAttempts };
+        console.log(`${remoteStagePrefix(context, "开始条目")} ${remoteItemLabel(params.item)}`);
+        const status = await processRemoteVideo({ ...params, context });
+        if (status !== "failed" || attempt === maxAttempts) return status;
+        console.warn(`${remoteStagePrefix(context, "外层重试")} ${itemRetryDelayMs / 1000} 秒后重试`);
+        await sleep(itemRetryDelayMs);
+    }
+    return "failed";
+}
+
+async function processRemoteVideo({ item, outputDir, ffmpeg, ytDlp, args, options, db, context }) {
+    const sourceKey = remoteSourceKey(item);
     const jobId = startIngestJob(db, { jobType: "subtitle_url", sourceKey, sourcePath: "" });
+    beginActiveTask({ db, jobId, label: remoteItemLabel(item) });
     let tempDir = "";
+    let outputPart = "";
     try {
-        const existing = !args.force ? await findExistingRemoteOutput(outputDir, item.outputStem, args.language) : "";
+        const existing = !args.force ? await findExistingRemoteOutput(outputDir, item, args.language) : "";
         if (existing) {
             finishIngestJob(db, jobId, { status: "completed" });
-            console.log(`[URL 字幕跳过] 已存在：${path.relative(appRoot, existing)}`);
+            markActiveTaskFinished(jobId);
+            console.log(`${remoteStagePrefix(context, "跳过")} 已存在：${path.relative(appRoot, existing)}`);
             return "completed";
         }
 
+        item = enrichRemoteEntryMetadata({ item, ffmpeg, ytDlp, options, context });
         const tempRoot = path.join(appRoot, "knowledge", "creative", ".tmp", "video-subtitles");
         await fs.mkdir(tempRoot, { recursive: true });
         tempDir = await fs.mkdtemp(path.join(tempRoot, "yt-"));
+        registerActiveTempDir(tempDir);
         const candidates = reorderAuthCandidates(authCandidates(item.isBilibili ? item.sourceUrl : item.url, options), item.preferredAuth);
-        const subtitle = await downloadRemoteSubtitle({ item, tempDir, ffmpeg, ytDlp, candidates, requestedLanguage: args.language });
+        const subtitle = await downloadRemoteSubtitle({ item, tempDir, ffmpeg, ytDlp, candidates, requestedLanguage: args.language, context });
         let output;
         let method;
         if (subtitle) {
             const language = normalizeLanguage(subtitle.language || args.language || "zh");
             output = path.join(outputDir, `${item.outputStem}.${language}.srt`);
-            await fs.copyFile(subtitle.file, output);
+            outputPart = subtitlePartPath(output);
+            registerActivePart(outputPart);
+            await fs.rm(outputPart, { force: true });
+            await fs.copyFile(subtitle.file, outputPart);
             method = "yt-dlp subtitle";
         } else {
             if (args["embedded-only"]) throw new Error("远程视频没有可提取的人工或自动字幕");
-            const audio = await downloadRemoteAudio({ item, tempDir, ffmpeg, ytDlp, candidates });
+            const audio = await downloadRemoteAudio({ item, tempDir, ffmpeg, ytDlp, candidates, context });
             const language = normalizeLanguage(args.language || "zh");
             output = path.join(outputDir, `${item.outputStem}.${language}.srt`);
-            transcribe(audio, output, args);
+            outputPart = subtitlePartPath(output);
+            registerActivePart(outputPart);
+            await fs.rm(outputPart, { force: true });
+            console.log(`${remoteStagePrefix(context, "语音转写")} 认证候选：不适用`);
+            transcribe(audio, outputPart, args);
             method = "yt-dlp audio + speech-to-text";
         }
 
-        await assertSubtitleFile(output);
+        await publishSubtitle(outputPart, output);
         finishIngestJob(db, jobId, { status: "completed" });
-        console.log(`[URL 字幕完成] ${item.title} [${item.id}] -> ${path.relative(appRoot, output)} (${method})`);
+        markActiveTaskFinished(jobId);
+        console.log(`${remoteStagePrefix(context, "完成")} ${remoteItemLabel(item)} -> ${path.relative(appRoot, output)} (${method})`);
         return "completed";
     } catch (error) {
         const message = safeErrorMessage(error);
         finishIngestJob(db, jobId, { status: "failed", error: message });
-        console.error(`[URL 字幕失败] ${item.title} [${item.id}]：${message}`);
+        markActiveTaskFinished(jobId);
+        console.error(`${remoteStagePrefix(context, "失败")} ${remoteItemLabel(item)}：${message}`);
         return "failed";
     } finally {
+        if (outputPart) await fs.rm(outputPart, { force: true }).catch(() => {});
         if (tempDir) {
             try {
                 await fs.rm(tempDir, { recursive: true, force: true });
@@ -448,13 +618,47 @@ async function processRemoteVideo({ item, outputDir, ffmpeg, ytDlp, args, option
                 console.warn(`[临时文件清理失败] ${tempDir}：${safeErrorMessage(error)}`);
             }
         }
+        endActiveTask(jobId);
     }
 }
 
-async function downloadRemoteSubtitle({ item, tempDir, ffmpeg, ytDlp, candidates, requestedLanguage }) {
+function enrichRemoteEntryMetadata({ item, ffmpeg, ytDlp, options, context }) {
+    const candidates = reorderAuthCandidates(authCandidates(item.isBilibili ? item.sourceUrl : item.url, options), item.preferredAuth);
+    for (const [candidateIndex, candidate] of candidates.entries()) {
+        const result = runYtDlp(ytDlp, [
+            ...ytDlpBaseArgs(ffmpeg),
+            ...authArgs(candidate),
+            ...remoteItemSelectionArgs(item),
+            "--dump-single-json",
+            "--skip-download",
+            item.url,
+        ], {
+            stage: "读取元数据",
+            timeoutMs: ytDlpTimeoutMs.metadata,
+            candidate,
+            candidateIndex,
+            candidateTotal: candidates.length,
+            context,
+        });
+        if (result.status !== 0) continue;
+        try {
+            const payload = JSON.parse(result.stdout || "{}");
+            const metadata = Array.isArray(payload.entries) ? payload.entries.find(Boolean) || payload : payload;
+            const title = String(metadata.title || metadata.fulltitle || item.title || item.id);
+            const id = String(metadata.id || item.id || shortUrlId(item.url));
+            const outputId = extractBvid(id, item.id, item.url, item.sourceUrl) || id;
+            return { ...item, title, id: outputId, outputStem: `${sanitizeFilenamePart(title, 110, "remote-video")} [${sanitizeFilenamePart(outputId, 56, shortUrlId(item.url))}]` };
+        } catch {
+            // Keep the playlist-level metadata when a single entry returns malformed JSON.
+        }
+    }
+    return item;
+}
+
+async function downloadRemoteSubtitle({ item, tempDir, ffmpeg, ytDlp, candidates, requestedLanguage, context }) {
     const diagnostics = [];
     let commandSucceeded = false;
-    for (const candidate of candidates) {
+    for (const [candidateIndex, candidate] of candidates.entries()) {
         await removeFilesWithPrefix(tempDir, "subtitle.");
         const result = runYtDlp(ytDlp, [
             ...ytDlpBaseArgs(ffmpeg),
@@ -474,11 +678,23 @@ async function downloadRemoteSubtitle({ item, tempDir, ffmpeg, ytDlp, candidates
             "--output",
             path.join(tempDir, "subtitle.%(ext)s"),
             item.url,
-        ]);
+        ], {
+            stage: "下载字幕",
+            timeoutMs: ytDlpTimeoutMs.subtitle,
+            candidate,
+            candidateIndex,
+            candidateTotal: candidates.length,
+            context,
+        });
         const files = await listMatchingFiles(tempDir, (name) => name.startsWith("subtitle.") && name.toLowerCase().endsWith(".srt"));
-        if (files.length) {
+        if (result.status === 0 && files.length) {
             const file = chooseRemoteSubtitle(files, requestedLanguage);
-            return { file, language: languageFromRemoteSubtitle(file) };
+            try {
+                await assertSubtitleFile(file);
+                return { file, language: languageFromRemoteSubtitle(file) };
+            } catch (error) {
+                diagnostics.push(`字幕完整性校验失败：${safeErrorMessage(error)}`);
+            }
         }
         if (result.status === 0) commandSucceeded = true;
         else diagnostics.push(resultDiagnostic(result));
@@ -487,9 +703,10 @@ async function downloadRemoteSubtitle({ item, tempDir, ffmpeg, ytDlp, candidates
     throw new Error(formatRemoteFailure(item.url, "提取字幕", diagnostics));
 }
 
-async function downloadRemoteAudio({ item, tempDir, ffmpeg, ytDlp, candidates }) {
+async function downloadRemoteAudio({ item, tempDir, ffmpeg, ytDlp, candidates, context }) {
     const diagnostics = [];
-    for (const candidate of candidates) {
+    for (const [candidateIndex, candidate] of candidates.entries()) {
+        await removeFilesWithPrefix(tempDir, "audio.");
         const result = runYtDlp(ytDlp, [
             ...ytDlpBaseArgs(ffmpeg),
             ...authArgs(candidate),
@@ -501,9 +718,16 @@ async function downloadRemoteAudio({ item, tempDir, ffmpeg, ytDlp, candidates })
             "--output",
             path.join(tempDir, "audio.%(ext)s"),
             item.url,
-        ]);
-        const files = await listMatchingFiles(tempDir, (name) => name.startsWith("audio.") && !/\.(?:part|ytdl)$/i.test(name));
-        if (files.length) return files[0];
+        ], {
+            stage: "下载音频",
+            timeoutMs: ytDlpTimeoutMs.audio,
+            candidate,
+            candidateIndex,
+            candidateTotal: candidates.length,
+            context,
+        });
+        const files = result.status === 0 ? await listMatchingFiles(tempDir, (name) => name.startsWith("audio.") && !/\.(?:part|ytdl)$/i.test(name)) : [];
+        if (files.length && (await fs.stat(files[0])).size > 0) return files[0];
         diagnostics.push(resultDiagnostic(result));
     }
     throw new Error(formatRemoteFailure(item.url, "下载最佳音频", diagnostics));
@@ -513,17 +737,49 @@ function remoteItemSelectionArgs(item) {
     return item.useSourcePlaylist ? ["--playlist-items", String(item.playlistIndex)] : ["--no-playlist"];
 }
 
-function runYtDlp(ytDlp, commandArgs) {
-    return spawnSync(ytDlp.command, [...ytDlp.prefix, ...commandArgs], {
+function runYtDlp(ytDlp, commandArgs, { stage, timeoutMs, candidate, candidateIndex, candidateTotal, context } = {}) {
+    const effectiveTimeoutMs = timeoutMs || ytDlpTimeoutMs.metadata;
+    const prefix = ytDlpStagePrefix({ stage, candidate, candidateIndex, candidateTotal, context });
+    console.log(`${prefix} 开始，进程超时 ${formatDuration(effectiveTimeoutMs)}`);
+    const result = spawnSync(ytDlp.command, [...ytDlp.prefix, ...commandArgs], {
         encoding: "utf8",
         maxBuffer: 100 * 1024 * 1024,
         windowsHide: true,
+        timeout: effectiveTimeoutMs,
+        killSignal: "SIGTERM",
         env: { ...process.env, NO_COLOR: "1" },
     });
+    const hasNextCandidate = Number(candidateIndex) + 1 < Number(candidateTotal);
+    if (isProcessTimeout(result)) {
+        console.warn(`${prefix} 超时${hasNextCandidate ? "，继续下一个认证候选" : "，已无其他认证候选"}`);
+    } else if (result.status !== 0) {
+        console.warn(`${prefix} 失败${hasNextCandidate ? "，继续下一个认证候选" : "，已无其他认证候选"}`);
+    }
+    return { ...result, timeoutMs: effectiveTimeoutMs };
+}
+
+function remoteStagePrefix(context, stage) {
+    return `[条目 ${context.position}/${context.total}][尝试 ${context.attempt}/${context.maxAttempts}][${stage}]`;
+}
+
+function ytDlpStagePrefix({ stage, candidate, candidateIndex, candidateTotal, context }) {
+    const operation = context ? remoteStagePrefix(context, stage || "yt-dlp") : `[${stage || "yt-dlp"}]`;
+    const currentCandidate = Number.isInteger(candidateIndex) ? candidateIndex + 1 : 1;
+    const totalCandidates = Number.isInteger(candidateTotal) && candidateTotal > 0 ? candidateTotal : 1;
+    return `${operation}[认证候选 ${currentCandidate}/${totalCandidates}：${describeAuth(candidate || { kind: "anonymous", value: "" })}]`;
+}
+
+function isProcessTimeout(result) {
+    return result?.error?.code === "ETIMEDOUT";
+}
+
+function formatDuration(milliseconds) {
+    if (milliseconds >= 60_000 && milliseconds % 60_000 === 0) return `${milliseconds / 60_000} 分钟`;
+    return `${Math.ceil(milliseconds / 1000)} 秒`;
 }
 
 function ytDlpBaseArgs(ffmpeg) {
-    return [
+    const args = [
         "--ignore-config",
         "--no-progress",
         "--socket-timeout",
@@ -534,9 +790,9 @@ function ytDlpBaseArgs(ffmpeg) {
         "3",
         "--extractor-retries",
         "3",
-        "--ffmpeg-location",
-        path.dirname(ffmpeg),
     ];
+    if (ffmpeg) args.push("--ffmpeg-location", path.dirname(ffmpeg));
+    return args;
 }
 
 function subtitleLanguageSelector(requestedLanguage) {
@@ -545,8 +801,8 @@ function subtitleLanguageSelector(requestedLanguage) {
 }
 
 function authCandidates(url, options) {
-    if (options.cookies) return [{ kind: "cookies", value: options.cookies }];
-    if (options.browser) return [{ kind: "browser", value: options.browser }];
+    if (options.cookies) return [{ kind: "cookies", value: options.cookies }, { kind: "anonymous", value: "" }];
+    if (options.browser) return [{ kind: "browser", value: options.browser }, { kind: "anonymous", value: "" }];
     if (!isBilibiliUrl(url)) return [{ kind: "anonymous", value: "" }];
     detectedBrowsers ||= detectInstalledBrowsers();
     return [...detectedBrowsers.map((browser) => ({ kind: "browser", value: browser })), { kind: "anonymous", value: "" }];
@@ -650,6 +906,7 @@ function recordRemoteFailure(db, sourceUrl, error) {
 }
 
 function resultDiagnostic(result) {
+    if (isProcessTimeout(result)) return `yt-dlp 进程在 ${formatDuration(result.timeoutMs || ytDlpTimeoutMs.metadata)} 后超时`;
     return sanitizeDiagnostic(result?.stderr || result?.error?.message || result?.stdout || "yt-dlp 运行失败");
 }
 
@@ -657,7 +914,7 @@ function sanitizeDiagnostic(value) {
     return String(value || "")
         .replace(/(^|\n)[^\r\n]*\t(?:TRUE|FALSE)\t[^\r\n]*\t(?:TRUE|FALSE)\t\d+\t[^\t\r\n]+\t[^\r\n]+/gi, "$1[Cookie 内容已隐藏]")
         .replace(/\b(SESSDATA|bili_jct|DedeUserID|DedeUserID__ckMd5|sid|authorization)\s*[:=]\s*[^;\s]+/gi, "$1=[已隐藏]")
-        .replace(/(cookie\s*[:=]\s*)[^\r\n]+/gi, "$1[已隐藏]")
+        .replace(/((?:set-)?cookie\s*[:=]\s*)[^\r\n]+/gi, "$1[已隐藏]")
         .trim()
         .slice(-4000);
 }
@@ -678,13 +935,21 @@ function remoteHost(value) {
     }
 }
 
-async function findExistingRemoteOutput(dir, stem, requestedLanguage) {
+async function findExistingRemoteOutput(dir, item, requestedLanguage) {
     const files = await fs.readdir(dir);
-    const candidates = files.filter((name) => name.startsWith(`${stem}.`) && name.toLowerCase().endsWith(".srt")).sort();
+    const bvid = extractBvid(item.id, item.url, item.sourceUrl);
+    const candidates = files
+        .filter((name) => {
+            if (!name.toLowerCase().endsWith(".srt")) return false;
+            if (bvid) return extractBvidFromFilename(name).toLowerCase() === bvid.toLowerCase();
+            return name.startsWith(`${item.outputStem}.`);
+        })
+        .sort();
     const matches = [];
     for (const name of candidates) {
         try {
-            if ((await fs.stat(path.join(dir, name))).size >= 8) matches.push(name);
+            await assertSubtitleFile(path.join(dir, name));
+            matches.push(name);
         } catch {
             // The output may have been replaced by another worker between readdir and stat.
         }
@@ -694,6 +959,10 @@ async function findExistingRemoteOutput(dir, stem, requestedLanguage) {
     const preferred = requested ? matches.find((name) => name.toLowerCase().endsWith(`.${requested}.srt`)) : "";
     if (requested && requested !== "auto" && !preferred) return "";
     return path.join(dir, preferred || matches[0]);
+}
+
+function extractBvidFromFilename(name) {
+    return String(name || "").match(/\[(BV[0-9A-Za-z]{10})\](?:-\d+)?(?:\.|$)/i)?.[1] || "";
 }
 
 async function removeFilesWithPrefix(dir, prefix) {
@@ -784,7 +1053,9 @@ function uniqueOutputPath(dir, input, language) {
 async function outputIsCurrent(input, output) {
     try {
         const [inputStat, outputStat] = await Promise.all([fs.stat(input), fs.stat(output)]);
-        return outputStat.size >= 8 && outputStat.mtimeMs >= inputStat.mtimeMs;
+        if (outputStat.mtimeMs < inputStat.mtimeMs) return false;
+        await assertSubtitleFile(output);
+        return true;
     } catch {
         return false;
     }
@@ -792,7 +1063,30 @@ async function outputIsCurrent(input, output) {
 
 async function assertSubtitleFile(output) {
     const stat = await fs.stat(output);
-    if (stat.size < 8) throw new Error("生成的字幕文件为空");
+    if (stat.size < 16) throw new Error("生成的字幕文件为空或不完整");
+    const content = (await fs.readFile(output, "utf8")).replace(/^\uFEFF/, "").replace(/\r\n?/g, "\n");
+    if (content.includes("\u0000")) throw new Error("生成的字幕文件包含无效字符");
+    const lines = content.split("\n");
+    const timingPattern = /^\s*\d{1,3}:\d{2}:\d{2}[,.]\d{3}\s*-->\s*\d{1,3}:\d{2}:\d{2}[,.]\d{3}(?:\s+.*)?$/;
+    let validCue = false;
+    for (let index = 1; index < lines.length - 1; index += 1) {
+        if (!timingPattern.test(lines[index])) continue;
+        if (!/^\s*\d+\s*$/.test(lines[index - 1])) continue;
+        if (lines[index + 1].trim()) {
+            validCue = true;
+            break;
+        }
+    }
+    if (!validCue) throw new Error("生成的字幕文件不是完整的 SRT（缺少序号、时间轴或正文）");
+}
+
+function subtitlePartPath(output) {
+    return `${output}.part`;
+}
+
+async function publishSubtitle(partFile, output) {
+    await assertSubtitleFile(partFile);
+    await fs.rename(partFile, output);
 }
 
 async function waitForStableFile(file) {
@@ -831,6 +1125,67 @@ function pickVideoFiles() {
     const result = spawnSync("powershell", ["-NoProfile", "-STA", "-Command", script], { encoding: "utf8", windowsHide: false });
     if (result.status !== 0) return [];
     return result.stdout.split(/\r?\n/).map((item) => item.trim()).filter(Boolean);
+}
+
+function beginActiveTask({ db, jobId, label }) {
+    activeTask = { db, jobId, label, partFiles: new Set(), tempDir: "", jobFinished: false };
+}
+
+function registerActivePart(file) {
+    if (activeTask && file) activeTask.partFiles.add(file);
+}
+
+function registerActiveTempDir(dir) {
+    if (activeTask) activeTask.tempDir = dir;
+}
+
+function markActiveTaskFinished(jobId) {
+    if (activeTask?.jobId === jobId) activeTask.jobFinished = true;
+}
+
+function endActiveTask(jobId) {
+    if (activeTask?.jobId === jobId) activeTask = null;
+}
+
+function terminateFromSignal(signal) {
+    if (terminating) return;
+    terminating = true;
+    const task = activeTask;
+    const error = `收到 ${signal}，任务已中断，临时文件已清理`;
+    if (task) {
+        for (const file of task.partFiles) {
+            try {
+                fsSync.rmSync(file, { force: true });
+            } catch {
+                // Continue cleanup so the database status is still finalized.
+            }
+        }
+        if (task.tempDir) {
+            try {
+                fsSync.rmSync(task.tempDir, { recursive: true, force: true });
+            } catch {
+                // Continue to mark the running job as failed.
+            }
+        }
+        if (!task.jobFinished) {
+            try {
+                finishIngestJob(task.db, task.jobId, { status: "failed", error });
+            } catch {
+                // The process is terminating; there is no further recovery path here.
+            }
+        }
+        try {
+            task.db.close();
+        } catch {
+            // The database may already be closed by normal finalization.
+        }
+    }
+    try {
+        fsSync.writeSync(process.stderr.fd, `[字幕任务中断] ${error}${task?.label ? `：${task.label}` : ""}\n`);
+    } catch {
+        // Avoid masking the requested termination when stderr is unavailable.
+    }
+    process.exit(signal === "SIGINT" ? 130 : 143);
 }
 
 function sleep(milliseconds) {

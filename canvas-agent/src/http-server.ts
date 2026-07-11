@@ -7,6 +7,7 @@ import path from "node:path";
 import { DEFAULT_PORT, ensureCanvasWorkspace, loadConfig, saveConfig, updateCanvasWorkspace, type CanvasAgentConfig } from "./config.js";
 import { CanvasSession } from "./canvas-session.js";
 import { archiveCodexThread, getCodexThreadStatus, listCodexThreads, readCodexThread, resumeCodexThread, runClaudeTurn, runCodexTurn, startCodexThread, steerCodexTurn, summarizeCodexThread, verifyCodexThreadWorkspace, withAgentPrompt } from "./agents.js";
+import { inspectPrivateCanvasContext, privateCanvasContextStatus } from "./private-context.js";
 import type { AgentAttachment } from "./types.js";
 
 type GitRemoteInfo = { name: string; url: string };
@@ -54,7 +55,7 @@ export function startHttpServer() {
         next();
     });
     app.get("/health", (_req, res) => res.json(session.health()));
-    app.get("/config", (_req, res) => res.json({ ok: true, url: config.url, listenHost, lanUrls: lanUrls(port), hasToken: true }));
+    app.get("/config", (_req, res) => res.json({ ok: true, url: config.url, listenHost, lanUrls: lanUrls(port), hasToken: true, privateExtension: privateCanvasContextStatus() }));
     app.use((req, res, next) => {
         if (validToken(req, requestUrl(req, config), config.token)) return next();
         res.status(401).json({ ok: false, error: "invalid token" });
@@ -69,6 +70,7 @@ export function startHttpServer() {
         res.json({ ok: true });
     });
     app.post("/api/tools", route(async (req, res) => res.json({ ok: true, result: await session.callTool(req.body?.name, req.body?.input || {}) })));
+    app.post("/agent/private-context/preview", (req, res) => res.json({ ok: true, ...inspectPrivateCanvasContext(String(req.body?.prompt || "")) }));
     app.get("/agent/codex/workspace", (req, res) => {
         const workspace = ensureCanvasWorkspace(config, requestWorkspaceId(req));
         res.json({ ok: true, workspace: workspacePayload(workspace) });

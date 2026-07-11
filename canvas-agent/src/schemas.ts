@@ -6,6 +6,8 @@ const viewportSchema = z.object({ x: z.number(), y: z.number(), k: z.number() })
 const nodeTypeSchema = z.enum(["image", "text", "config", "video", "audio"]);
 const generationModeSchema = z.enum(["text", "image", "video", "audio"]);
 const creativeStageSchema = z.enum(["brief", "story", "episodes", "script", "assets", "storyboard", "review", "preview", "generation", "rework"]);
+const creativeArtifactKindSchema = z.enum(["activity_constraints", "story", "episodes", "script", "asset_manifest", "character_assets", "scene_assets", "prop_assets", "storyboard", "storyboard_review", "preview_grid", "video_batch", "rework_log"]);
+const creativeArtifactStatusSchema = z.enum(["missing", "draft", "review", "approved", "blocked"]);
 const directorCameraSchema = z.object({
     shot_size: z.string().optional(),
     angle: z.string().optional(),
@@ -44,7 +46,7 @@ const directorSlotSchema = z.object({
 });
 const directorPacketSchema = z.object({
     global_visual_contract: z.string().optional(),
-    slots: z.array(directorSlotSchema).min(1).max(10),
+    slots: z.array(directorSlotSchema).min(1).max(60),
 });
 
 export const toolNames = [
@@ -133,12 +135,26 @@ export const toolInputSchemas = {
     canvas_director_capture_shot: z.object({ shotId: z.string().optional() }),
     canvas_director_capture_all: z.object({}),
     canvas_update_project_blackboard: z.object({
+        mode: z.enum(["standard", "activity"]).optional(),
+        productionType: z.enum(["unspecified", "series", "short_film"]).optional(),
         currentStage: creativeStageSchema.optional(),
         completion: z.number().min(0).max(100).optional(),
+        targetDeliverables: z.array(creativeArtifactKindSchema).optional(),
         confirmedConstants: z.array(z.string()).optional(),
         activityConstraints: z.array(z.string()).optional(),
         openQuestions: z.array(z.string()).optional(),
         nextGap: z.string().optional(),
+        artifactUpdates: z.array(z.object({
+            id: z.string().optional(),
+            nodeId: z.string().optional(),
+            kind: creativeArtifactKindSchema,
+            title: z.string().optional(),
+            status: creativeArtifactStatusSchema.optional(),
+            version: z.number().int().positive().optional(),
+            ownerAgent: z.string().optional(),
+            userConfirmed: z.boolean().optional(),
+            qualityGate: z.array(z.string()).optional(),
+        })).optional(),
         userConfirmed: z.boolean().optional(),
     }),
     canvas_apply_ops: z.object({ ops: z.array(canvasOpSchema) }),
@@ -168,11 +184,11 @@ export const toolDescriptions: Record<ToolName, string> = {
     canvas_get_selection: "读取当前网页画布选中的节点。",
     canvas_export_snapshot: "导出当前画布快照，用于理解布局。",
     canvas_director_get_state: "读取 3D 导演台当前分镜包、活动镜头和打开状态。",
-    canvas_director_load_packet: "把已确认文字分镜载入 3D 导演台，按镜头槽自动布置角色、道具、机位和 FOV。最多 10 个镜头。",
+    canvas_director_load_packet: "把已确认文字分镜载入 3D 导演台，按镜头槽自动布置角色、道具、机位和 FOV。完整分镜最多 60 槽，预演每批 10 槽。",
     canvas_director_load_shot: "恢复指定导演台镜头的角色、道具和机位。",
     canvas_director_capture_shot: "渲染指定导演台镜头，并把 1280x720 截图创建为画布图片节点。",
-    canvas_director_capture_all: "按分镜顺序渲染导演台全部镜头，并把截图批量创建为画布图片节点。",
-    canvas_update_project_blackboard: "创建或更新结构化项目黑板，记录当前阶段、完成度、活动约束、已确认常量、待确认问题和下一缺口。",
+    canvas_director_capture_all: "按分镜顺序渲染当前预演批次（最多 10 槽），并把截图批量创建为画布图片节点。",
+    canvas_update_project_blackboard: "创建或更新结构化项目黑板，记录目标产物、活动约束、产物版本和审核状态；只建议下一步，不自动推进。",
     canvas_apply_ops: "批量操作当前网页画布。ops 支持 add_node、update_node、delete_node、delete_connections、connect_nodes、set_viewport、select_nodes、run_generation。",
     canvas_create_node: "创建任意类型节点：text、image、config、video、audio。适合创建占位图、媒体占位、配置节点或自定义 metadata 节点。",
     canvas_create_text_node: "在当前画布创建单个文本节点。",

@@ -3,6 +3,26 @@ import type { PromptHubCatalogModel, PromptHubImageModel } from "@/services/prom
 /** Canvas node model field: ph-hub:<model id> means server-side Prompt Hub generation with credit billing. */
 export const PH_HUB_MODEL_PREFIX = "ph-hub:";
 
+const PROMPT_HUB_MODEL_LABELS: Record<string, string> = {
+    "creative-5-5": "全能模型5.5",
+    "creative-5-6": "全能模型5.6",
+    image2: "全能模型2 · 1K",
+    "image2-pro": "全能模型2 · 高质量 2K/4K",
+    "image2-hd": "全能模型2 · 经济 2K/4K",
+    "lingtu-fast": "香蕉 · 极速 1K",
+    "lingtu-2": "香蕉 · 2代 1K/2K/4K",
+    "lingtu-pro": "香蕉 · 专业 1K/2K/4K",
+    lingtu: "香蕉 · 标准 1K/2K/4K",
+    "sd2.0": "sd2.0",
+    "sd2.0-fast": "sd2.0-fast",
+    "sd2.0-mini": "sd2.0-mini",
+    "sd2.0四图版": "sd2.0四图版",
+    "sd2.0fast四图版": "sd2.0fast四图版",
+    "sd1080-4k": "sd1080-4k",
+    "motion-video": "Grok Video",
+    "motion-video-1-5": "Grok Video 1.5",
+};
+
 export function toPromptHubModelValue(modelId: string) {
     return `${PH_HUB_MODEL_PREFIX}${modelId}`;
 }
@@ -17,8 +37,7 @@ export function parsePromptHubModelId(value?: string | null) {
 }
 
 export function promptHubModelPickerLabel(modelId: string, label?: string) {
-    const name = (label || modelId).trim();
-    return `卡藏 · ${name}`;
+    return PROMPT_HUB_MODEL_LABELS[modelId] || (label || modelId).trim();
 }
 
 function parameterValues(model: PromptHubImageModel | null | undefined, names: string[]) {
@@ -48,6 +67,33 @@ export function promptHubImageMaxReferences(model: PromptHubImageModel | null | 
     const multiple = model?.parameters?.find((parameter) => parameter.name === "images" || parameter.name === "refImageUrls");
     if (typeof multiple?.max_items === "number") return multiple.max_items;
     return model?.parameters?.some((parameter) => parameter.name === "image" || parameter.name === "refImageUrl") ? 1 : null;
+}
+
+export type PromptHubImageCountRange = {
+    min: number;
+    max: number;
+    fixed: number | null;
+};
+
+function positiveInteger(value: unknown) {
+    const number = Number(value);
+    return Number.isFinite(number) && number > 0 ? Math.floor(number) : null;
+}
+
+export function promptHubImageCountRange(model: PromptHubImageModel | null | undefined): PromptHubImageCountRange {
+    const parameter = model?.parameters?.find((item) => item.name === "n" || item.name === "count");
+    if (!parameter) return { min: 1, max: 1, fixed: 1 };
+
+    const fixed = Object.prototype.hasOwnProperty.call(parameter, "fixed") ? positiveInteger(parameter.fixed) : null;
+    if (fixed != null) return { min: fixed, max: fixed, fixed };
+
+    const options = (parameter.options || []).map(positiveInteger).filter((value): value is number => value != null);
+    const declaredMin = positiveInteger(parameter.min);
+    const declaredMax = positiveInteger(parameter.max);
+    const defaultValue = positiveInteger(parameter.default);
+    const min = Math.max(1, declaredMin ?? (options.length ? Math.min(...options) : defaultValue ?? 1));
+    const max = Math.max(min, Math.min(15, declaredMax ?? (options.length ? Math.max(...options) : defaultValue ?? min)));
+    return { min, max, fixed: min === max ? min : null };
 }
 
 export function promptHubImageCredits(model: PromptHubImageModel | null | undefined, resolution?: string) {

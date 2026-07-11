@@ -5,17 +5,8 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { unzipSync, strFromU8 } from "fflate";
-import {
-    contentHash,
-    databaseSummary,
-    finishIngestJob,
-    openCreativeLibraryDb,
-    readCachedSource,
-    readKnowledgeCardsForSource,
-    replaceKnowledgeCardsForSource,
-    startIngestJob,
-    upsertLibrarySource,
-} from "./creative-library-db.mjs";
+import { contentHash, databaseSummary, finishIngestJob, openCreativeLibraryDb, readCachedSource, readKnowledgeCardsForSource, replaceKnowledgeCardsForSource, startIngestJob, upsertLibrarySource } from "./creative-library-db.mjs";
+import { writeReadableKnowledgeReports } from "./render-creative-knowledge-report.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const appRoot = path.resolve(__dirname, "..");
@@ -24,6 +15,7 @@ const defaultManifest = path.join(appRoot, "knowledge", "creative", "sources.jso
 const defaultOutputFile = path.join(appRoot, "src", "app", "(user)", "canvas", "utils", "creative-knowledge-pack.generated.ts");
 const defaultReportFile = path.join(appRoot, "knowledge", "creative", "creative-knowledge-report.json");
 const defaultReviewFile = path.join(appRoot, "knowledge", "creative", "review.json");
+const pipelineVersion = "knowledge-distill-v2";
 
 const allowedExts = new Set([".txt", ".md", ".markdown", ".srt", ".vtt", ".html", ".htm", ".epub", ".mobi", ".azw", ".azw3", ".pdf"]);
 const categoryFallback = "综合创作";
@@ -76,9 +68,14 @@ async function main() {
     const reportFile = path.resolve(appRoot, args.report || defaultReportFile);
     const reviewFile = path.resolve(appRoot, args.review || defaultReviewFile);
     const maxCards = numberArg(args["max-cards"], 96);
-    const maxChunksPerSource = numberArg(args["max-chunks-per-source"], 16);
+    const maxChunksPerSource = numberArg(args["max-chunks-per-source"], 24);
+    const chunksPerBatch = numberArg(args["chunks-per-batch"], 8);
+    const batchChars = numberArg(args["batch-chars"], 18000);
+    const reviewedCardsDir = args["reviewed-cards-dir"] ? path.resolve(appRoot, args["reviewed-cards-dir"]) : "";
+    const chunksDir = args["chunks-dir"] ? path.resolve(appRoot, args["chunks-dir"]) : "";
     const useLlm = !args.local && Boolean(args.llm || process.env.KNOWLEDGE_LLM_API_KEY || process.env.OPENAI_API_KEY);
-    const ingestMode = useLlm ? "llm" : "local";
+    const ingestMode = reviewedCardsDir ? "agent-reviewed" : useLlm ? "llm" : "local";
+    const llmModel = reviewedCardsDir ? "agent-reviewed" : useLlm ? process.env.KNOWLEDGE_LLM_MODEL || process.env.OPENAI_MODEL || "gpt-4.1-mini" : "local";
     const { db, file: dbFile } = openCreativeLibraryDb(args.db);
 
     await fs.mkdir(inputDir, { recursive: true });
@@ -102,16 +99,41 @@ async function main() {
     const warnings = [];
     const documents = [];
     for (const spec of sourceSpecs) {
-        const sourceKey = spec.path || spec.url;
+        const sourceKey = sourceSpecKey(spec);
         const jobId = startIngestJob(db, { jobType: "knowledge", sourceKey, sourcePath: spec.path || "" });
         try {
-            const doc = await loadSource(spec);
+            const doc = chunksDir ? await loadChunkDocument(spec, chunksDir) : await loadSource(spec);
+            const reviewedCardsText = reviewedCardsDir ? await readReviewedCardsText(reviewedCardsDir, doc.manifestId || doc.id) : "";
             if (doc.text.trim().length < 300) {
                 warnings.push(`${doc.title}: 文本太短，已跳过`);
                 finishIngestJob(db, jobId, { status: "failed", error: "文本少于 300 字" });
                 continue;
             }
-            documents.push({ ...doc, contentHash: contentHash(cleanText(doc.text)), jobId });
+            documents.push({
+                ...doc,
+                contentHash: contentHash(
+                    JSON.stringify({
+                        pipelineVersion,
+                        llmModel,
+                        maxCards,
+                        maxChunksPerSource,
+                        chunksPerBatch,
+                        batchChars,
+                        title: doc.title,
+                        category: doc.category,
+                        note: doc.note,
+                        layer: doc.layer,
+                        scope: doc.scope,
+                        workId: doc.workId,
+                        language: doc.language,
+                        authority: doc.authority,
+                        reviewedCardsText,
+                        text: cleanText(doc.text),
+                    }),
+                ),
+                jobId,
+                reviewedCardsText,
+            });
         } catch (error) {
             const message = error instanceof Error ? error.message : String(error);
             warnings.push(`${spec.title || spec.path || spec.url}: ${message}`);
@@ -121,7 +143,7 @@ async function main() {
 
     const prepared = [];
     for (const doc of documents) {
-        const chunks = selectKnowledgeChunks(cleanText(doc.text), maxChunksPerSource);
+        const chunks = doc.extractedChunks || selectKnowledgeChunks(cleanText(doc.text), maxChunksPerSource);
         if (!chunks.length) {
             warnings.push(`${doc.title}: 没有提取到足够相关的知识段落，已保留为失败任务等待资料调整`);
             finishIngestJob(db, doc.jobId, { status: "failed", error: "没有提取到足够相关的知识段落" });
@@ -130,6 +152,7 @@ async function main() {
         prepared.push({ ...doc, chunks });
     }
     const review = await readReviewFile(reviewFile);
+    const sourceIdByManifestId = new Map(prepared.map((doc) => [doc.manifestId, doc.id]).filter(([id]) => id));
     const rawCards = [];
     let cachedSourceCount = 0;
     for (const doc of prepared) {
@@ -141,10 +164,17 @@ async function main() {
                 cachedSourceCount += 1;
             } else {
                 const warningCount = warnings.length;
-                const distilled = useLlm ? await distillWithLlm([doc], { maxCards, warnings }) : localDistill([doc], maxCards);
+                const distilled = reviewedCardsDir ? parseReviewedCards(doc, sourceIdByManifestId) : useLlm ? await distillWithLlm([doc], { maxCards, warnings, chunksPerBatch, batchChars }) : localDistill([doc], maxCards);
                 sourceCards = auditCards(distilled, { documents: [doc], review });
                 const failed = warnings.slice(warningCount).some((warning) => warning.startsWith(`${doc.title}:`) && /失败/.test(warning));
-                upsertLibrarySource(db, doc, { libraryType: "knowledge", hash: doc.contentHash, ingestMode, status: failed ? "failed" : "completed", error: failed ? warnings.at(-1) : "" });
+                upsertLibrarySource(db, doc, {
+                    libraryType: "knowledge",
+                    hash: doc.contentHash,
+                    ingestMode,
+                    status: failed ? "failed" : "completed",
+                    error: failed ? warnings.at(-1) : "",
+                    metadata: { scope: doc.scope, workId: doc.workId, language: doc.language, epubRange: doc.epubRange },
+                });
                 replaceKnowledgeCardsForSource(db, doc.id, sourceCards);
                 finishIngestJob(db, doc.jobId, { status: failed ? "failed" : "completed", error: failed ? warnings.at(-1) : "" });
             }
@@ -160,18 +190,33 @@ async function main() {
             finishIngestJob(db, doc.jobId, { status: "failed", error: message });
         }
     }
-    const cards = auditCards(rawCards, { documents: prepared, review }).slice(0, maxCards);
-    const sources = prepared.map((doc) => ({ id: doc.id, title: doc.title, category: doc.category, kind: doc.kind, source: doc.source, layer: doc.layer, authority: doc.authority, verified: doc.verified, chars: doc.text.length, chunks: doc.chunks.length }));
+    const cards = limitCardsBySource(auditCards(rawCards, { documents: prepared, review }), prepared, maxCards);
+    const sources = prepared.map((doc) => ({
+        id: doc.id,
+        title: doc.title,
+        category: doc.category,
+        kind: doc.kind,
+        source: doc.source,
+        layer: doc.layer,
+        scope: doc.scope,
+        workId: doc.workId,
+        language: doc.language,
+        authority: doc.authority,
+        verified: doc.verified,
+        chars: doc.text.length,
+        chunks: doc.chunks.length,
+    }));
 
-    const mode = useLlm ? (warnings.some((warning) => warning.includes("LLM 蒸馏失败")) ? "mixed" : "llm-distilled") : "local-indexed";
+    const mode = reviewedCardsDir ? "agent-reviewed" : useLlm ? (warnings.some((warning) => warning.includes("LLM 蒸馏失败")) ? "mixed" : "llm-distilled") : "local-indexed";
     await writeGeneratedPack(outputFile, { cards, sources, mode });
-    await writeReport(reportFile, { sources, cards, warnings });
+    const readableReports = await writeReport(reportFile, { sources, cards, warnings });
 
     console.log(`Creative knowledge ingest complete.`);
     console.log(`Sources: ${sources.length}`);
     console.log(`Cards: ${cards.length}`);
     console.log(`Generated: ${path.relative(appRoot, outputFile)}`);
     console.log(`Report: ${path.relative(appRoot, reportFile)}`);
+    console.log(`Readable report: ${path.relative(appRoot, readableReports.htmlFile)}`);
     console.log(`Cache hits: ${cachedSourceCount}/${prepared.length}`);
     console.log(`SQLite: ${path.relative(appRoot, dbFile)} ${JSON.stringify(databaseSummary(db))}`);
     if (!useLlm) {
@@ -238,10 +283,16 @@ async function collectSourceSpecs({ inputDir, manifest, manifestFile }) {
             if (!entry?.path) continue;
             specs.push({
                 type: "file",
+                manifestId: cleanField(entry.id),
                 path: path.resolve(path.dirname(manifestFile), entry.path),
                 title: entry.title,
                 category: entry.category,
                 note: entry.note,
+                scope: normalizeKnowledgeScope(entry.scope),
+                workId: cleanField(entry.workId),
+                language: cleanField(entry.language),
+                epubRange: normalizeEpubRange(entry.epubRange),
+                pdfOcrMaxPages: optionalPositiveInt(entry.pdfOcrMaxPages),
                 layer: normalizeLayer(entry.layer),
                 authority: normalizeScore(entry.authority, 0.7),
                 verified: entry.verified === true,
@@ -251,16 +302,106 @@ async function collectSourceSpecs({ inputDir, manifest, manifestFile }) {
     if (Array.isArray(manifest.urls)) {
         for (const entry of manifest.urls) {
             if (!entry?.url) continue;
-            specs.push({ type: "url", url: entry.url, title: entry.title, category: entry.category, note: entry.note, layer: normalizeLayer(entry.layer || "public"), authority: normalizeScore(entry.authority, 0.65), verified: entry.verified === true });
+            specs.push({
+                type: "url",
+                manifestId: cleanField(entry.id),
+                url: entry.url,
+                title: entry.title,
+                category: entry.category,
+                note: entry.note,
+                scope: normalizeKnowledgeScope(entry.scope),
+                workId: cleanField(entry.workId),
+                language: cleanField(entry.language),
+                layer: normalizeLayer(entry.layer || "public"),
+                authority: normalizeScore(entry.authority, 0.65),
+                verified: entry.verified === true,
+            });
         }
     }
     if (!specs.length && (await pathExists(inputDir))) {
         const files = await walkFiles(inputDir);
         for (const file of files) {
-            if (allowedExts.has(path.extname(file).toLowerCase())) specs.push({ type: "file", path: file, layer: "private", authority: 0.7, verified: false });
+            if (allowedExts.has(path.extname(file).toLowerCase())) specs.push({ type: "file", path: file, layer: "private", scope: "specialist", authority: 0.7, verified: false });
         }
     }
+    assertUniqueSourceSpecs(specs);
     return specs;
+}
+
+function optionalPositiveInt(value) {
+    const number = Number(value);
+    return Number.isFinite(number) && number > 0 ? Math.floor(number) : undefined;
+}
+
+async function readReviewedCardsText(dir, sourceId) {
+    const file = path.join(dir, `${sourceId}.json`);
+    if (!(await pathExists(file))) throw new Error(`缺少已审核知识卡文件：${file}`);
+    return fs.readFile(file, "utf8");
+}
+
+async function loadChunkDocument(spec, chunksDir) {
+    const manifestId = cleanField(spec.manifestId);
+    if (!manifestId) throw new Error("复用代表分块时，来源必须配置稳定 id");
+    const file = path.join(chunksDir, `${manifestId}.json`);
+    if (!(await pathExists(file))) throw new Error(`缺少代表分块文件：${file}`);
+    const payload = JSON.parse(await fs.readFile(file, "utf8"));
+    if (payload.sourceId !== manifestId) throw new Error(`代表分块 sourceId 不匹配：${manifestId}`);
+    const chunks = Array.isArray(payload.chunks) ? payload.chunks.map(cleanField).filter(Boolean) : [];
+    if (!chunks.length) throw new Error(`${manifestId}: 代表分块为空`);
+    const ext = spec.path ? path.extname(spec.path).toLowerCase() : "";
+    return {
+        id: stableId(sourceSpecKey(spec)),
+        manifestId,
+        title: spec.title || payload.title || manifestId,
+        category: spec.category || payload.category || categoryFallback,
+        kind: ext === ".epub" && spec.epubRange ? "epub-section" : ext.slice(1) || "file",
+        source: spec.path ? sourceDisplayPath(spec.path, spec.epubRange) : spec.url,
+        layer: normalizeLayer(spec.layer),
+        scope: normalizeKnowledgeScope(spec.scope),
+        workId: cleanField(spec.workId),
+        language: cleanField(spec.language),
+        authority: normalizeScore(spec.authority, 0.7),
+        verified: spec.verified === true,
+        note: cleanField(spec.note),
+        epubRange: normalizeEpubRange(spec.epubRange),
+        text: chunks.join("\n\n"),
+        extractedChunks: chunks,
+    };
+}
+
+function parseReviewedCards(doc, sourceIdByManifestId) {
+    const payload = JSON.parse(doc.reviewedCardsText || "{}");
+    if (payload.sourceId !== doc.manifestId) throw new Error(`${doc.title}: 已审核知识卡 sourceId 不匹配`);
+    if (payload.audited !== true) throw new Error(`${doc.title}: 知识卡尚未完成独立审核`);
+    const cards = Array.isArray(payload.cards) ? payload.cards : [];
+    return cards.map((card, index) => {
+        if (typeof card.keep !== "boolean") throw new Error(`${doc.title}: 第 ${index + 1} 张卡缺少 keep 审核结论`);
+        if (!cleanField(card.auditReason) || !containsHan(card.auditReason)) throw new Error(`${doc.title}: 第 ${index + 1} 张卡缺少中文审核理由`);
+        if (card.keep && (!cleanField(card.evidenceSummary) || !containsHan(card.evidenceSummary))) throw new Error(`${doc.title}: 第 ${index + 1} 张保留卡缺少中文证据摘要`);
+        const supportingManifestIds = Array.isArray(card.supportingSourceIds) ? card.supportingSourceIds.map(String) : [];
+        const unknownSupportingId = supportingManifestIds.find((id) => !sourceIdByManifestId.has(id));
+        if (unknownSupportingId) throw new Error(`${doc.title}: 第 ${index + 1} 张卡引用未知校核来源 ${unknownSupportingId}`);
+        const supportingIds = supportingManifestIds.map((id) => sourceIdByManifestId.get(id));
+        const confidence = normalizeScore(card.confidence, 0.5);
+        return {
+            ...card,
+            sourceIds: [...new Set([doc.id, ...supportingIds])],
+            layer: doc.layer,
+            scope: doc.scope,
+            status: card.keep === false ? "rejected" : confidence >= 0.78 && doc.authority >= 0.6 ? "auto_verified" : "candidate",
+            confidence,
+            authority: doc.authority,
+        };
+    });
+}
+
+function assertUniqueSourceSpecs(specs) {
+    const seen = new Set();
+    for (const spec of specs) {
+        const key = sourceSpecKey(spec);
+        if (seen.has(key)) throw new Error(`来源清单存在重复逻辑来源：${key}`);
+        seen.add(key);
+    }
 }
 
 async function walkFiles(dir) {
@@ -288,12 +429,16 @@ async function loadUrl(spec) {
     const title = spec.title || titleFromHtml(raw) || spec.url;
     const text = contentType.includes("html") ? stripHtml(raw) : raw;
     return {
-        id: stableId(spec.url),
+        id: stableId(sourceSpecKey(spec)),
         title,
         category: spec.category || inferCategory(`${title}\n${text}`),
         kind: "url",
         source: spec.url,
+        manifestId: cleanField(spec.manifestId),
         layer: normalizeLayer(spec.layer || "public"),
+        scope: normalizeKnowledgeScope(spec.scope),
+        workId: cleanField(spec.workId),
+        language: cleanField(spec.language),
         authority: normalizeScore(spec.authority, 0.65),
         verified: spec.verified === true,
         note: cleanField(spec.note),
@@ -308,25 +453,30 @@ async function loadFile(spec) {
     let text = "";
     if ([".txt", ".md", ".markdown", ".srt", ".vtt"].includes(ext)) text = await fs.readFile(file, "utf8");
     else if ([".html", ".htm"].includes(ext)) text = stripHtml(await fs.readFile(file, "utf8"));
-    else if (ext === ".epub") text = await extractEpub(file);
+    else if (ext === ".epub") text = await extractEpub(file, spec.epubRange);
     else if ([".mobi", ".azw", ".azw3"].includes(ext)) text = await convertWithCalibre(file);
-    else if (ext === ".pdf") text = await extractPdf(file);
+    else if (ext === ".pdf") text = await extractPdf(file, { maxOcrPages: spec.pdfOcrMaxPages });
     else throw new Error(`不支持的文件类型：${ext}`);
     return {
-        id: stableId(path.resolve(file)),
+        id: stableId(sourceSpecKey(spec)),
         title,
         category: spec.category || inferCategory(`${title}\n${text}`),
-        kind: ext.slice(1) || "file",
-        source: path.relative(appRoot, file).replaceAll("\\", "/"),
+        kind: ext === ".epub" && spec.epubRange ? "epub-section" : ext.slice(1) || "file",
+        source: sourceDisplayPath(file, spec.epubRange),
+        manifestId: cleanField(spec.manifestId),
         layer: normalizeLayer(spec.layer),
+        scope: normalizeKnowledgeScope(spec.scope),
+        workId: cleanField(spec.workId),
+        language: cleanField(spec.language),
         authority: normalizeScore(spec.authority, 0.7),
         verified: spec.verified === true,
         note: cleanField(spec.note),
+        epubRange: normalizeEpubRange(spec.epubRange),
         text,
     };
 }
 
-async function extractEpub(file) {
+async function extractEpub(file, epubRange) {
     const bytes = new Uint8Array(await fs.readFile(file));
     const zip = unzipSync(bytes);
     const readEntry = (name) => (zip[name] ? strFromU8(zip[name]) : "");
@@ -355,7 +505,43 @@ async function extractEpub(file) {
             if (/\.(xhtml|html|htm)$/i.test(key)) htmlPaths.push(key);
         }
     }
-    return htmlPaths.map((entry) => stripHtml(readEntry(entry))).join("\n\n");
+    const selectedPaths = selectEpubPaths(htmlPaths, epubRange);
+    return selectedPaths.map((entry) => stripHtml(readEntry(entry))).join("\n\n");
+}
+
+function selectEpubPaths(htmlPaths, epubRange) {
+    const range = normalizeEpubRange(epubRange);
+    if (!range) return htmlPaths;
+    const startIndex = range.start ? htmlPaths.indexOf(range.start) : 0;
+    const endIndex = range.end ? htmlPaths.indexOf(range.end) : htmlPaths.length - 1;
+    if (startIndex < 0) throw new Error(`EPUB 分段起点不存在：${range.start}`);
+    if (endIndex < 0) throw new Error(`EPUB 分段终点不存在：${range.end}`);
+    if (endIndex < startIndex) throw new Error(`EPUB 分段终点早于起点：${range.start} -> ${range.end}`);
+    return htmlPaths.slice(startIndex, endIndex + 1);
+}
+
+function normalizeEpubRange(value) {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+    const start = String(value.start || "")
+        .trim()
+        .replaceAll("\\", "/");
+    const end = String(value.end || "")
+        .trim()
+        .replaceAll("\\", "/");
+    return start || end ? { start, end } : null;
+}
+
+function sourceSpecKey(spec) {
+    if (spec.manifestId) return `manifest:${spec.manifestId}`;
+    const base = spec.path ? path.resolve(spec.path) : spec.url || "";
+    const range = normalizeEpubRange(spec.epubRange);
+    return range ? `${base}#epub:${range.start || ""}..${range.end || ""}` : base;
+}
+
+function sourceDisplayPath(file, epubRange) {
+    const relative = path.relative(appRoot, file).replaceAll("\\", "/");
+    const range = normalizeEpubRange(epubRange);
+    return range ? `${relative}#${range.start || "start"}..${range.end || "end"}` : relative;
 }
 
 function matchAttr(tag, attr) {
@@ -363,15 +549,16 @@ function matchAttr(tag, attr) {
     return tag.match(re)?.[1] || "";
 }
 
-async function extractPdf(file) {
+async function extractPdf(file, { maxOcrPages = 72 } = {}) {
     const pdftotext = resolveCommand("pdftotext");
+    const pages = pdfPageCount(file);
     if (pdftotext) {
         const result = spawnSync(pdftotext, ["-layout", file, "-"], { encoding: "utf8", maxBuffer: 100 * 1024 * 1024 });
         const text = normalizePdfText(result.stdout || "");
-        if (result.status === 0 && isUsablePdfText(text)) return text;
+        if (result.status === 0 && isUsablePdfText(text, pages)) return text;
     }
     try {
-        const ocrText = await ocrPdf(file);
+        const ocrText = await ocrPdf(file, { maxPages: maxOcrPages, pages });
         if (isUsablePdfText(ocrText)) return normalizePdfText(ocrText);
     } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
@@ -384,14 +571,22 @@ async function extractPdf(file) {
     return convertWithCalibre(file);
 }
 
-async function ocrPdf(file) {
+function pdfPageCount(file) {
+    const pdfinfo = resolveCommand("pdfinfo");
+    if (!pdfinfo) return 0;
+    const info = spawnSync(pdfinfo, [file], { encoding: "utf8", maxBuffer: 10 * 1024 * 1024 });
+    const pages = Number(info.stdout.match(/^Pages:\s+(\d+)/im)?.[1]);
+    return info.status === 0 && Number.isFinite(pages) ? pages : 0;
+}
+
+async function ocrPdf(file, { maxPages = 72, pages: knownPages = 0 } = {}) {
     const pdftoppm = resolveCommand("pdftoppm");
     const pdfinfo = resolveCommand("pdfinfo");
     const tesseract = resolveCommand("tesseract");
     if (!pdftoppm || !pdfinfo || !tesseract) throw new Error("缺少 pdftoppm、pdfinfo 或 Tesseract");
-    const info = spawnSync(pdfinfo, [file], { encoding: "utf8", maxBuffer: 10 * 1024 * 1024 });
-    const pages = Number(info.stdout.match(/^Pages:\s+(\d+)/im)?.[1]);
-    if (info.status !== 0 || !Number.isFinite(pages) || pages < 1) throw new Error(info.stderr || "无法读取 PDF 页数");
+    const pages = knownPages || pdfPageCount(file);
+    if (!Number.isFinite(pages) || pages < 1) throw new Error("无法读取 PDF 页数");
+    const pageNumbers = selectPdfPageNumbers(pages, maxPages);
     const tessdataDir = path.join(appRoot, "data", "tessdata");
     const hasChinese = fsSync.existsSync(path.join(tessdataDir, "chi_sim.traineddata"));
     const hasEnglish = fsSync.existsSync(path.join(tessdataDir, "eng.traineddata"));
@@ -400,7 +595,7 @@ async function ocrPdf(file) {
     await fs.mkdir(tmpDir, { recursive: true });
     const output = [];
     try {
-        for (let pageNumber = 1; pageNumber <= pages; pageNumber += 1) {
+        for (const pageNumber of pageNumbers) {
             const prefix = path.join(tmpDir, `page-${String(pageNumber).padStart(5, "0")}`);
             const image = `${prefix}.png`;
             const render = spawnSync(pdftoppm, ["-f", String(pageNumber), "-l", String(pageNumber), "-singlefile", "-r", "200", "-png", file, prefix], {
@@ -412,7 +607,7 @@ async function ocrPdf(file) {
             if (fsSync.existsSync(tessdataDir)) args.push("--tessdata-dir", tessdataDir);
             const recognized = spawnSync(tesseract, args, { encoding: "utf8", maxBuffer: 30 * 1024 * 1024 });
             if (recognized.status !== 0) throw new Error(recognized.stderr || `第 ${pageNumber} 页 OCR 失败`);
-            output.push(recognized.stdout);
+            output.push(`PDF 第 ${pageNumber} 页\n${recognized.stdout}`);
             await fs.rm(image, { force: true });
         }
     } finally {
@@ -421,9 +616,21 @@ async function ocrPdf(file) {
     return output.join("\n\n");
 }
 
-function isUsablePdfText(text) {
+function selectPdfPageNumbers(totalPages, maxPages) {
+    const total = Math.max(0, Math.floor(Number(totalPages)));
+    const limit = Math.max(1, Math.floor(Number(maxPages) || 1));
+    if (total <= limit) return Array.from({ length: total }, (_, index) => index + 1);
+    const pages = new Set([1, total]);
+    for (let index = 0; index < limit; index += 1) {
+        pages.add(Math.round(1 + (index * (total - 1)) / Math.max(1, limit - 1)));
+    }
+    return [...pages].sort((a, b) => a - b).slice(0, limit);
+}
+
+function isUsablePdfText(text, pages = 0) {
     const compact = String(text || "").replace(/\s/g, "");
-    if (compact.length < 100) return false;
+    const minimumLength = pages > 0 ? Math.min(5000, Math.max(100, pages * 30)) : 100;
+    if (compact.length < minimumLength) return false;
     const meaningful = (compact.match(/[\p{L}\p{N}\p{Script=Han}]/gu) || []).length;
     const replacement = (compact.match(/�/g) || []).length;
     return meaningful / compact.length >= 0.55 && replacement / compact.length < 0.01;
@@ -475,7 +682,12 @@ function resolveCommand(command) {
     }
     const probe = process.platform === "win32" ? "where" : "which";
     const result = spawnSync(probe, [command], { encoding: "utf8" });
-    return result.status === 0 ? result.stdout.split(/\r?\n/).map((item) => item.trim()).find(Boolean) || command : "";
+    return result.status === 0
+        ? result.stdout
+              .split(/\r?\n/)
+              .map((item) => item.trim())
+              .find(Boolean) || command
+        : "";
 }
 
 function findExecutable(dir, names, depth) {
@@ -555,13 +767,26 @@ function splitParagraphs(text) {
 
 function selectKnowledgeChunks(text, limit) {
     const paras = splitParagraphs(text);
-    return paras
+    const candidates = paras
         .map((text, index) => ({ text, index, score: scoreChunk(text) }))
         .filter((item) => item.score > 1)
-        .sort((a, b) => b.score - a.score)
-        .slice(0, limit)
-        .sort((a, b) => a.index - b.index)
-        .map((item) => item.text);
+        .sort((a, b) => b.score - a.score || a.index - b.index);
+    if (candidates.length <= limit) return candidates.sort((a, b) => a.index - b.index).map((item) => item.text);
+
+    const selected = new Map();
+    const bucketCount = Math.min(limit, Math.max(1, Math.ceil(limit / 2)));
+    const bucketWidth = Math.max(1, paras.length / bucketCount);
+    for (let bucket = 0; bucket < bucketCount; bucket += 1) {
+        const start = bucket * bucketWidth;
+        const end = (bucket + 1) * bucketWidth;
+        const best = candidates.find((item) => item.index >= start && item.index < end && !selected.has(item.index));
+        if (best) selected.set(best.index, best);
+    }
+    for (const item of candidates) {
+        if (selected.size >= limit) break;
+        selected.set(item.index, item);
+    }
+    return [...selected.values()].sort((a, b) => a.index - b.index).map((item) => item.text);
 }
 
 function scoreChunk(text) {
@@ -601,6 +826,7 @@ function localDistill(docs, maxCards) {
             avoid: ["只摘录原文而不转化为可执行创作判断", "把单一来源当作万能公式"],
             sourceIds: [doc.id],
             layer: doc.layer,
+            scope: doc.scope,
             status: "candidate",
             confidence: 0.45,
             authority: doc.authority,
@@ -618,7 +844,7 @@ function topTerms(text) {
     return [...new Set(terms)].slice(0, 10);
 }
 
-async function distillWithLlm(docs, { maxCards, warnings }) {
+async function distillWithLlm(docs, { maxCards, warnings, chunksPerBatch = 8, batchChars = 18000 }) {
     const apiKey = process.env.KNOWLEDGE_LLM_API_KEY || process.env.OPENAI_API_KEY;
     const baseUrl = (process.env.KNOWLEDGE_LLM_BASE_URL || process.env.OPENAI_BASE_URL || "https://api.openai.com/v1").replace(/\/$/, "");
     const model = process.env.KNOWLEDGE_LLM_MODEL || process.env.OPENAI_MODEL || "gpt-4.1-mini";
@@ -627,30 +853,34 @@ async function distillWithLlm(docs, { maxCards, warnings }) {
     const cards = [];
     for (const doc of docs) {
         if (cards.length >= maxCards) break;
-        const excerpt = doc.chunks.join("\n\n---\n\n").slice(0, 24000);
-        try {
-            const result = await callChatJson({
-                apiKey,
-                baseUrl,
-                model,
-                messages: [
-                    {
-                        role: "system",
-                        content:
-                            "你是影视、短剧与 AI 视频生成的版权安全知识蒸馏器。只输出原创总结，不要复述原文，不要长引用。只保留权威、可执行、可质检的创作原则。低质量、玄学、标题党内容必须丢弃。",
-                    },
-                    {
-                        role: "user",
-                        content: `来源 ID：${doc.id}
+        const batches = buildDistillationBatches(doc.chunks, { chunksPerBatch, batchChars });
+        for (let batchIndex = 0; batchIndex < batches.length && cards.length < maxCards; batchIndex += 1) {
+            const excerpt = batches[batchIndex].join("\n\n---\n\n");
+            try {
+                const result = await callChatJson({
+                    apiKey,
+                    baseUrl,
+                    model,
+                    messages: [
+                        {
+                            role: "system",
+                            content:
+                                "你是影视、短剧与 AI 视频生成的版权安全知识蒸馏器。所有知识卡字段必须使用简体中文，只有作品名、人名和无法准确翻译的专有名词可附带原文。只输出原创总结，不要复述原文，不要长引用。只保留权威、可执行、可质检的创作原则。低质量、玄学、标题党内容必须丢弃。",
+                        },
+                        {
+                            role: "user",
+                            content: `来源 ID：${doc.id}
 来源标题：${doc.title}
 来源类别：${doc.category}
+来源说明：${doc.note || "无"}
+当前批次：${batchIndex + 1}/${batches.length}（来自全书不同位置的代表性章节）
 
-请从下面材料中蒸馏 3-8 条创作知识卡，输出 JSON：
+请从下面材料中蒸馏 0-5 条创作知识卡，输出 JSON。没有得到材料充分支持的可执行原则时返回空数组，不要凑数；完整专业书的每批通常可保留 2-5 条。每张卡只解决一个创作判断问题，避免和其他卡重复：
 {
   "cards": [
     {
       "title": "短标题",
-      "category": "故事与剧本/台词与对白/人物与心理/导演与表演/视听与分镜/剪辑与声音/AI视频生成/短剧与网感/综合创作",
+      "category": "优先沿用来源类别，也可细分为故事与剧本、台词与对白、人物与心理、世界观与设定、导演与表演、视听与分镜、色彩与视觉叙事、声音设计、剪辑与叙事节奏、服装与角色视觉、文化语境与传播（扩展）等中文类别",
                       "principle": "原创总结的一条可执行原则，禁止长引用",
                       "appliesTo": ["适用节点或阶段"],
                       "checks": ["质检问题1", "质检问题2", "质检问题3"],
@@ -664,25 +894,45 @@ async function distillWithLlm(docs, { maxCards, warnings }) {
 
 材料：
 ${excerpt}`,
-                    },
-                ],
-            });
-            const nextCards = Array.isArray(result.cards) ? result.cards : [];
-            const candidates = nextCards.map((card) => ({
-                ...card,
-                sourceIds: [doc.id],
-                layer: doc.layer,
-                status: "candidate",
-                confidence: 0.6,
-                authority: doc.authority,
-            }));
-            cards.push(...(await independentlyAuditCards(doc, excerpt, candidates, { apiKey, baseUrl, model, warnings })));
-        } catch (error) {
-            warnings.push(`${doc.title}: LLM 蒸馏失败，使用本地索引。${error instanceof Error ? error.message : String(error)}`);
-            cards.push(...localDistill([doc], 4));
+                        },
+                    ],
+                });
+                const nextCards = Array.isArray(result.cards) ? result.cards : [];
+                const candidates = nextCards.map((card) => ({
+                    ...card,
+                    sourceIds: [doc.id],
+                    layer: doc.layer,
+                    scope: doc.scope,
+                    status: "candidate",
+                    confidence: 0.6,
+                    authority: doc.authority,
+                }));
+                cards.push(...(await independentlyAuditCards(doc, excerpt, candidates, { apiKey, baseUrl, model, warnings })));
+            } catch (error) {
+                warnings.push(`${doc.title}: 第 ${batchIndex + 1}/${batches.length} 批 LLM 蒸馏失败，保留本地候选索引。${error instanceof Error ? error.message : String(error)}`);
+                cards.push(...localDistill([{ ...doc, title: `${doc.title}（第${batchIndex + 1}批）`, chunks: batches[batchIndex] }], 1));
+            }
         }
     }
     return cards.slice(0, maxCards);
+}
+
+function buildDistillationBatches(chunks, { chunksPerBatch = 8, batchChars = 18000 } = {}) {
+    const batches = [];
+    let current = [];
+    let chars = 0;
+    for (const chunk of chunks) {
+        const nextLength = String(chunk || "").length;
+        if (current.length && (current.length >= chunksPerBatch || chars + nextLength > batchChars)) {
+            batches.push(current);
+            current = [];
+            chars = 0;
+        }
+        current.push(chunk);
+        chars += nextLength;
+    }
+    if (current.length) batches.push(current);
+    return batches;
 }
 
 async function independentlyAuditCards(doc, excerpt, candidates, { apiKey, baseUrl, model, warnings }) {
@@ -696,7 +946,7 @@ async function independentlyAuditCards(doc, excerpt, candidates, { apiKey, baseU
                 {
                     role: "system",
                     content:
-                        "你是独立知识审计员，不参与第一轮蒸馏。不要因为来源标题、作者名或候选卡写得像专业术语就放行。只检查材料是否真正支持原则、原则是否可执行、是否过度泛化、是否说明适用边界。",
+                        "你是独立知识审计员，不参与第一轮蒸馏。所有输出字段必须使用简体中文，只有作品名、人名和无法准确翻译的专有名词可附带原文。不要因为来源标题、作者名或候选卡写得像专业术语就放行。只检查材料是否真正支持原则、原则是否可执行、是否过度泛化、是否说明适用边界。",
                 },
                 {
                     role: "user",
@@ -783,14 +1033,15 @@ function auditCards(cards, { documents = [], review = { approved: [], rejected: 
     for (const card of cards) {
         const title = cleanField(card.title).slice(0, 60);
         const principle = cleanField(card.principle).slice(0, 360);
-        if (!title || principle.length < 20) continue;
+        const category = cleanField(card.category) || categoryFallback;
+        if (!title || principle.length < 20 || !containsHan(title) || !containsHan(principle) || !containsHan(category)) continue;
         if (lowQualityTerms.some((term) => title.includes(term) || principle.includes(term))) continue;
-        const key = `${title}|${principle.slice(0, 40)}`;
+        const sourceIds = cleanList(card.sourceIds).slice(0, 5);
+        const key = `${sourceIds.join("|")}|${title}|${principle.slice(0, 80)}`;
         if (seen.has(key)) continue;
         seen.add(key);
-        const sourceIds = cleanList(card.sourceIds).slice(0, 5);
         const sources = sourceIds.map((id) => sourceMap.get(id)).filter(Boolean);
-        const id = cleanField(card.id) || stableId(`${title}|${principle}|${sourceIds.join("|")}`);
+        const id = stableId(`${title}|${principle}|${sourceIds.join("|")}`);
         let status = normalizeStatus(card.status);
         if (sources.some((source) => source.verified)) status = "verified";
         if (approved.has(id)) status = "verified";
@@ -799,13 +1050,14 @@ function auditCards(cards, { documents = [], review = { approved: [], rejected: 
         out.push({
             id,
             title,
-            category: cleanField(card.category) || categoryFallback,
+            category,
             principle,
             appliesTo: cleanList(card.appliesTo).slice(0, 5),
             checks: cleanList(card.checks).slice(0, 5),
             avoid: cleanList(card.avoid).slice(0, 4),
             sourceIds,
             layer: normalizeLayer(card.layer || sources[0]?.layer),
+            scope: normalizeKnowledgeScope(card.scope || sources[0]?.scope),
             status,
             confidence: normalizeScore(card.confidence, status === "candidate" ? 0.5 : 0.78),
             authority: normalizeScore(card.authority, sources.length ? sources.reduce((sum, source) => sum + source.authority, 0) / sources.length : 0.65),
@@ -816,6 +1068,29 @@ function auditCards(cards, { documents = [], review = { approved: [], rejected: 
         });
     }
     return out;
+}
+
+function containsHan(value) {
+    return /[\u3400-\u9fff]/.test(String(value || ""));
+}
+
+function limitCardsBySource(cards, documents, limit) {
+    if (cards.length <= limit) return cards;
+    const groups = new Map(documents.map((document) => [document.id, []]));
+    for (const card of cards) {
+        const sourceId = card.sourceIds[0] || "other";
+        if (!groups.has(sourceId)) groups.set(sourceId, []);
+        groups.get(sourceId).push(card);
+    }
+    const output = [];
+    while (output.length < limit && [...groups.values()].some((group) => group.length)) {
+        for (const group of groups.values()) {
+            if (output.length >= limit) break;
+            const card = group.shift();
+            if (card) output.push(card);
+        }
+    }
+    return output;
 }
 
 function cleanField(value) {
@@ -834,6 +1109,10 @@ function normalizeLayer(value) {
     return value === "project" || value === "public" || value === "model" ? value : "private";
 }
 
+function normalizeKnowledgeScope(value) {
+    return value === "core" || value === "extension" || value === "corroboration" ? value : "specialist";
+}
+
 function normalizeStatus(value) {
     return value === "verified" || value === "auto_verified" || value === "rejected" ? value : "candidate";
 }
@@ -844,15 +1123,28 @@ function normalizeScore(value, fallback) {
 }
 
 async function writeGeneratedPack(outputFile, { cards, sources, mode }) {
-    const context = renderKnowledgeContext(cards, sources);
+    const activeCards = cards.filter((card) => card.status === "verified");
+    const context = renderKnowledgeContext(activeCards, sources);
     const meta = {
         generatedAt: new Date().toISOString(),
         sourceCount: sources.length,
         cardCount: cards.length,
-        activeCardCount: cards.filter((card) => card.status === "verified" || card.status === "auto_verified").length,
-        candidateCardCount: cards.filter((card) => card.status === "candidate").length,
+        activeCardCount: cards.filter((card) => card.status === "verified").length,
+        independentlyReviewedCardCount: cards.filter((card) => card.status === "auto_verified").length,
+        candidateCardCount: cards.filter((card) => card.status === "candidate" || card.status === "auto_verified").length,
         mode,
-        sources: sources.map((source) => ({ id: source.id, title: source.title, category: source.category, kind: source.kind, layer: source.layer, authority: source.authority, verified: source.verified })),
+        sources: sources.map((source) => ({
+            id: source.id,
+            title: source.title,
+            category: source.category,
+            kind: source.kind,
+            layer: source.layer,
+            scope: source.scope,
+            workId: source.workId,
+            language: source.language,
+            authority: source.authority,
+            verified: source.verified,
+        })),
     };
     const content = `// Generated by scripts/ingest-creative-knowledge.mjs. Do not edit manually.
 export const CREATIVE_IMPORTED_KNOWLEDGE_CONTEXT = ${JSON.stringify(context, null, 4)};
@@ -870,7 +1162,10 @@ function renderKnowledgeContext(cards, sources) {
     const sourceLines = sources.map((source, index) => `${index + 1}. ${source.title}（${source.category}，${source.kind}）`).join("\n");
     const cardLines = cards
         .map((card, index) => {
-            const sourceTitles = card.sourceIds.map((id) => sourceMap.get(id)?.title).filter(Boolean).join("；");
+            const sourceTitles = card.sourceIds
+                .map((id) => sourceMap.get(id)?.title)
+                .filter(Boolean)
+                .join("；");
             return `${index + 1}. ${card.title}｜${card.category}
 - 原则：${card.principle}
 - 适用：${card.appliesTo.join("；") || "创作与质检"}
@@ -893,6 +1188,7 @@ ${cardLines}`;
 
 async function writeReport(reportFile, data) {
     await fs.writeFile(reportFile, JSON.stringify(data, null, 2), "utf8");
+    return writeReadableKnowledgeReports(reportFile, data);
 }
 
 function stableId(value) {
@@ -921,14 +1217,24 @@ export {
     cleanList,
     cleanText,
     collectSourceSpecs,
+    buildDistillationBatches,
+    extractEpub,
     inferCategory,
     loadSource,
     normalizeLayer,
+    normalizeKnowledgeScope,
+    normalizeEpubRange,
     normalizeScore,
     normalizeStatus,
     parseArgs,
+    parseReviewedCards,
     pathExists,
     resolveCommand,
+    selectPdfPageNumbers,
+    selectEpubPaths,
+    selectKnowledgeChunks,
+    sourceSpecKey,
     stableId,
     walkFiles,
+    writeGeneratedPack,
 };

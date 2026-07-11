@@ -3,7 +3,7 @@
     "version": "0.1.0",
     "private": true,
     "engines": {
-        "node": ">=20"
+        "node": ">=22.13.0"
     },
     "type": "module",
     "scripts": {
@@ -11,10 +11,17 @@
         "build": "next build",
         "start": "next start",
         "knowledge:ingest": "node --disable-warning=ExperimentalWarning ./scripts/ingest-creative-knowledge.mjs",
+        "knowledge:export-chunks": "node --disable-warning=ExperimentalWarning ./scripts/export-creative-knowledge-chunks.mjs",
+        "knowledge:report": "node --disable-warning=ExperimentalWarning ./scripts/render-creative-knowledge-report.mjs",
+        "knowledge:rebuild": "node --disable-warning=ExperimentalWarning ./scripts/rebuild-creative-knowledge-pack.mjs",
+        "knowledge:promote": "node --disable-warning=ExperimentalWarning ./scripts/promote-creative-knowledge.mjs",
+        "knowledge:smoke": "node ../canvas-agent/node_modules/tsx/dist/cli.mjs ./scripts/smoke-creative-knowledge.ts",
         "ingest-knowledge": "node --disable-warning=ExperimentalWarning ./scripts/ingest-creative-knowledge.mjs",
         "knowledge:cases": "node --disable-warning=ExperimentalWarning ./scripts/ingest-creative-cases.mjs",
         "knowledge:subtitle": "node --disable-warning=ExperimentalWarning ./scripts/extract-video-subtitles.mjs",
+        "knowledge:audit-subtitles": "node --disable-warning=ExperimentalWarning ./scripts/audit-video-subtitles.mjs",
         "knowledge:status": "node --disable-warning=ExperimentalWarning ./scripts/creative-library-status.mjs",
+        "knowledge:test": "node --test ./scripts/ingest-creative-knowledge.test.mjs",
         "knowledge:all": "npm run knowledge:ingest && npm run knowledge:cases",
         "knowledge:watch": "node --disable-warning=ExperimentalWarning ./scripts/watch-creative-knowledge.mjs",
         "open-knowledge-folder": "node ./scripts/open-creative-knowledge-folder.mjs",

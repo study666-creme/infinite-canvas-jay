@@ -16,9 +16,21 @@ data/
 # and reviewed TypeScript indexes in Git.
 web/knowledge/creative/.tmp/
 web/knowledge/creative/review.json
+web/knowledge/creative/raw/*
+!web/knowledge/creative/raw/.gitkeep
 web/knowledge/creative/cases/*.json
 web/knowledge/creative/cases/raw/*
 !web/knowledge/creative/cases/raw/.gitkeep
 web/knowledge/creative/videos/urls.txt
 web/knowledge/creative/videos/inbox/*
 !web/knowledge/creative/videos/inbox/.gitkeep
+
+# Private Agent knowledge and local presets. These files may contain distilled
+# source material and must never be committed to the public canvas repository.
+web/knowledge/creative/creative-knowledge-report.json
+web/knowledge/creative/知识卡-*
+web/knowledge/creative/agent-context.md
+web/src/app/(user)/canvas/utils/creative-knowledge-pack.generated.ts
+web/src/app/(user)/canvas/utils/creative-case-library.generated.ts
+web/src/app/(user)/canvas/utils/short-drama-agent-prompt.ts
+web/src/app/(user)/canvas/components/short-drama-agent-preset-button.tsx

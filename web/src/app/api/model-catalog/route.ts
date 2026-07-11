@@ -3,17 +3,17 @@ export const dynamic = "force-dynamic";
 
 const DEFAULT_NEW_API_BASE_URL = "https://newapi.prompt-hubs.com";
 const FALLBACK_ALIASES: Record<string, { id: string; label: string; description: string }> = {
-    "gpt-5.5": { id: "creative-5-5", label: "创作 5.5", description: "通用创作与推理模型，最高 xhigh 思考。" },
-    "gpt-5.6-sol": { id: "creative-5-6", label: "创作 5.6", description: "旗舰创作与推理模型，最高 ultra 思考。" },
-    "gpt-image-2": { id: "image2", label: "Image2", description: "标准生图模型，固定 1K。" },
-    "gpt-image-2-ext": { id: "image2-pro", label: "Image2 Pro", description: "高质量生图模型，支持 2K/4K。" },
-    image2k4k: { id: "image2-hd", label: "Image2 HD", description: "高分辨率经济模型，支持 2K/4K。" },
-    "nano-banana-fast": { id: "lingtu-fast", label: "灵图 极速", description: "快速生图模型，固定 1K。" },
-    "nano-banana-2": { id: "lingtu-2", label: "灵图 2", description: "通用生图模型，支持 1K/2K/4K。" },
-    "nano-banana-pro": { id: "lingtu-pro", label: "灵图 Pro", description: "高质量通用生图模型，支持 1K/2K/4K。" },
-    "nano-banana": { id: "lingtu", label: "灵图", description: "通用生图模型，支持 1K/2K/4K。" },
-    "grok-video": { id: "motion-video", label: "动态影像", description: "按秒计费的视频模型。" },
-    "grok-video-1.5": { id: "motion-video-1-5", label: "动态影像 1.5", description: "按秒计费的视频模型。" },
+    "gpt-5.5": { id: "creative-5-5", label: "全能模型5.5", description: "通用创作与推理模型，最高 xhigh 思考。" },
+    "gpt-5.6-sol": { id: "creative-5-6", label: "全能模型5.6", description: "旗舰创作与推理模型，最高 ultra 思考。" },
+    "gpt-image-2": { id: "image2", label: "全能模型2 · 1K", description: "标准生图模型，固定 1K。" },
+    "gpt-image-2-ext": { id: "image2-pro", label: "全能模型2 · 高质量 2K/4K", description: "高质量生图模型，支持 2K/4K。" },
+    image2k4k: { id: "image2-hd", label: "全能模型2 · 经济 2K/4K", description: "高分辨率经济模型，支持 2K/4K。" },
+    "nano-banana-fast": { id: "lingtu-fast", label: "香蕉 · 极速 1K", description: "快速生图模型，固定 1K。" },
+    "nano-banana-2": { id: "lingtu-2", label: "香蕉 · 2代 1K/2K/4K", description: "通用生图模型，支持 1K/2K/4K。" },
+    "nano-banana-pro": { id: "lingtu-pro", label: "香蕉 · 专业 1K/2K/4K", description: "高质量通用生图模型，支持 1K/2K/4K。" },
+    "nano-banana": { id: "lingtu", label: "香蕉 · 标准 1K/2K/4K", description: "通用生图模型，支持 1K/2K/4K。" },
+    "grok-video": { id: "motion-video", label: "Grok Video", description: "按秒计费的视频模型。" },
+    "grok-video-1.5": { id: "motion-video-1-5", label: "Grok Video 1.5", description: "按秒计费的视频模型。" },
 };
 
 function catalogUrl() {
@@ -42,7 +42,8 @@ function publicCatalog(payload: unknown) {
                   label: typeof model.label === "string" ? model.label : upstreamId,
                   description: typeof model.description === "string" ? model.description : "",
               };
-              const id = typeof declared?.id === "string" && declared.id ? declared.id : fallback.id;
+              const canonical = FALLBACK_ALIASES[upstreamId];
+              const id = canonical?.id || (typeof declared?.id === "string" && declared.id ? declared.id : fallback.id);
               if (!id) return [];
               const parameters = Array.isArray(model.parameters)
                   ? model.parameters.map((parameter) => {
@@ -53,7 +54,7 @@ function publicCatalog(payload: unknown) {
                   : [];
               return [{
                   id,
-                  label: typeof declared?.label === "string" && declared.label ? declared.label : fallback.label,
+                  label: canonical?.label || (typeof declared?.label === "string" && declared.label ? declared.label : fallback.label),
                   description: typeof declared?.description === "string" && declared.description ? declared.description : fallback.description,
                   modality: model.modality,
                   operation: model.operation,

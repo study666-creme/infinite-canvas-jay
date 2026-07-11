@@ -6,6 +6,7 @@ import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 
 import { AGENT_PROMPT, VERSION } from "./config.js";
+import { buildPrivateCanvasContext } from "./private-context.js";
 import type { AgentAttachment, AgentEmit } from "./types.js";
 
 type Json = Record<string, unknown>;
@@ -22,7 +23,10 @@ const canvasAgentMcp = canvasAgentMcpCommand();
 const require = createRequire(import.meta.url);
 
 export function withAgentPrompt(prompt: string) {
-    return prompt.trim() ? `${AGENT_PROMPT}\n\n用户请求：${prompt}` : "";
+    const text = prompt.trim();
+    if (!text) return "";
+    const privateContext = buildPrivateCanvasContext(text);
+    return `${AGENT_PROMPT}${privateContext ? `\n\n${privateContext}` : ""}\n\n用户请求：${text}`;
 }
 
 export async function runCodexTurn(prompt: string, emit: AgentEmit, attachments: AgentAttachment[] = [], options: CodexRunOptions = {}) {

@@ -44,6 +44,7 @@ export type AiConfig = {
     videoModels: string[];
     textModels: string[];
     audioModels: string[];
+    catalogModelSelectionVersion: number;
     quality: string;
     size: string;
     count: string;
@@ -72,28 +73,48 @@ const GEMINI_BASE_URL = "https://generativelanguage.googleapis.com";
 const PROMPT_HUB_DEFAULT_IMAGE_MODEL = "ph-hub:image2";
 const PROMPT_HUB_DEFAULT_VIDEO_MODEL = "ph-hub:sd2.0";
 const PROMPT_HUB_DEFAULT_TEXT_MODEL = "ph-hub:creative-5-5";
-const LEGACY_BUILT_IN_MODEL_NAMES = new Set(["gpt-image-2", "grok-imagine-video", "gpt-5.5"]);
+const PROMPT_HUB_MODEL_PREFIX = "ph-hub:";
+const CATALOG_MODEL_SELECTION_VERSION = 1;
+export const DEFAULT_PROMPT_HUB_MODEL_SELECTIONS: Record<ModelCapability, string[]> = {
+    image: ["ph-hub:image2", "ph-hub:image2-pro", "ph-hub:image2-hd", "ph-hub:lingtu-fast"],
+    video: ["ph-hub:sd2.0", "ph-hub:sd2.0-fast", "ph-hub:sd2.0-mini", "ph-hub:sd2.0四图版", "ph-hub:sd2.0fast四图版", "ph-hub:sd1080-4k", "ph-hub:motion-video", "ph-hub:motion-video-1-5"],
+    text: ["ph-hub:creative-5-5", "ph-hub:creative-5-6", "ph-hub:deepseek-v4-pro", "ph-hub:glm-5.1", "ph-hub:grok4.5pro"],
+    audio: [],
+};
+const BUILT_IN_MODEL_CAPABILITIES: Record<string, ModelCapability> = {
+    image2: "image",
+    "image2-pro": "image",
+    "image2-hd": "image",
+    "lingtu-fast": "image",
+    "lingtu-2": "image",
+    "lingtu-pro": "image",
+    lingtu: "image",
+    "sd2.0": "video",
+    "sd2.0-fast": "video",
+    "sd2.0-mini": "video",
+    "sd2.0四图版": "video",
+    "sd2.0fast四图版": "video",
+    "sd1080-4k": "video",
+    "motion-video": "video",
+    "motion-video-1-5": "video",
+    "creative-5-5": "text",
+    "creative-5-6": "text",
+    "deepseek-v4-pro": "text",
+    "glm-5.1": "text",
+    "grok4.5pro": "text",
+};
 
 export const defaultConfig: AiConfig = {
     channelMode: "local",
     baseUrl: OPENAI_BASE_URL,
     apiKey: "",
     apiFormat: "openai",
-    channels: [
-        {
-            id: "default",
-            name: "默认渠道",
-            baseUrl: OPENAI_BASE_URL,
-            apiKey: "",
-            apiFormat: "openai",
-            models: ["gpt-4o-mini-tts"],
-        },
-    ],
+    channels: [],
     model: PROMPT_HUB_DEFAULT_IMAGE_MODEL,
     imageModel: PROMPT_HUB_DEFAULT_IMAGE_MODEL,
     videoModel: PROMPT_HUB_DEFAULT_VIDEO_MODEL,
     textModel: PROMPT_HUB_DEFAULT_TEXT_MODEL,
-    audioModel: "default::gpt-4o-mini-tts",
+    audioModel: "",
     audioVoice: "alloy",
     audioFormat: "mp3",
     audioSpeed: "1",
@@ -103,11 +124,12 @@ export const defaultConfig: AiConfig = {
     videoGenerateAudio: "true",
     videoWatermark: "false",
     systemPrompt: "",
-    models: ["default::gpt-4o-mini-tts"],
-    imageModels: [],
-    videoModels: [],
-    textModels: [],
-    audioModels: ["default::gpt-4o-mini-tts"],
+    models: [],
+    imageModels: DEFAULT_PROMPT_HUB_MODEL_SELECTIONS.image,
+    videoModels: DEFAULT_PROMPT_HUB_MODEL_SELECTIONS.video,
+    textModels: DEFAULT_PROMPT_HUB_MODEL_SELECTIONS.text,
+    audioModels: [],
+    catalogModelSelectionVersion: CATALOG_MODEL_SELECTION_VERSION,
     quality: "2k",
     size: "1:1",
     count: "1",
@@ -145,12 +167,31 @@ type ConfigStore = {
 };
 
 function migrateLegacyDefaultModel(value: string | undefined, capability: "image" | "video" | "text") {
-    const model = String(value || "").trim();
+    const model = unwrapPromptHubModelValue(value);
     const name = modelOptionName(model).toLowerCase();
+    const builtInCapability = builtInModelCapability(model);
+    if (builtInCapability && builtInCapability !== capability) return defaultBuiltInModel(capability);
+    if (model.startsWith(PROMPT_HUB_MODEL_PREFIX)) return model;
     if (capability === "image" && ["gpt-image-2", "newapi-gpt-image-2", "image2"].includes(name)) return PROMPT_HUB_DEFAULT_IMAGE_MODEL;
     if (capability === "video" && ["grok-imagine-video", "grok-video", "sd2.0"].includes(name)) return PROMPT_HUB_DEFAULT_VIDEO_MODEL;
     if (capability === "text" && ["gpt-5.5", "gpt-5.6-sol"].includes(name)) return PROMPT_HUB_DEFAULT_TEXT_MODEL;
-    return model || (capability === "image" ? PROMPT_HUB_DEFAULT_IMAGE_MODEL : capability === "video" ? PROMPT_HUB_DEFAULT_VIDEO_MODEL : PROMPT_HUB_DEFAULT_TEXT_MODEL);
+    return model || defaultBuiltInModel(capability);
+}
+
+function defaultBuiltInModel(capability: "image" | "video" | "text") {
+    return capability === "image" ? PROMPT_HUB_DEFAULT_IMAGE_MODEL : capability === "video" ? PROMPT_HUB_DEFAULT_VIDEO_MODEL : PROMPT_HUB_DEFAULT_TEXT_MODEL;
+}
+
+function unwrapPromptHubModelValue(value?: string) {
+    const model = String(value || "").trim();
+    const decoded = decodeChannelModel(model);
+    const raw = decoded?.model || model;
+    return raw.startsWith(PROMPT_HUB_MODEL_PREFIX) ? raw : model;
+}
+
+function builtInModelCapability(model: string): ModelCapability | undefined {
+    const name = modelOptionName(unwrapPromptHubModelValue(model)).toLowerCase().replace(/^ph-hub:/, "");
+    return BUILT_IN_MODEL_CAPABILITIES[name];
 }
 
 function isVideoModelName(model: string) {
@@ -174,6 +215,8 @@ function isTextModelName(model: string) {
 
 export function modelMatchesCapability(model: string, capability?: ModelCapability) {
     if (!capability) return true;
+    const builtInCapability = builtInModelCapability(model);
+    if (builtInCapability) return builtInCapability === capability;
     if (capability === "image") return isImageModelName(model);
     if (capability === "video") return isVideoModelName(model);
     if (capability === "audio") return isAudioModelName(model);
@@ -235,6 +278,27 @@ export const useConfigStore = create<ConfigStore>()(
                 if (!Array.isArray(persistedConfig.channels)) config.channels = [];
                 const channels = normalizeChannels(config);
                 const models = modelOptionsFromChannels(channels);
+                const selectionInitialized = persistedConfig.catalogModelSelectionVersion === CATALOG_MODEL_SELECTION_VERSION;
+                const imageModels = normalizeCapabilityModelList(
+                    selectionInitialized ? config.imageModels : [...config.imageModels, ...DEFAULT_PROMPT_HUB_MODEL_SELECTIONS.image],
+                    channels,
+                    "image",
+                );
+                const videoModels = normalizeCapabilityModelList(
+                    selectionInitialized ? config.videoModels : [...config.videoModels, ...DEFAULT_PROMPT_HUB_MODEL_SELECTIONS.video],
+                    channels,
+                    "video",
+                );
+                const textModels = normalizeCapabilityModelList(
+                    selectionInitialized ? config.textModels : [...config.textModels, ...DEFAULT_PROMPT_HUB_MODEL_SELECTIONS.text],
+                    channels,
+                    "text",
+                );
+                const audioModels = normalizeCapabilityModelList(
+                    selectionInitialized ? config.audioModels : [...config.audioModels, ...DEFAULT_PROMPT_HUB_MODEL_SELECTIONS.audio],
+                    channels,
+                    "audio",
+                );
                 return {
                     ...current,
                     webdav: { ...defaultWebdavSyncConfig, ...persistedWebdav },
@@ -244,10 +308,11 @@ export const useConfigStore = create<ConfigStore>()(
                         apiFormat: normalizeApiFormat(config.apiFormat),
                         channels,
                         models,
-                        imageModel: normalizeModelOptionValue(migrateLegacyDefaultModel(config.imageModel || config.model, "image"), channels),
-                        videoModel: normalizeModelOptionValue(migrateLegacyDefaultModel(config.videoModel, "video"), channels),
-                        textModel: normalizeModelOptionValue(migrateLegacyDefaultModel(config.textModel || config.model, "text"), channels),
-                        audioModel: normalizeModelOptionValue(config.audioModel || defaultConfig.audioModel, channels),
+                        model: normalizeSelectedModel(normalizeModelOptionValue(migrateLegacyDefaultModel(config.imageModel || config.model, "image"), channels), imageModels),
+                        imageModel: normalizeSelectedModel(normalizeModelOptionValue(migrateLegacyDefaultModel(config.imageModel || config.model, "image"), channels), imageModels),
+                        videoModel: normalizeSelectedModel(normalizeModelOptionValue(migrateLegacyDefaultModel(config.videoModel, "video"), channels), videoModels),
+                        textModel: normalizeSelectedModel(normalizeModelOptionValue(migrateLegacyDefaultModel(config.textModel || config.model, "text"), channels), textModels),
+                        audioModel: normalizeSelectedModel(normalizeModelOptionValue(config.audioModel || "", channels), audioModels),
                         audioVoice: config.audioVoice || defaultConfig.audioVoice,
                         audioFormat: config.audioFormat || defaultConfig.audioFormat,
                         audioSpeed: config.audioSpeed || defaultConfig.audioSpeed,
@@ -262,10 +327,11 @@ export const useConfigStore = create<ConfigStore>()(
                         autoExportVideo: persistedConfig.autoExportVideo ?? defaultConfig.autoExportVideo,
                         localImageFolderName: persistedConfig.localImageFolderName || "",
                         localVideoFolderName: persistedConfig.localVideoFolderName || "",
-                        imageModels: Array.isArray(persistedConfig.imageModels) ? normalizeModelList(config.imageModels, channels) : filterModelsByCapability(models, "image"),
-                        videoModels: Array.isArray(persistedConfig.videoModels) ? normalizeModelList(config.videoModels, channels) : filterModelsByCapability(models, "video"),
-                        textModels: Array.isArray(persistedConfig.textModels) ? normalizeModelList(config.textModels, channels) : filterModelsByCapability(models, "text"),
-                        audioModels: Array.isArray(persistedConfig.audioModels) ? normalizeModelList(config.audioModels, channels) : filterModelsByCapability(models, "audio"),
+                        imageModels,
+                        videoModels,
+                        textModels,
+                        audioModels,
+                        catalogModelSelectionVersion: CATALOG_MODEL_SELECTION_VERSION,
                     },
                 };
             },
@@ -330,6 +396,8 @@ export function normalizeModelOptionValue(value: string | undefined, channels: M
     const model = (value || "").trim();
     if (!model) return "";
     const decoded = decodeChannelModel(model);
+    const unwrappedPromptHubModel = decoded?.model || model;
+    if (unwrappedPromptHubModel.startsWith(PROMPT_HUB_MODEL_PREFIX)) return unwrappedPromptHubModel;
     if (decoded) {
         const channel = channels.find((item) => item.id === decoded.channelId);
         return channel && channel.models.includes(decoded.model) ? model : "";
@@ -339,6 +407,9 @@ export function normalizeModelOptionValue(value: string | undefined, channels: M
 }
 
 export function resolveModelChannel(config: AiConfig, value: string) {
+    if (unwrapPromptHubModelValue(value).startsWith(PROMPT_HUB_MODEL_PREFIX)) {
+        return createModelChannel({ id: "card-vault-api", name: "卡藏 API", baseUrl: "", apiKey: "", models: [] });
+    }
     const decoded = decodeChannelModel(value);
     const model = decoded?.model || value;
     const matched = decoded ? config.channels.find((channel) => channel.id === decoded.channelId) : config.channels.find((channel) => channel.models.includes(model));
@@ -365,33 +436,39 @@ function normalizeChannels(config: AiConfig) {
             name: channel.name || (index === 0 ? "默认渠道" : `渠道 ${index + 1}`),
             models: uniqueRawModels(channel.models || []),
         }),
-    );
-    if (!channels.length) {
+    ).filter((channel, index) => !isUnusedDefaultChannel(channel, index));
+    if (!channels.length && config.apiKey.trim()) {
         channels.push(
             createModelChannel({
-                id: "default",
-                name: "默认渠道",
+                id: "channel-1",
+                name: "渠道 1",
                 baseUrl: config.baseUrl || defaultConfig.baseUrl,
                 apiKey: config.apiKey || "",
                 apiFormat: config.apiFormat || defaultConfig.apiFormat,
-                models: uniqueRawModels([
-                    ...(config.models || []),
-                    config.model,
-                    config.imageModel,
-                    config.videoModel,
-                    config.textModel,
-                    config.audioModel,
-                ]),
+                models: uniqueRawModels(config.models || []),
             }),
         );
     }
-    return channels.map((channel) => ({
-        ...channel,
-        models: uniqueRawModels(channel.models).filter((model) => {
-            const untouchedLegacyDefault = channel.id === "default" && !channel.apiKey.trim() && channel.baseUrl.replace(/\/+$/, "") === OPENAI_BASE_URL;
-            return !untouchedLegacyDefault || !LEGACY_BUILT_IN_MODEL_NAMES.has(model.toLowerCase());
-        }),
-    }));
+    return channels.map((channel) => ({ ...channel, models: uniqueRawModels(channel.models).filter((model) => !model.startsWith(PROMPT_HUB_MODEL_PREFIX)) }));
+}
+
+function isUnusedDefaultChannel(channel: ModelChannel, index: number) {
+    const defaultIdentity = channel.id === "default" || (index === 0 && channel.name === "默认渠道");
+    const baseUrl = channel.baseUrl.replace(/\/+$/, "");
+    const untouchedBaseUrl = baseUrl === OPENAI_BASE_URL || baseUrl === GEMINI_BASE_URL;
+    return defaultIdentity && !channel.apiKey.trim() && untouchedBaseUrl;
+}
+
+function normalizeCapabilityModelList(models: string[], channels: ModelChannel[], capability: ModelCapability) {
+    const localOptions = new Set(modelOptionsFromChannels(channels));
+    return normalizeModelList(models, channels).filter((model) => {
+        if (unwrapPromptHubModelValue(model).startsWith(PROMPT_HUB_MODEL_PREFIX)) return true;
+        return localOptions.has(model) && modelMatchesCapability(model, capability);
+    });
+}
+
+function normalizeSelectedModel(value: string, options: string[]) {
+    return options.includes(value) ? value : options[0] || "";
 }
 
 export function defaultBaseUrlForApiFormat(apiFormat: ApiCallFormat) {

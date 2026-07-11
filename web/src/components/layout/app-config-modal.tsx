@@ -6,11 +6,13 @@ import { useState } from "react";
 
 import { PromptHubAwareModelPicker } from "@/components/prompt-hub-model-picker";
 import { ExportFolderSettingsPanel, ModelPricingSettingsPanel } from "@/components/layout/export-pricing-settings";
-import { PromptHubSettingsPanel } from "@/components/layout/prompt-hub-settings-panel";
 import { fetchChannelModels } from "@/services/api/image";
 import { syncAppDataToWebdav, type AppSyncDomainKey, type AppSyncProgressEvent } from "@/services/app-sync";
 import { testWebdavConnection, WEBDAV_MANIFEST_FILE_NAME } from "@/services/webdav-sync";
 import { audioFormatOptions, audioVoiceOptions, normalizeAudioSpeedValue } from "@/lib/audio-generation";
+import { isPromptHubModelValue, promptHubModelPickerLabel, toPromptHubModelValue } from "@/services/prompt-hub-models";
+import type { PromptHubCatalogModel, PromptHubImageModel } from "@/services/prompt-hub";
+import { usePromptHubStore } from "@/stores/use-prompt-hub-store";
 import { createModelChannel, defaultBaseUrlForApiFormat, filterModelsByCapability, modelOptionLabel, modelOptionsFromChannels, normalizeModelOptionValue, useConfigStore, type AiConfig, type ApiCallFormat, type ModelCapability, type ModelChannel } from "@/stores/use-config-store";
 
 type ModelGroup = {
@@ -75,7 +77,8 @@ export function AppConfigModal() {
     const shouldPromptContinue = useConfigStore((state) => state.shouldPromptContinue);
     const setConfigDialogOpen = useConfigStore((state) => state.setConfigDialogOpen);
     const clearPromptContinue = useConfigStore((state) => state.clearPromptContinue);
-    const modelOptions = config.models.map((model) => ({ label: modelOptionLabel(config, model), value: model }));
+    const promptHubImageModels = usePromptHubStore((state) => state.imageModels);
+    const promptHubCatalogModels = usePromptHubStore((state) => state.models);
     const webdavReady = Boolean(webdav.url.trim());
 
     const saveConfig = (nextConfig: AiConfig) => {
@@ -83,9 +86,7 @@ export function AppConfigModal() {
     };
 
     const finishConfig = () => {
-        const ready = config.channels.some((channel) => channel.baseUrl.trim() && channel.apiKey.trim() && channel.models.length);
         setConfigDialogOpen(false);
-        if (!ready) return;
         message.success(shouldPromptContinue ? "配置已保存，请继续刚才的请求" : "配置已保存");
         clearPromptContinue();
     };
@@ -109,10 +110,6 @@ export function AppConfigModal() {
     };
 
     const deleteChannel = (id: string) => {
-        if (config.channels.length <= 1) {
-            message.warning("至少保留一个渠道");
-            return;
-        }
         updateChannels(config.channels.filter((channel) => channel.id !== id));
     };
 
@@ -153,7 +150,8 @@ export function AppConfigModal() {
     };
 
     const updateCapabilityModels = (group: ModelGroup, models: string[]) => {
-        const next = uniqueModels(models.map((model) => normalizeModelOptionValue(model, config.channels)).filter(Boolean));
+        const normalized = uniqueModels(models.map((model) => normalizeModelOptionValue(model, config.channels)).filter(Boolean));
+        const next = normalized.filter((model) => isPromptHubModelValue(model) || filterModelsByCapability([model], group.capability).length > 0);
         updateConfig(group.modelsKey, next);
         if (!next.includes(config[group.modelKey])) updateConfig(group.modelKey, next[0] || "");
     };
@@ -308,23 +306,32 @@ export function AppConfigModal() {
                             <Form layout="vertical" requiredMark={false}>
                                 <div className="mb-4 rounded-lg border border-stone-200 p-3 dark:border-stone-800">
                                     <div className="text-sm font-semibold">默认模型和可选项</div>
-                                    <div className="mt-1 text-xs leading-5 text-stone-500">可选项决定各处下拉框展示哪些模型；同名模型会以括号里的渠道名区分。</div>
+                                    <div className="mt-1 text-xs leading-5 text-stone-500">勾选后模型才会出现在各处下拉框；新加入的卡藏模型默认不自动显示。</div>
                                 </div>
                                 <div className="grid gap-4 md:grid-cols-2">
-                                    {modelGroups.map((group) => (
-                                        <Form.Item key={group.modelsKey} label={group.optionsLabel} className="mb-0">
-                                            <Select
-                                                mode="tags"
-                                                showSearch
-                                                allowClear
-                                                maxTagCount="responsive"
-                                                placeholder={config.models.length ? `请选择或输入${group.optionsLabel}` : "先到渠道里填写或拉取模型"}
-                                                value={config[group.modelsKey]}
-                                                options={modelOptions}
-                                                onChange={(models) => updateCapabilityModels(group, models)}
-                                            />
-                                        </Form.Item>
-                                    ))}
+                                    {modelGroups.map((group) => {
+                                        const values = config[group.modelsKey];
+                                        const promptHubOptions = promptHubModelOptions(group.capability, promptHubImageModels, promptHubCatalogModels);
+                                        const localOptions = filterModelsByCapability(config.models, group.capability).map((model) => ({ label: modelOptionLabel(config, model), value: model }));
+                                        const options = [
+                                            ...(promptHubOptions.length ? [{ label: "卡藏 API", options: promptHubOptions }] : []),
+                                            ...(localOptions.length ? [{ label: "本地 / 第三方 API", options: localOptions }] : []),
+                                        ];
+                                        return (
+                                            <Form.Item key={group.modelsKey} label={group.optionsLabel} className="mb-0">
+                                                <Select
+                                                    mode="multiple"
+                                                    showSearch
+                                                    allowClear
+                                                    maxTagCount="responsive"
+                                                    placeholder={options.length ? `选择${group.optionsLabel}` : "暂无可用模型"}
+                                                    value={values}
+                                                    options={options}
+                                                    onChange={(models) => updateCapabilityModels(group, models)}
+                                                />
+                                            </Form.Item>
+                                        );
+                                    })}
                                 </div>
                                 <div className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
                                     {modelGroups.map((group) => (
@@ -390,11 +397,6 @@ export function AppConfigModal() {
                         children: <ExportFolderSettingsPanel />,
                     },
                     {
-                        key: "prompt-hub",
-                        label: "Prompt Hub",
-                        children: <PromptHubSettingsPanel />,
-                    },
-                    {
                         key: "webdav",
                         label: "WebDAV",
                         children: (
@@ -455,19 +457,38 @@ export function AppConfigModal() {
     );
 }
 
+function promptHubModelOptions(
+    capability: ModelCapability,
+    imageModels: PromptHubImageModel[],
+    catalogModels: PromptHubCatalogModel[],
+) {
+    const source: PromptHubCatalogModel[] = capability === "image"
+        ? imageModels
+        : catalogModels.filter((model) => {
+              if (model.modality !== capability) return false;
+              return capability === "text" ? model.operation !== "generate" : model.operation !== "chat";
+          });
+    return source
+        .filter((model, index, list) => list.findIndex((candidate) => candidate.id === model.id) === index)
+        .map((model) => ({
+            value: toPromptHubModelValue(model.id),
+            label: promptHubModelPickerLabel(model.id, model.label),
+        }));
+}
+
 function withChannels(config: AiConfig, channels: ModelChannel[]): AiConfig {
     const models = modelOptionsFromChannels(channels);
-    const imageModels = keepOrSuggest(config.imageModels, filterModelsByCapability(models, "image"), models);
-    const videoModels = keepOrSuggest(config.videoModels, filterModelsByCapability(models, "video"), models);
-    const textModels = keepOrSuggest(config.textModels, filterModelsByCapability(models, "text"), models);
-    const audioModels = keepOrSuggest(config.audioModels, filterModelsByCapability(models, "audio"), models);
+    const imageModels = keepRemoteAndSuggestLocal(config.imageModels, filterModelsByCapability(models, "image"));
+    const videoModels = keepRemoteAndSuggestLocal(config.videoModels, filterModelsByCapability(models, "video"));
+    const textModels = keepRemoteAndSuggestLocal(config.textModels, filterModelsByCapability(models, "text"));
+    const audioModels = keepRemoteAndSuggestLocal(config.audioModels, filterModelsByCapability(models, "audio"));
     return {
         ...config,
         channels,
         models,
-        baseUrl: channels[0]?.baseUrl || config.baseUrl,
-        apiKey: channels[0]?.apiKey || config.apiKey,
-        apiFormat: channels[0]?.apiFormat || config.apiFormat,
+        baseUrl: channels[0]?.baseUrl || defaultBaseUrlForApiFormat("openai"),
+        apiKey: channels[0]?.apiKey || "",
+        apiFormat: channels[0]?.apiFormat || "openai",
         imageModels,
         videoModels,
         textModels,
@@ -479,15 +500,17 @@ function withChannels(config: AiConfig, channels: ModelChannel[]): AiConfig {
     };
 }
 
-function keepOrSuggest(current: string[], suggested: string[], allModels: string[]) {
-    const available = new Set(allModels);
-    const kept = uniqueModels(current).filter((model) => available.has(model));
-    return kept.length ? kept : suggested;
+function keepRemoteAndSuggestLocal(current: string[], suggested: string[]) {
+    const available = new Set(suggested);
+    const selected = uniqueModels(current);
+    const remote = selected.filter(isPromptHubModelValue);
+    const keptLocal = selected.filter((model) => !isPromptHubModelValue(model) && available.has(model));
+    return [...remote, ...(keptLocal.length ? keptLocal : suggested)];
 }
 
 function normalizeDefaultModel(value: string, options: string[]) {
     if (options.includes(value)) return value;
-    return options[0] || value;
+    return options[0] || "";
 }
 
 function normalizeImageCount(value: string) {

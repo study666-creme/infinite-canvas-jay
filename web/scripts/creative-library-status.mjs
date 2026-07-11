@@ -26,10 +26,10 @@ console.table({
     "正式故事案例": summary.activeCases,
     "候选/全部故事案例": summary.cases,
     "进行中任务": summary.queuedJobs,
-    "失败任务": summary.failedJobs,
+    "历史失败尝试": summary.failedJobs,
 });
 if (recentFailures.length) {
-    console.log("最近失败任务：");
+    console.log("最近历史失败尝试（不代表当前队列仍失败）：");
     console.table(recentFailures);
 }
 db.close();

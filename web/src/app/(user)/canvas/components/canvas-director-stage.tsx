@@ -10,6 +10,7 @@ import { canvasThemes } from "@/lib/canvas-theme";
 import { useThemeStore } from "@/stores/use-theme-store";
 import {
     createDirectorStageStarterPacket,
+    DIRECTOR_STAGE_PREVIEW_BATCH_SIZE,
     isDirectorStageActionName,
     normalizeDirectorStagePacket,
     type DirectorStageActionInput,
@@ -66,6 +67,9 @@ export const CanvasDirectorStage = forwardRef<
 
     const activeSlot = useMemo(() => packet?.slots.find((slot) => slot.shot_id === activeShotId) || packet?.slots[0] || null, [activeShotId, packet]);
     const activeShotIndex = useMemo(() => packet?.slots.findIndex((slot) => slot.shot_id === activeSlot?.shot_id) ?? -1, [activeSlot?.shot_id, packet]);
+    const activeBatchIndex = Math.floor(Math.max(0, activeShotIndex) / DIRECTOR_STAGE_PREVIEW_BATCH_SIZE);
+    const totalBatches = Math.max(1, Math.ceil((packet?.slots.length || 0) / DIRECTOR_STAGE_PREVIEW_BATCH_SIZE));
+    const activeBatchSlots = useMemo(() => packetBatchSlots(packet, activeSlot?.shot_id), [activeSlot?.shot_id, packet]);
 
     const setStageOpen = (next: boolean) => {
         openRef.current = next;
@@ -169,6 +173,9 @@ export const CanvasDirectorStage = forwardRef<
                     return {
                         open: openRef.current,
                         activeShotId: activeShotIdRef.current,
+                        activeBatch: Math.floor(Math.max(0, packetRef.current?.slots.findIndex((slot) => slot.shot_id === activeShotIdRef.current) ?? 0) / DIRECTOR_STAGE_PREVIEW_BATCH_SIZE) + 1,
+                        totalBatches: Math.max(1, Math.ceil((packetRef.current?.slots.length || 0) / DIRECTOR_STAGE_PREVIEW_BATCH_SIZE)),
+                        previewBatchSize: DIRECTOR_STAGE_PREVIEW_BATCH_SIZE,
                         packet: packetRef.current
                             ? {
                                   globalVisualContract: packetRef.current.global_visual_contract,
@@ -196,7 +203,7 @@ export const CanvasDirectorStage = forwardRef<
                 }
                 const currentPacket = packetRef.current;
                 if (!currentPacket) throw new Error("请先载入导演台分镜包");
-                return captureSlots(currentPacket.slots);
+                return captureSlots(packetBatchSlots(currentPacket, activeShotIdRef.current));
             },
         }),
         [onCapture],
@@ -424,6 +431,14 @@ export const CanvasDirectorStage = forwardRef<
         if (nextIndex !== currentIndex) applySlotToRuntime(slots[nextIndex].shot_id);
     };
 
+    const moveBatch = (offset: number) => {
+        const slots = packetRef.current?.slots;
+        if (!slots?.length) return;
+        const nextBatch = Math.min(totalBatches - 1, Math.max(0, activeBatchIndex + offset));
+        const target = slots[nextBatch * DIRECTOR_STAGE_PREVIEW_BATCH_SIZE];
+        if (target) applySlotToRuntime(target.shot_id);
+    };
+
     const captureFromUi = async (slots: DirectorStageSlot[]) => {
         try {
             const result = await captureSlots(slots);
@@ -497,11 +512,11 @@ export const CanvasDirectorStage = forwardRef<
                     </button>
                     <button
                         type="button"
-                        disabled={!packet?.slots.length || capturing}
+                        disabled={!activeBatchSlots.length || capturing}
                         className="inline-flex h-9 items-center gap-2 rounded-md bg-[#16776f] px-3 text-xs font-semibold text-white transition hover:bg-[#11675f] disabled:opacity-40"
-                        onClick={() => packet && void captureFromUi(packet.slots)}
+                        onClick={() => void captureFromUi(activeBatchSlots)}
                     >
-                        <Images className="size-4" /><span className="hidden sm:inline">全部截图</span>
+                        <Images className="size-4" /><span className="hidden sm:inline">本批截图</span>
                     </button>
                     <StageIconButton label="关闭导演台" onClick={() => setStageOpen(false)}><X className="size-4.5" /></StageIconButton>
                 </div>
@@ -576,8 +591,16 @@ export const CanvasDirectorStage = forwardRef<
             </aside>
 
             <div className="absolute inset-x-0 bottom-0 z-20 h-20 border-t border-black/10 bg-white/76 px-3 py-2 backdrop-blur-xl dark:border-white/10 dark:bg-black/52 sm:px-5">
-                <div className="thin-scrollbar flex h-full items-stretch gap-2 overflow-x-auto">
-                    {packet?.slots.map((slot) => {
+                <div className="flex h-full min-w-0 items-stretch gap-2">
+                    {totalBatches > 1 ? (
+                        <div className="flex shrink-0 items-center border-r border-black/10 pr-2 dark:border-white/10">
+                            <StageIconButton label="上一批分镜" disabled={activeBatchIndex <= 0} onClick={() => moveBatch(-1)}><ChevronLeft className="size-4" /></StageIconButton>
+                            <span className="min-w-10 text-center text-[10px] font-semibold tabular-nums">{activeBatchIndex + 1}/{totalBatches}</span>
+                            <StageIconButton label="下一批分镜" disabled={activeBatchIndex >= totalBatches - 1} onClick={() => moveBatch(1)}><ChevronRight className="size-4" /></StageIconButton>
+                        </div>
+                    ) : null}
+                    <div className="thin-scrollbar flex min-w-0 flex-1 items-stretch gap-2 overflow-x-auto">
+                    {activeBatchSlots.map((slot) => {
                         const active = slot.shot_id === activeShotId;
                         return (
                             <button
@@ -593,13 +616,21 @@ export const CanvasDirectorStage = forwardRef<
                             </button>
                         );
                     })}
+                    </div>
                 </div>
             </div>
 
-            {capturing ? <div className="pointer-events-none absolute inset-0 z-30 grid place-items-center bg-black/12 backdrop-blur-[1px]"><div className="rounded-md bg-black/78 px-4 py-2 text-xs font-semibold text-white">正在渲染分镜 {captureProgress.current}/{captureProgress.total}</div></div> : null}
+            {capturing ? <div className="pointer-events-auto absolute inset-0 z-30 grid place-items-center bg-black/12 backdrop-blur-[1px]" aria-busy="true"><div className="rounded-md bg-black/78 px-4 py-2 text-xs font-semibold text-white">正在渲染分镜 {captureProgress.current}/{captureProgress.total}</div></div> : null}
         </div>
     );
 });
+
+function packetBatchSlots(packet: DirectorStagePacket | null | undefined, activeShotId?: string) {
+    if (!packet?.slots.length) return [];
+    const activeIndex = Math.max(0, packet.slots.findIndex((slot) => slot.shot_id === activeShotId));
+    const start = Math.floor(activeIndex / DIRECTOR_STAGE_PREVIEW_BATCH_SIZE) * DIRECTOR_STAGE_PREVIEW_BATCH_SIZE;
+    return packet.slots.slice(start, start + DIRECTOR_STAGE_PREVIEW_BATCH_SIZE);
+}
 
 function nextEntityId(kind: "actor" | "prop", slot: DirectorStageSlot) {
     const used = new Set((kind === "actor" ? slot.subjects : slot.props).map((item) => item.id));

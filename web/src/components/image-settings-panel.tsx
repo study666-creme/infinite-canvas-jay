@@ -37,6 +37,7 @@ type ImageSettingsPanelProps = {
     theme: CanvasTheme;
     showTitle?: boolean;
     className?: string;
+    minCount?: number;
     maxCount?: number;
     quickCount?: number;
     variant?: "default" | "jimeng";
@@ -46,10 +47,14 @@ type ImageSettingsPanelProps = {
 
 const jimengAspectValues = ["21:9", "16:9", "4:3", "1:1", "3:4", "9:16"] as const;
 
-export function ImageSettingsPanel({ config, onConfigChange, theme, showTitle = true, className = "w-[320px] space-y-4 rounded-2xl px-1 py-0.5", maxCount = 15, quickCount = 10, variant = "default", aspectRatios, resolutions }: ImageSettingsPanelProps) {
+export function ImageSettingsPanel({ config, onConfigChange, theme, showTitle = true, className = "w-[320px] space-y-4 rounded-2xl px-1 py-0.5", minCount = 1, maxCount = 15, quickCount = 10, variant = "default", aspectRatios, resolutions }: ImageSettingsPanelProps) {
     const [snapDimensionToStep, setSnapDimensionToStep] = useState(true);
     const quality = normalizeJimengQualityValue(config.quality || "2k");
-    const count = Math.max(1, Math.min(maxCount, Math.floor(Math.abs(Number(config.count)) || 1)));
+    const countMin = Math.max(1, Math.floor(minCount));
+    const countMax = Math.max(countMin, Math.floor(maxCount));
+    const count = Math.max(countMin, Math.min(countMax, Math.floor(Math.abs(Number(config.count)) || countMin)));
+    const visibleCountMax = Math.min(countMax, countMin + Math.max(1, Math.floor(quickCount)) - 1);
+    const countOptions = Array.from({ length: visibleCountMax - countMin + 1 }, (_, index) => countMin + index);
     const activeSize = config.size || "auto";
     const selectedAspect = aspectOptions.find((item) => (item.size || item.value) === activeSize || item.value === activeSize);
     const dimensions = readSizeDimensions(activeSize, selectedAspect || aspectOptions[0]);
@@ -107,10 +112,10 @@ export function ImageSettingsPanel({ config, onConfigChange, theme, showTitle = 
                         <div className="space-y-3">
                             <JimengSectionTitle color={theme.node.muted}>选择生成数量</JimengSectionTitle>
                             <JimengPillRow
-                                options={Array.from({ length: quickCount }, (_, index) => ({ value: String(index + 1), label: String(index + 1) }))}
+                                options={countOptions.map((value) => ({ value: String(value), label: String(value) }))}
                                 value={String(count)}
                                 theme={theme}
-                                columns={4}
+                                columns={Math.min(4, Math.max(1, countOptions.length))}
                                 onChange={(value) => onConfigChange("count", value)}
                             />
                         </div>
@@ -166,12 +171,12 @@ export function ImageSettingsPanel({ config, onConfigChange, theme, showTitle = 
                 <div className="space-y-2.5">
                     <SettingTitle color={theme.node.muted}>生成张数</SettingTitle>
                     <div className="grid grid-cols-4 gap-2.5">
-                        {Array.from({ length: quickCount }, (_, index) => index + 1).map((value) => (
+                        {countOptions.map((value) => (
                             <OptionPill key={value} selected={count === value} theme={theme} onClick={() => onConfigChange("count", String(value))}>
                                 {value} 张
                             </OptionPill>
                         ))}
-                        <CountInput value={count} max={maxCount} theme={theme} onChange={(value) => onConfigChange("count", String(value || 1))} />
+                        {countMax > visibleCountMax ? <CountInput value={count} min={countMin} max={countMax} theme={theme} onChange={(value) => onConfigChange("count", String(value || countMin))} /> : null}
                     </div>
                 </div>
                     </>
@@ -214,7 +219,7 @@ export function normalizeJimengQualityValue(quality: string) {
 
 export function imageJimengSummaryParts(
     config: Pick<AiConfig, "size" | "quality" | "count">,
-    capabilities?: { aspectRatios?: readonly string[]; resolutions?: readonly string[] },
+    capabilities?: { aspectRatios?: readonly string[]; resolutions?: readonly string[]; minCount?: number; maxCount?: number },
 ) {
     const activeSize = config.size || "auto";
     const configuredRatios = capabilities?.aspectRatios || [];
@@ -225,7 +230,9 @@ export function imageJimengSummaryParts(
     const quality = capabilities?.resolutions?.length && !capabilities.resolutions.includes(normalizedQuality)
         ? capabilities.resolutions[0]
         : normalizedQuality;
-    const count = Math.max(1, Math.floor(Math.abs(Number(config.count)) || 1));
+    const countMin = Math.max(1, Math.floor(capabilities?.minCount ?? 1));
+    const countMax = Math.max(countMin, Math.floor(capabilities?.maxCount ?? 15));
+    const count = Math.max(countMin, Math.min(countMax, Math.floor(Math.abs(Number(config.count)) || countMin)));
     return [ratioLabel, imageJimengQualityLabel(quality), String(count)];
 }
 
@@ -276,17 +283,20 @@ function DimensionInput({ prefix, value, disabled, theme, alignToStep, onChange 
     );
 }
 
-function CountInput({ value, max, theme, onChange }: { value: number; max: number; theme: CanvasTheme; onChange: (value: number | null) => void }) {
+function CountInput({ value, min, max, theme, onChange }: { value: number; min: number; max: number; theme: CanvasTheme; onChange: (value: number | null) => void }) {
     return (
         <label className="col-span-2 flex h-9 overflow-hidden rounded-full border text-sm" style={{ borderColor: theme.node.stroke, color: theme.node.text }}>
             <input
                 type="number"
-                min={1}
+                min={min}
                 max={max}
                 className="min-w-0 flex-1 bg-transparent px-3 text-center outline-none [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
                 style={{ color: theme.node.text, WebkitTextFillColor: theme.node.text }}
                 value={value || ""}
-                onChange={(event) => onChange(Number(event.target.value) || null)}
+                onChange={(event) => {
+                    const next = Number(event.target.value);
+                    onChange(Number.isFinite(next) && next > 0 ? Math.max(min, Math.min(max, Math.floor(next))) : null);
+                }}
                 onMouseDown={(event) => event.stopPropagation()}
             />
         </label>

@@ -15,6 +15,7 @@
   "scripts": {
     "dev": "tsx src/index.ts",
     "build": "tsc -p tsconfig.json",
+    "test": "tsx --test \"../web/src/app/(user)/canvas/utils/creative-project-state.test.ts\" \"src/private-context.test.ts\"",
     "start": "node dist/index.js",
     "prepack": "npm run build"
   },

@@ -5,7 +5,7 @@
 - [快速开始](/docs/overview/quick-start)
 - [功能总览](/docs/overview/features)
 - [3D 导演台](/docs/overview/director-stage)
-- [创作总监 Agent](/docs/overview/creative-agent)
+- [画布 Agent](/docs/overview/creative-agent)
 - [Codex App 插件](/docs/overview/codex-app-plugin)
 - [视频生成与播放](/docs/overview/video-playback)
 - [部署与自托管](/docs/overview/deployment)

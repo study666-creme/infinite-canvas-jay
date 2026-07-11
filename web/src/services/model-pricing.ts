@@ -68,6 +68,10 @@ export function formatCredits(value: number) {
     return Number.isInteger(value) ? value.toLocaleString() : value.toLocaleString(undefined, { maximumFractionDigits: 2 });
 }
 
+export function formatYuan(value: number) {
+    return value.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 4 });
+}
+
 export async function loadRemotePricing(force = false) {
     const now = Date.now();
     if (!force && cachedSnapshot && now - cachedSnapshot.fetchedAt < REMOTE_PRICING_REFRESH_MS) return cachedSnapshot;

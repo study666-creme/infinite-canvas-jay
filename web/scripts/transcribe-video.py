@@ -34,13 +34,16 @@ def main() -> int:
         condition_on_previous_text=True,
     )
     count = 0
-    with open(args.output, "w", encoding="utf-8", newline="\n") as stream:
+    with open(args.output, "w", encoding="utf-8", newline="\n", buffering=1) as stream:
         for segment in segments:
             text = segment.text.strip()
             if not text:
                 continue
             count += 1
             stream.write(f"{count}\n{timestamp(segment.start)} --> {timestamp(segment.end)}\n{text}\n\n")
+            stream.flush()
+            if count % 50 == 0:
+                print(f"[transcription progress] segments={count} end={timestamp(segment.end)}", flush=True)
     if count == 0:
         print("No speech segments were detected", file=sys.stderr)
         return 2

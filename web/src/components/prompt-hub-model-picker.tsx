@@ -8,11 +8,12 @@ import { CreditSymbol, resolveModelPricingRule, type ModelPricingRule } from "@/
 import { cn } from "@/lib/utils";
 import {
     isPromptHubModelValue,
+    parsePromptHubModelId,
     promptHubImageCredits,
     promptHubModelPickerLabel,
     toPromptHubModelValue,
 } from "@/services/prompt-hub-models";
-import { formatCredits, useRemoteModelPricingRules } from "@/services/model-pricing";
+import { formatCredits, formatYuan, useRemoteModelPricingRules } from "@/services/model-pricing";
 import { usePromptHubStore } from "@/stores/use-prompt-hub-store";
 import { modelOptionLabel, modelOptionName, selectableModelsByCapability, type AiConfig, type ModelCapability } from "@/stores/use-config-store";
 import type { PromptHubCatalogModel, PromptHubImageModel } from "@/services/prompt-hub";
@@ -39,7 +40,17 @@ function PromptHubCatalogModelPicker({ capability, ...props }: CapabilityProps) 
     const catalog = usePromptHubStore((state) => state.models);
     const refreshGenerationAccount = usePromptHubStore((state) => state.refreshGenerationAccount);
     const loggedIn = Boolean(session?.access_token);
-    const remoteModels = useMemo(() => catalog.filter((model) => model.modality === capability), [capability, catalog]);
+    const enabledIds = useMemo(
+        () => new Set(selectableModelsByCapability(props.config, capability).map(parsePromptHubModelId).filter((id): id is string => Boolean(id))),
+        [capability, props.config],
+    );
+    const remoteModels = useMemo(
+        () => catalog.filter((model) => {
+            if (model.modality !== capability || !enabledIds.has(model.id)) return false;
+            return capability === "text" ? model.operation !== "generate" : model.operation !== "chat";
+        }),
+        [capability, catalog, enabledIds],
+    );
 
     usePromptHubPickerRefresh(loggedIn, refreshGenerationAccount);
     if (!loggedIn || !remoteModels.length) return <PlainCapabilityModelPicker {...props} capability={capability} />;
@@ -53,7 +64,14 @@ export function PromptHubAwareImageModelPicker(props: Props) {
     const refreshGenerationAccount = usePromptHubStore((s) => s.refreshGenerationAccount);
     const remotePricing = useRemoteModelPricingRules();
     const loggedIn = Boolean(session?.access_token);
-    const catalogImageModels = useMemo(() => imageModels.filter((model) => model.modality === "image" && model.selectable !== false), [imageModels]);
+    const enabledIds = useMemo(
+        () => new Set(props.config.imageModels.map(parsePromptHubModelId).filter((id): id is string => Boolean(id))),
+        [props.config.imageModels],
+    );
+    const catalogImageModels = useMemo(
+        () => imageModels.filter((model) => model.modality === "image" && model.selectable !== false && enabledIds.has(model.id)),
+        [enabledIds, imageModels],
+    );
 
     usePromptHubPickerRefresh(loggedIn, refreshGenerationAccount);
 
@@ -76,7 +94,7 @@ function usePromptHubPickerRefresh(loggedIn: boolean, refresh: () => Promise<voi
 
 function PlainCapabilityModelPicker({ config, capability, value, onChange, className, fullWidth, placeholder = "选择模型", onMissingConfig }: CapabilityProps) {
     const options = useMemo(
-        () => Array.from(new Set(selectableModelsByCapability(config, capability).filter(Boolean))),
+        () => Array.from(new Set(selectableModelsByCapability(config, capability).filter((model) => model && !isPromptHubModelValue(model)))),
         [capability, config],
     );
     return (
@@ -105,7 +123,7 @@ function MergedCapabilityModelPicker({
     remoteModels,
 }: CapabilityProps & { remoteModels: PromptHubCatalogModel[] }) {
     const localModels = useMemo(
-        () => Array.from(new Set(selectableModelsByCapability(config, capability).filter(Boolean))),
+        () => Array.from(new Set(selectableModelsByCapability(config, capability).filter((model) => model && !isPromptHubModelValue(model)))),
         [capability, config],
     );
     const options = useMemo(() => [
@@ -114,6 +132,7 @@ function MergedCapabilityModelPicker({
             label: promptHubModelPickerLabel(model.id, model.label),
             kind: "ph" as const,
             credits: model.pricing?.credits,
+            yuan: model.pricing?.yuan,
             pricingUnit: model.pricing?.unit,
         })),
         ...localModels.map((model) => ({
@@ -138,7 +157,7 @@ function MergedCapabilityModelPicker({
 
 function PlainImageModelPicker({ config, value, onChange, className, fullWidth, placeholder = "选择模型", onMissingConfig }: Props) {
     const options = useMemo(
-        () => Array.from(new Set(selectableModelsByCapability(config, "image").filter(Boolean))),
+        () => Array.from(new Set(selectableModelsByCapability(config, "image").filter((model) => model && !isPromptHubModelValue(model)))),
         [config],
     );
     return (
@@ -167,7 +186,7 @@ function MergedImageModelPicker({
     remotePricing,
 }: Props & { imageModels: PromptHubImageModel[]; remotePricing: ModelPricingRule[] }) {
     const localModels = useMemo(
-        () => Array.from(new Set(selectableModelsByCapability(config, "image").filter(Boolean))),
+        () => Array.from(new Set(selectableModelsByCapability(config, "image").filter((model) => model && !isPromptHubModelValue(model)))),
         [config],
     );
     const options = useMemo(() => {
@@ -176,6 +195,8 @@ function MergedImageModelPicker({
             label: promptHubModelPickerLabel(m.id, m.label),
             kind: "ph" as const,
             credits: promptHubImageModelCredits(m, remotePricing),
+            yuan: m.pricing?.yuan,
+            pricingUnit: m.pricing?.unit,
         }));
         const local = localModels.map((model) => ({
             value: model,
@@ -210,12 +231,13 @@ function BaseModelSelect({
     onMissingConfig,
     options,
 }: Props & {
-    options: { value: string; label: string; kind: "ph" | "local"; credits?: number; pricingUnit?: "request" | "second" | "image" | "token" }[];
+    options: { value: string; label: string; kind: "ph" | "local"; credits?: number; yuan?: number; pricingUnit?: "request" | "second" | "image" | "token" }[];
 }) {
     const pickerId = useId();
     const [open, setOpen] = useState(false);
     const current = value || "";
-    const currentLabel = options.find((o) => o.value === current)?.label || current || placeholder;
+    const promptHubModelId = parsePromptHubModelId(current);
+    const currentLabel = options.find((o) => o.value === current)?.label || (promptHubModelId ? promptHubModelPickerLabel(promptHubModelId) : current || placeholder);
 
     return (
         <Select
@@ -277,8 +299,9 @@ function BaseModelSelect({
                                         ) : typeof opt.credits === "number" ? (
                                             <span className="inline-flex shrink-0 items-center gap-1 text-[11px] tabular-nums opacity-70">
                                                 <CreditSymbol className="size-3" />
-                                                {formatCredits(opt.credits)}
+                                                {formatCredits(opt.credits)} 积分
                                                 {opt.pricingUnit === "second" ? "/秒" : ""}
+                                                {typeof opt.yuan === "number" ? <span>（¥{formatYuan(opt.yuan)}）</span> : null}
                                             </span>
                                         ) : null}
                                     </span>

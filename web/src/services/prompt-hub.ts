@@ -97,6 +97,8 @@ export type PromptHubCatalogModel = {
 
 export type PromptHubImageModel = PromptHubCatalogModel & {
     modality: "image";
+    provider?: string;
+    uiFamily?: string;
     aspectRatios?: string[];
     resolutions?: string[];
     pricingByResolution?: boolean;

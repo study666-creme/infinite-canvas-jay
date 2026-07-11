@@ -248,6 +248,75 @@ export function replaceKnowledgeCardsForSource(db, sourceId, cards) {
     }
 }
 
+export function replaceKnowledgeSnapshot(db, { sources, cards, ingestMode = "user-confirmed" }) {
+    const now = new Date().toISOString();
+    const sourceIds = new Set(sources.map((source) => source.id));
+    for (const card of cards) {
+        const missingSource = (card.sourceIds || []).find((sourceId) => !sourceIds.has(sourceId));
+        if (missingSource) throw new Error(`知识卡 ${card.id} 引用了不存在的来源 ${missingSource}`);
+    }
+
+    db.exec("BEGIN IMMEDIATE");
+    try {
+        db.exec(`
+            DELETE FROM knowledge_card_sources
+            WHERE source_id IN (SELECT id FROM library_sources WHERE library_type = 'knowledge');
+            DELETE FROM knowledge_cards;
+            DELETE FROM library_sources WHERE library_type = 'knowledge';
+        `);
+
+        const insertSource = db.prepare(`
+            INSERT INTO library_sources (
+                id, library_type, title, category, kind, source, layer, authority,
+                verified, chars, chunks, content_hash, ingest_mode, status,
+                error_message, metadata_json, created_at, updated_at, last_ingested_at
+            ) VALUES (?, 'knowledge', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'completed', '', ?, ?, ?, ?)
+        `);
+        for (const source of sources) {
+            const metadata = {
+                scope: source.scope || "specialist",
+                workId: source.workId || "",
+                language: source.language || "",
+                userConfirmedAt: now,
+            };
+            insertSource.run(
+                source.id,
+                source.title,
+                source.category,
+                source.kind,
+                source.source,
+                source.layer || "private",
+                Number(source.authority) || 0.7,
+                source.verified ? 1 : 0,
+                Number(source.chars) || 0,
+                Number(source.chunks) || 0,
+                contentHash(JSON.stringify(source)),
+                ingestMode,
+                JSON.stringify(metadata),
+                now,
+                now,
+                now,
+            );
+        }
+
+        const insertCard = db.prepare(`
+            INSERT INTO knowledge_cards (
+                id, title, category, principle, layer, status, confidence,
+                authority, card_json, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `);
+        const connect = db.prepare("INSERT INTO knowledge_card_sources (card_id, source_id) VALUES (?, ?)");
+        for (const card of cards) {
+            insertCard.run(card.id, card.title, card.category, card.principle, card.layer || "private", card.status, Number(card.confidence) || 0.5, Number(card.authority) || 0.65, JSON.stringify(card), now, now);
+            for (const sourceId of card.sourceIds || []) connect.run(card.id, sourceId);
+        }
+        db.exec("COMMIT");
+    } catch (error) {
+        db.exec("ROLLBACK");
+        throw error;
+    }
+}
+
 export function readStoryCaseForSource(db, sourceId) {
     const row = db.prepare("SELECT case_json FROM story_cases WHERE source_id = ?").get(sourceId);
     return row ? safeJson(row.case_json) : null;
@@ -278,9 +347,9 @@ export function databaseSummary(db) {
         knowledgeSources: count("library_sources", "WHERE library_type = 'knowledge'"),
         caseSources: count("library_sources", "WHERE library_type = 'case'"),
         cards: count("knowledge_cards"),
-        activeCards: count("knowledge_cards", "WHERE status IN ('verified', 'auto_verified')"),
+        activeCards: count("knowledge_cards", "WHERE status = 'verified'"),
         cases: count("story_cases"),
-        activeCases: count("story_cases", "WHERE status IN ('verified', 'auto_verified')"),
+        activeCases: count("story_cases", "WHERE status = 'verified'"),
         queuedJobs: count("ingest_jobs", "WHERE status IN ('queued', 'running')"),
         failedJobs: count("ingest_jobs", "WHERE status = 'failed'"),
     };

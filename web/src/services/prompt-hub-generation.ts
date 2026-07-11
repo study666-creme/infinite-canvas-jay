@@ -54,6 +54,8 @@ export type PromptHubCanvasGenerateOpts = {
 
     referenceImages?: ReferenceImage[];
 
+    maxReferences?: number | null;
+
     signal?: AbortSignal;
 
     onStage?: (stage: PromptHubCanvasGenerationStage) => void;
@@ -317,7 +319,7 @@ async function referenceImagesToRefUrls(session: PromptHubSession, references: R
     }
 
     if (selectedReferences.length && !urls.length) {
-        throw new Error("参考图上传失败：没有读到可上传的图片，请检查上游图片节点是否仍存在");
+        throw new Error("参考图上传失败：没有读到可上传的图片，请检查连接的图片节点是否仍存在");
     }
 
     return urls;
@@ -598,12 +600,12 @@ async function runOnePromptHubJob(opts: PromptHubCanvasGenerateOpts, refImageUrl
         signal: opts.signal,
     });
     if (!submitted?.jobId) throw new Error("卡藏未返回任务 ID");
-    opts.onStage?.({ progress: 36, stage: "已提交上游，等待结果" });
+    opts.onStage?.({ progress: 36, stage: "任务已提交，等待结果" });
     const job = await pollPromptHubGenerationJob(opts.session, submitted.jobId, {
         apiBase: opts.apiBase,
         signal: opts.signal,
         onPoll: (attempt, currentJob) => {
-            const statusText = currentJob?.status === "completed" ? "上游已完成" : currentJob?.status === "failed" ? "上游生成失败" : "上游生成中";
+            const statusText = currentJob?.status === "completed" ? "生成已完成" : currentJob?.status === "failed" ? "生成失败" : "生成中";
             opts.onStage?.({ progress: Math.min(82, 38 + attempt * 2), stage: statusText });
         },
     });
@@ -623,8 +625,11 @@ async function runOnePromptHubJob(opts: PromptHubCanvasGenerateOpts, refImageUrl
 export async function requestPromptHubCanvasImages(opts: PromptHubCanvasGenerateOpts): Promise<PromptHubCanvasImageItem[]> {
     const count = Math.max(1, Math.min(8, Math.floor(opts.count || 1)));
     opts.onStage?.({ progress: 8, stage: opts.referenceImages?.length ? "准备参考图" : "准备提交任务" });
-    const refImageUrls = opts.referenceImages?.length
-        ? await referenceImagesToRefUrls(opts.session, opts.referenceImages, { apiBase: opts.apiBase, signal: opts.signal, onStage: opts.onStage })
+    const references = typeof opts.maxReferences === "number"
+        ? (opts.referenceImages || []).slice(0, Math.max(0, opts.maxReferences))
+        : opts.referenceImages;
+    const refImageUrls = references?.length
+        ? await referenceImagesToRefUrls(opts.session, references, { apiBase: opts.apiBase, signal: opts.signal, onStage: opts.onStage })
         : undefined;
 
     if (count === 1) {
@@ -688,7 +693,7 @@ export async function loadPromptHubGenerationAccount(
 
     const credits = Number(status?.data?.credits);
 
-    const selectable = imageModels.filter((m) => m.selectable !== false);
+    const selectable = imageModels.filter((model) => model.selectable !== false && model.uiFamily !== "midjourney");
 
     return {
 

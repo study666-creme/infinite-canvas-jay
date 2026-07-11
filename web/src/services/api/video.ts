@@ -658,7 +658,7 @@ function videoTaskError(state: unknown) {
 function readAxiosError(error: unknown, fallback: string) {
     if (axios.isCancel(error)) return "请求已取消";
     if (axios.isAxiosError<{ error?: { code?: string; message?: string } | string; msg?: string; code?: number }>(error)) {
-        if (!error.response && (error.code === "ECONNABORTED" || /timeout/i.test(error.message))) return "视频请求超时，上游可能仍在生成；请稍后刷新任务或重试写回画布";
+        if (!error.response && (error.code === "ECONNABORTED" || /timeout/i.test(error.message))) return "视频请求超时，任务可能仍在生成；请稍后刷新任务或重试写回画布";
         const responseData = error.response?.data;
         return responseData?.msg || (typeof responseData?.error === "string" ? responseData.error : responseData?.error?.message) || statusMessage(error.response?.status, fallback);
     }

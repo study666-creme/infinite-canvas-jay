@@ -41,7 +41,7 @@ export function ClientRootInit({ children }: { children: ReactNode }) {
                             }
                           : channel,
                   )
-                : [createModelChannel({ id: "default", name: "默认渠道", baseUrl: baseUrl || undefined, apiKey: apiKey || "" })],
+                : [createModelChannel({ id: "channel-1", name: "渠道 1", baseUrl: baseUrl || undefined, apiKey: apiKey || "" })],
         );
         if (baseUrl) updateConfig("baseUrl", baseUrl);
         if (apiKey) updateConfig("apiKey", apiKey);

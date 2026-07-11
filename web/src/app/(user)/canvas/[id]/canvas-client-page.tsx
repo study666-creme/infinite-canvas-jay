@@ -22,7 +22,7 @@ import {
 import { requestPromptHubCanvasImages } from "@/services/prompt-hub-generation";
 import { requestPromptHubCanvasVideo } from "@/services/prompt-hub-video";
 import { requestPromptHubText } from "@/services/prompt-hub-text";
-import { parsePromptHubModelId } from "@/services/prompt-hub-models";
+import { parsePromptHubModelId, promptHubImageCountRange, promptHubImageMaxReferences } from "@/services/prompt-hub-models";
 import { usePromptHubStore } from "@/stores/use-prompt-hub-store";
 import { resolveMediaUrl, uploadMediaFile, type UploadedFile } from "@/services/file-storage";
 import { nanoid } from "nanoid";
@@ -2706,7 +2706,11 @@ function InfiniteCanvasPage() {
             const sourceNode = nodesRef.current.find((node) => node.id === nodeId);
             const generationConfig = buildGenerationConfig(effectiveConfig, sourceNode, mode);
             const phModelId = parsePromptHubModelId(generationConfig.model);
-            const promptHubSession = phModelId ? await usePromptHubStore.getState().getSession() : null;
+            const promptHubState = usePromptHubStore.getState();
+            const promptHubModel = phModelId ? promptHubState.imageModels.find((model) => model.id === phModelId) : null;
+            const promptHubCountRange = promptHubModel ? promptHubImageCountRange(promptHubModel) : null;
+            const promptHubMaxReferences = promptHubModel ? promptHubImageMaxReferences(promptHubModel) : null;
+            const promptHubSession = phModelId ? await promptHubState.getSession() : null;
             const usePromptHubGen = !!promptHubSession && !!phModelId;
             if (!usePromptHubGen && !isAiConfigReady(generationConfig, generationConfig.model)) {
                 openConfigDialog(true);
@@ -2740,7 +2744,10 @@ function InfiniteCanvasPage() {
                 if (mode === "image") {
                     const imageRunStartedAt = performance.now();
                     const successfulUploads: UploadedImage[] = [];
-                    const count = getGenerationCount(generationConfig.count);
+                    const requestedCount = getGenerationCount(generationConfig.count);
+                    const count = promptHubCountRange
+                        ? Math.max(promptHubCountRange.min, Math.min(promptHubCountRange.max, requestedCount))
+                        : requestedCount;
                     const isConfigNode = sourceNode?.type === CanvasNodeType.Config;
                     const isImageNode = sourceNode?.type === CanvasNodeType.Image;
                     const isEmptyImageNode = isImageNode && !sourceNode?.metadata?.content;
@@ -2904,6 +2911,7 @@ function InfiniteCanvasPage() {
                                   resolution: mapPromptHubResolution(generationConfig),
                                   size: generationConfig.size,
                                   referenceImages: referenceImages.length ? referenceImages : undefined,
+                                  maxReferences: promptHubMaxReferences,
                                   signal: controller.signal,
                                   onStage: ({ progress, stage }) => updateProgressNodes(progress, stage),
                               })

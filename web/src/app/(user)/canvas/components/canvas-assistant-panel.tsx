@@ -10,7 +10,7 @@ import { modelOptionName, normalizeModelOptionValue, resolveModelChannel, select
 import { canvasThemes } from "@/lib/canvas-theme";
 import { nanoid } from "nanoid";
 import { requestImageQuestion, requestToolResponse, type ResponseFunctionTool, type ResponseInputMessage, type ResponseToolCall } from "@/services/api/image";
-import { isPromptHubModelValue, parsePromptHubModelId, toPromptHubModelValue } from "@/services/prompt-hub-models";
+import { isPromptHubModelValue, parsePromptHubModelId, promptHubModelPickerLabel, toPromptHubModelValue } from "@/services/prompt-hub-models";
 import { requestPromptHubText, requestPromptHubToolResponse } from "@/services/prompt-hub-text";
 import { imageToDataUrl } from "@/services/image-storage";
 import { useAssetStore } from "@/stores/use-asset-store";
@@ -23,7 +23,6 @@ import { Select, SelectContent, SelectItem, SelectTrigger } from "@/components/u
 import { CanvasPromptLibrary } from "./canvas-prompt-library";
 import { AgentChatComposer, AgentChatMessage, AgentModeSwitch, AgentPanelTabs, AgentWorkingMessage, type CanvasAgentChatMessage, type CanvasAgentMode } from "./canvas-agent-chat-ui";
 import { CanvasLocalAgentPanel } from "./canvas-local-agent-panel";
-import { ShortDramaAgentPresetButton } from "./short-drama-agent-preset-button";
 import { useCompactCanvasViewport } from "./use-compact-canvas-viewport";
 import { NODE_DEFAULT_SIZE } from "../constants";
 import { CanvasNodeType, type CanvasAssistantMessage, type CanvasAssistantReference, type CanvasAssistantSession, type CanvasNodeData } from "../types";
@@ -31,29 +30,15 @@ import { useCanvasAgentStore, type CanvasAgentCreativeMode } from "../stores/use
 import { summarizeCanvasAgentOps, type CanvasAgentOp, type CanvasAgentSnapshot } from "../utils/canvas-agent-ops";
 import { directorStageActionLabel, isDirectorStageActionName, type DirectorStageActionHandler } from "../utils/director-stage-types";
 import { buildCreativeToolAction, deriveCreativeProjectState, isSubstantiveCreativeOps, updateCreativeActionStatusOps, updateCreativeProjectBlackboardOps, type CreativeProjectStatePatch } from "../utils/creative-project-state";
-import {
-    CANVAS_AGENT_KNOWLEDGE_DISCLOSURE_CONTEXT,
-    buildCreativeAgentKnowledgeContext,
-    isShortDramaAgentPresetPrompt,
-    SHORT_DRAMA_AGENT_MODE_CONTEXT,
-    shouldDiscloseCanvasAgentKnowledge,
-    shouldUseCanvasCreativeKnowledge,
-} from "../utils/short-drama-agent-prompt";
 
 export const CANVAS_AGENT_PANEL_MOTION_MS = 500;
 const PANEL_MOTION_SECONDS = CANVAS_AGENT_PANEL_MOTION_MS / 1000;
 const ONLINE_AGENT_MAX_STEPS = 6;
-const ONLINE_AGENT_PROMPT = `你是卡藏画布的在线总控 Agent。当前画布 JSON 包含项目级 creativeProjectState v2；它是主记录，画布「项目黑板」只是同一状态的可视化镜像。首轮必须先调用 canvas_get_state。不要输出 JSON ops，不要编造执行结果；涉及已有节点时只使用真实 id。
+const ONLINE_AGENT_PROMPT = `你是通用画布 Agent，只依据用户当前请求和画布中的真实内容工作，不加载任何内置行业知识、创作流派或业务预设。
 
-AI 视频创作的目标通常是可直接生成视频的文字分镜提示词和已确认参考资产，但不能把它做成固定流水线。先判断并写入 productionType：AI 短剧使用 series，负责分集、集间钩子和跨集一致性；AI 短片使用 short_film，只做单片完整闭环，禁止强制前三集或连载钩子；信息不足时保留 unspecified 并询问。再检查 ProjectState 中已有产物、版本、status 与 userConfirmed：用户给了剧本就可以跳过点子和故事规划；给了资产或分镜就从相应缺口继续；活动/参赛只是一组可覆盖两种形态的本次项目约束，不是独立 Agent 或并列知识库。第一人称、第三人称、仙侠、都市、精品叙事、快节奏策略和不同活动目标必须采用不同的创作判断与知识召回。
+首轮先调用 canvas_get_state。涉及已有节点时只使用真实 id，不输出 JSON ops，不编造工具执行结果。需要修改画布时调用已提供的工具；工具失败时说明失败原因，不声称已经完成。
 
-硬性确认规则：没有用户本轮明确执行意图时，只说明 recommendedAction，不自动创建下一阶段；需要写入或生成时调用相应工具，界面会进入 awaiting_user_confirmation，用户批准后才执行。新生成产物一律先标为 draft/review，不能因为 Agent 自己生成就标记 approved；只有用户明确表示满意/确认后，才通过 canvas_update_project_blackboard 的 artifactUpdates 写入 approved 和 userConfirmed。审核、返工、预览和视频生成同样不能默认执行。
-
-协作方式是总控共享一块公共黑板并按缺口调用专门能力，不是多个模型各写各的。故事、编剧、人物对白、资产视觉、分镜、连续性/空间审核、平台风险、生成和返工 Agent 只在能产生明确产物时介入；每次输出说明负责 Agent、输入、产物、质量门槛和待确认项。知识库默认隐性按题材、叙事视角和任务召回；方法卡最多五张只是上限，没必要时一张也不创建。
-
-可选生产工具不是固定阶段：开工时只记录原创/改编、活动/常规生产、画幅、时长、平台和交付物；改编任务才建立原作事实、改编边界与保留/替换/禁止改动清单，禁止把「洗稿」当工作模式。复杂单集可使用 Beat 表、情绪曲线和断点，生产场次可按静态信息、人物动作、转场功能拆分。分镜二审要核对轴线、视线、运动方向、左右站位、出入画和道具状态。本集归档与下一集交接只在用户决定继续连载时执行。
-
-资产先提取稳定 ID 和提示词，再做参考图；用户选定参考图后，角色才做三视图，场景/道具通常四个角度、最多五个。单集通常 1-3 分钟，文字分镜按实际内容拆分，每个可生成视频段落尽量不超过 15 秒；不能无缝拼接的连续动作尽量放入同一段。镜头/段落总数没有 10 个的业务上限。3D 导演台可载入完整分镜，最多 60 槽，但每批只预演/截图 10 槽。25 宫格是可选人工预览，不约束最终视频；最终生成使用已确认文字分镜和参考资产。`;
+尊重用户的工作顺序，不主动套用固定流程。没有明确执行意图时先澄清；写入、删除、生成或批量修改等操作按界面确认规则执行。`;
 const JSON_RECORD_SCHEMA = { type: "object", additionalProperties: true };
 const POSITION_SCHEMA = { type: "object", properties: { x: { type: "number" }, y: { type: "number" } }, required: ["x", "y"], additionalProperties: false };
 const VIEWPORT_SCHEMA = { type: "object", properties: { x: { type: "number" }, y: { type: "number" }, k: { type: "number" } }, required: ["x", "y", "k"], additionalProperties: false };
@@ -172,7 +157,7 @@ const ONLINE_AGENT_TOOLS: ResponseFunctionTool[] = [
     toolDefinition("canvas_director_load_shot", "在 3D 导演台恢复指定镜头的角色、道具和机位。", { shotId: { type: "string" }, open: { type: "boolean" } }, ["shotId"]),
     toolDefinition("canvas_director_capture_shot", "渲染指定导演台镜头并把 1280x720 截图创建为画布图片节点。", { shotId: { type: "string" } }),
     toolDefinition("canvas_director_capture_all", "按分镜顺序渲染当前预演批次（最多 10 槽），并把截图批量创建为画布图片节点。", {}),
-    toolDefinition("canvas_update_project_blackboard", "创建或更新结构化项目黑板。记录 AI短剧/AI短片形态、目标产物、活动约束、已确认常量、产物版本与审核状态；只建议下一步，不自动推进。", { mode: { type: "string", enum: ["standard", "activity"] }, productionType: { type: "string", enum: ["unspecified", "series", "short_film"] }, currentStage: CREATIVE_STAGE_SCHEMA, completion: { type: "number" }, targetDeliverables: { type: "array", items: CREATIVE_ARTIFACT_KIND_SCHEMA }, confirmedConstants: { type: "array", items: { type: "string" } }, activityConstraints: { type: "array", items: { type: "string" } }, openQuestions: { type: "array", items: { type: "string" } }, nextGap: { type: "string" }, artifactUpdates: { type: "array", items: { type: "object", properties: { id: { type: "string" }, nodeId: { type: "string" }, kind: CREATIVE_ARTIFACT_KIND_SCHEMA, title: { type: "string" }, status: CREATIVE_ARTIFACT_STATUS_SCHEMA, version: { type: "number" }, ownerAgent: { type: "string" }, userConfirmed: { type: "boolean" }, qualityGate: { type: "array", items: { type: "string" } } }, required: ["kind"], additionalProperties: false } }, userConfirmed: { type: "boolean" } }),
+    toolDefinition("canvas_update_project_blackboard", "创建或更新结构化项目黑板，记录当前项目目标、约束、已确认常量、产物版本与审核状态。", { mode: { type: "string", enum: ["standard", "activity"] }, productionType: { type: "string", enum: ["unspecified", "series", "short_film"] }, currentStage: CREATIVE_STAGE_SCHEMA, completion: { type: "number" }, targetDeliverables: { type: "array", items: CREATIVE_ARTIFACT_KIND_SCHEMA }, confirmedConstants: { type: "array", items: { type: "string" } }, activityConstraints: { type: "array", items: { type: "string" } }, openQuestions: { type: "array", items: { type: "string" } }, nextGap: { type: "string" }, artifactUpdates: { type: "array", items: { type: "object", properties: { id: { type: "string" }, nodeId: { type: "string" }, kind: CREATIVE_ARTIFACT_KIND_SCHEMA, title: { type: "string" }, status: CREATIVE_ARTIFACT_STATUS_SCHEMA, version: { type: "number" }, ownerAgent: { type: "string" }, userConfirmed: { type: "boolean" }, qualityGate: { type: "array", items: { type: "string" } } }, required: ["kind"], additionalProperties: false } }, userConfirmed: { type: "boolean" } }),
     toolDefinition("canvas_apply_ops", "批量操作当前网页画布。ops 支持 add_node、update_node、delete_node、delete_connections、connect_nodes、set_viewport、select_nodes、run_generation。", { ops: { type: "array", items: CANVAS_OP_SCHEMA } }, ["ops"], false),
     toolDefinition("canvas_create_node", "创建任意类型节点：text、image、config、video、audio。适合创建占位图、媒体占位、配置节点或自定义 metadata 节点。", { nodeType: NODE_TYPE_SCHEMA, title: { type: "string" }, x: { type: "number" }, y: { type: "number" }, width: { type: "number" }, height: { type: "number" }, metadata: JSON_RECORD_SCHEMA }, ["nodeType"]),
     toolDefinition("canvas_create_text_node", "在当前画布创建单个文本节点。", { text: { type: "string" }, x: { type: "number" }, y: { type: "number" }, title: { type: "string" }, width: { type: "number" }, height: { type: "number" } }),
@@ -233,7 +218,6 @@ export function CanvasAssistantPanel({ nodes, selectedNodeIds, snapshot, session
     const promptHubSession = usePromptHubStore((state) => state.session);
     const promptHubApiBase = usePromptHubStore((state) => state.apiBase);
     const confirmTools = useCanvasAgentStore((state) => state.confirmTools);
-    const creativeMode = useCanvasAgentStore((state) => state.creativeMode);
     const setAgentState = useCanvasAgentStore((state) => state.setAgentState);
     const compactViewport = useCompactCanvasViewport();
     const [width, setWidth] = useState(520);
@@ -380,12 +364,11 @@ export function CanvasAssistantPanel({ nodes, selectedNodeIds, snapshot, session
         }
 
         const refs = savedReferences || selectedReferences;
-        const requestCreativeMode: CanvasAgentCreativeMode = isShortDramaAgentPresetPrompt(text) ? "short_drama" : creativeMode;
+        const requestCreativeMode: CanvasAgentCreativeMode = "general";
         const userMessage: CanvasAssistantMessage = { id: nanoid(), role: "user", text, references: refs, creativeMode: requestCreativeMode };
         const assistantId = nanoid();
         appendMessage(session.id, userMessage);
         addOnlineLog("发送请求", { text, creativeMode: requestCreativeMode, selectedNodeIds: snapshotRef.current.selectedNodeIds, nodeCount: snapshotRef.current.nodes.length, connectionCount: snapshotRef.current.connections.length });
-        if (requestCreativeMode !== creativeMode) setAgentState({ creativeMode: requestCreativeMode });
         setPrompt("");
         setIsRunning(true);
         void runOnlineAgentStep(session.id, assistantId, history, userMessage, { step: 1, creativeMode: requestCreativeMode });
@@ -424,7 +407,7 @@ export function CanvasAssistantPanel({ nodes, selectedNodeIds, snapshot, session
 
     const runOnlineAgentStep = async (sessionId: string, assistantId: string, history: CanvasAssistantMessage[], userMessage: CanvasAssistantMessage, loop: OnlineLoopContext) => {
         const requestConfig = { ...effectiveConfig, model: effectiveConfig.textModel || effectiveConfig.model };
-        const requestCreativeMode = loop.creativeMode || creativeMode;
+        const requestCreativeMode = loop.creativeMode || "general";
         try {
             setIsRunning(true);
             const messages = await buildToolAgentMessages(snapshotRef.current, history, userMessage, requestCreativeMode);
@@ -445,7 +428,7 @@ export function CanvasAssistantPanel({ nodes, selectedNodeIds, snapshot, session
                 await continueOnlineToolLoop(sessionId, assistantId, messages, result, loop.step, requestCreativeMode);
             } else {
                 if (!result.content.trim()) throw new Error("模型没有返回工具调用，画布操作未执行。");
-                const reply = await finalizeCreativeReply(userMessage.text, result.content || streamed || "没有返回内容。", requestCreativeMode, requestConfig);
+                const reply = result.content || streamed || "没有返回内容。";
                 upsertMessage(sessionId, { id: assistantId, role: "assistant", text: reply, creativeMode: requestCreativeMode });
                 addOnlineLog(`Agent Tool Loop ${loop.step} 结束`, { reply });
             }
@@ -500,22 +483,7 @@ export function CanvasAssistantPanel({ nodes, selectedNodeIds, snapshot, session
             return;
         }
         const draft = next.content || streamed || toolResults.map((item) => toolResultText(item.result)).join("\n") || "工具已执行。";
-        const userRequest = latestCreativeUserRequest(nextMessages);
-        const reply = await finalizeCreativeReply(userRequest, draft, requestCreativeMode, requestConfig);
-        upsertMessage(sessionId, { id: assistantId, role: "assistant", text: reply, creativeMode: requestCreativeMode });
-    };
-
-    const finalizeCreativeReply = async (userRequest: string, draft: string, requestCreativeMode: CanvasAgentCreativeMode, requestConfig: AiConfig) => {
-        if (!shouldRunIndependentCreativeReview(userRequest, draft, requestCreativeMode)) return draft;
-        try {
-            addOnlineLog("独立审核开始", { userRequest });
-            const reviewed = await requestIndependentCreativeReview(requestConfig, userRequest, draft, compactSnapshot(snapshotRef.current), requestOnlineTextResponse);
-            addOnlineLog("独立审核完成", reviewed);
-            return reviewed.revisedResponse || draft;
-        } catch (error) {
-            addOnlineLog("独立审核失败，保留初稿", error instanceof Error ? error.message : error);
-            return draft;
-        }
+        upsertMessage(sessionId, { id: assistantId, role: "assistant", text: draft, creativeMode: requestCreativeMode });
     };
 
     const executeOps = (ops: CanvasAgentOp[]) => {
@@ -582,7 +550,7 @@ export function CanvasAssistantPanel({ nodes, selectedNodeIds, snapshot, session
         const pendingContext = pendingToolContextRef.current.get(messageId);
         const toolCalls = pendingContext?.toolCalls || toolCallsFromDetail(detail);
         const previousMessages = pendingContext?.messages || [];
-        const requestCreativeMode = pendingContext?.creativeMode || creativeMode;
+        const requestCreativeMode = pendingContext?.creativeMode || "general";
         const session = safeSessions.find((session) => session.messages.some((item) => item.id === messageId));
         addOnlineLog("批准工具", { messageId, toolCalls });
         const assistantId = pendingContext?.assistantId || "";
@@ -622,12 +590,6 @@ export function CanvasAssistantPanel({ nodes, selectedNodeIds, snapshot, session
         const text = prompt.trim();
         if (!text || isRunning) return;
         await sendMessage(text, messages);
-    };
-
-    const toggleShortDramaMode = (active: boolean) => {
-        const nextMode: CanvasAgentCreativeMode = active ? "short_drama" : "general";
-        if (creativeMode !== nextMode) setAgentState({ creativeMode: nextMode });
-        if (isShortDramaAgentPresetPrompt(prompt)) setPrompt("");
     };
 
     const addImagesToCanvas = (files: FileList | File[] | null) => {
@@ -785,7 +747,6 @@ export function CanvasAssistantPanel({ nodes, selectedNodeIds, snapshot, session
                         onAddFiles={addImagesToCanvas}
                         left={
                             <>
-                                <ShortDramaAgentPresetButton active={creativeMode === "short_drama"} disabled={isRunning} onToggle={toggleShortDramaMode} />
                                 <CanvasPromptLibrary onSelect={setPrompt} />
                                 <AgentTextModelPicker config={effectiveConfig} value={effectiveConfig.textModel} onChange={(model) => updateConfig("textModel", model)} />
                             </>
@@ -886,14 +847,16 @@ export function CanvasAssistantPanel({ nodes, selectedNodeIds, snapshot, session
 function AgentTextModelPicker({ config, value, onChange }: { config: AiConfig; value: string; onChange: (model: string) => void }) {
     const catalog = usePromptHubStore((state) => state.models);
     const refreshGenerationAccount = usePromptHubStore((state) => state.refreshGenerationAccount);
-    const remoteModels = useMemo(() => catalog.filter((model) => model.modality === "text"), [catalog]);
+    const visibleModels = selectableModelsByCapability(config, "text");
+    const enabledRemoteIds = useMemo(() => new Set(visibleModels.map(parsePromptHubModelId).filter((id): id is string => Boolean(id))), [visibleModels]);
+    const remoteModels = useMemo(() => catalog.filter((model) => model.modality === "text" && model.operation !== "generate" && enabledRemoteIds.has(model.id)), [catalog, enabledRemoteIds]);
     const options = useMemo(
-        () => Array.from(new Set([value, ...remoteModels.map((model) => toPromptHubModelValue(model.id)), ...selectableModelsByCapability(config, "text")].filter(Boolean))),
-        [config, remoteModels, value],
+        () => Array.from(new Set([...remoteModels.map((model) => toPromptHubModelValue(model.id)), ...visibleModels.filter((model) => !isPromptHubModelValue(model))].filter(Boolean))),
+        [remoteModels, visibleModels],
     );
     const modelLabel = (model: string) => {
         const id = parsePromptHubModelId(model);
-        return id ? remoteModels.find((item) => item.id === id)?.label || id : modelOptionName(model);
+        return id ? promptHubModelPickerLabel(id, remoteModels.find((item) => item.id === id)?.label) : modelOptionName(model);
     };
     const channelLabel = (model: string) => isPromptHubModelValue(model) ? "卡藏" : resolveModelChannel(config, model).name;
     const current = value || "";
@@ -1527,14 +1490,7 @@ function buildAssistantReferences(nodes: CanvasNodeData[], selectedNodeIds: Set<
 
 async function buildToolAgentMessages(snapshot: CanvasAgentSnapshot, history: CanvasAssistantMessage[], userMessage: CanvasAssistantMessage, creativeMode: CanvasAgentCreativeMode): Promise<ResponseInputMessage[]> {
     const refs = userMessage.references || [];
-    const systemPrompt = [
-        ONLINE_AGENT_PROMPT,
-        shouldDiscloseCanvasAgentKnowledge(userMessage.text, creativeMode) ? CANVAS_AGENT_KNOWLEDGE_DISCLOSURE_CONTEXT : "",
-        creativeMode === "short_drama" ? SHORT_DRAMA_AGENT_MODE_CONTEXT : "",
-        shouldUseCanvasCreativeKnowledge(userMessage.text, creativeMode) ? buildCreativeAgentKnowledgeContext(userMessage.text, creativeMode) : "",
-    ]
-        .filter(Boolean)
-        .join("\n\n");
+    const systemPrompt = ONLINE_AGENT_PROMPT;
     const scopedHistory = history.filter((message) => messageCreativeMode(message) === creativeMode);
     return [
         { role: "system", content: systemPrompt },
@@ -1557,67 +1513,12 @@ function messageCreativeMode(message: CanvasAssistantMessage): CanvasAgentCreati
     return message.creativeMode === "short_drama" ? "short_drama" : "general";
 }
 
-function latestCreativeUserRequest(messages: ResponseInputMessage[]) {
-    for (let index = messages.length - 1; index >= 0; index -= 1) {
-        const message = messages[index];
-        if ("type" in message || message.role !== "user") continue;
-        if (typeof message.content === "string") return message.content;
-        return message.content.map((item) => (item.type === "text" ? item.text : "")).filter(Boolean).join("\n");
-    }
-    return "";
-}
-
-function shouldRunIndependentCreativeReview(userRequest: string, draft: string, mode: CanvasAgentCreativeMode) {
-    if (mode !== "short_drama" || draft.trim().length < 40) return false;
-    return /审核|复核|二审|检查|纠错|找问题|挑问题|审稿|审片|改稿|返工/.test(userRequest);
-}
-
 function directorResultSnapshot(value: unknown): CanvasAgentSnapshot | undefined {
     if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
     const snapshot = (value as { canvasSnapshot?: unknown }).canvasSnapshot;
     if (!snapshot || typeof snapshot !== "object" || Array.isArray(snapshot)) return undefined;
     const candidate = snapshot as Partial<CanvasAgentSnapshot>;
     return Array.isArray(candidate.nodes) && Array.isArray(candidate.connections) && Array.isArray(candidate.selectedNodeIds) && Boolean(candidate.viewport) ? candidate as CanvasAgentSnapshot : undefined;
-}
-
-async function requestIndependentCreativeReview(
-    config: AiConfig,
-    userRequest: string,
-    draft: string,
-    snapshot: ReturnType<typeof compactSnapshot>,
-    requestText: (config: AiConfig, messages: Parameters<typeof requestImageQuestion>[1], onDelta: (text: string) => void) => Promise<string>,
-) {
-    const answer = await requestText(
-        { ...config, systemPrompt: "" },
-        [
-            {
-                role: "system",
-                content:
-                    "你是与创作 Agent 隔离的独立审核员。不要赞美，不要顺着初稿自证。只检查上下文矛盾、人物动机、空间关系、资产一致性、镜头可生成性、节奏密度、平台审核风险和活动硬约束。没有实质问题就批准；有问题必须给可直接替换初稿回复的修正版。只输出 JSON。",
-            },
-            {
-                role: "user",
-                content: `用户需求：\n${userRequest.slice(-6000)}\n\n当前结构化画布状态：\n${JSON.stringify(snapshot).slice(0, 16000)}\n\n创作 Agent 初稿：\n${draft.slice(0, 16000)}\n\n输出：\n{\n  "applicable": true,\n  "approved": false,\n  "issues": ["具体问题"],\n  "revisedResponse": "有问题时给完整修正版；无问题时留空"\n}`,
-            },
-        ],
-        () => undefined,
-    );
-    const parsed = parseJsonObject(answer);
-    const issues = Array.isArray(parsed.issues) ? parsed.issues.map((item) => String(item || "").trim()).filter(Boolean).slice(0, 8) : [];
-    const revisedResponse = typeof parsed.revisedResponse === "string" ? parsed.revisedResponse.trim() : "";
-    if (parsed.applicable === false || parsed.approved === true) return { approved: true, issues, revisedResponse: "" };
-    return { approved: false, issues, revisedResponse: revisedResponse || (issues.length ? `${draft}\n\n独立审核待修正：\n${issues.map((item) => `- ${item}`).join("\n")}` : "") };
-}
-
-function parseJsonObject(value: string): Record<string, unknown> {
-    const text = String(value || "").trim();
-    const raw = text.match(/```(?:json)?\s*([\s\S]*?)```/i)?.[1] || text;
-    const start = raw.indexOf("{");
-    const end = raw.lastIndexOf("}");
-    if (start < 0 || end < start) throw new Error("独立审核没有返回 JSON");
-    const parsed = JSON.parse(raw.slice(start, end + 1));
-    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("独立审核 JSON 格式不正确");
-    return parsed as Record<string, unknown>;
 }
 
 function compactSnapshot(snapshot: CanvasAgentSnapshot) {

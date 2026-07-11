@@ -150,6 +150,13 @@ export function ratioPreviewSize(ratio: string) {
     if (ratio === "3:4") return { width: 3, height: 4, label: "3:4" };
     if (ratio === "21:9") return { width: 21, height: 9, label: "21:9" };
     if (ratio === "adaptive") return { width: 0, height: 0, label: "自适应" };
+    if (ratio === "auto") return { width: 0, height: 0, label: "自动" };
     if (ratio === "16:9") return { width: 16, height: 9, label: "16:9" };
+    const match = /^(\d+(?:\.\d+)?):(\d+(?:\.\d+)?)$/.exec(ratio);
+    if (match) {
+        const width = Number(match[1]);
+        const height = Number(match[2]);
+        if (width > 0 && height > 0) return { width, height, label: ratio };
+    }
     return { width: 16, height: 9, label: ratio };
 }

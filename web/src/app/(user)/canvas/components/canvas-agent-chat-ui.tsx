@@ -37,7 +37,7 @@ export function AgentChatMessage({ item, theme, user, onRejectTool, onApproveToo
         );
     }
     if (item.role === "tool") {
-        if (objectField(item.detail, "status") === "pending") return <AgentPendingToolCard summary={item.text} detail={item.detail} theme={theme} onReject={() => onRejectTool?.(item.id)} onApprove={() => onApproveTool?.(item.id)} />;
+        if (objectField(item.detail, "status") === "pending") return <AgentPendingToolCard title={item.title} summary={item.text} detail={item.detail} theme={theme} onReject={() => onRejectTool?.(item.id)} onApprove={() => onApproveTool?.(item.id)} />;
         return (
             <div className="flex items-start gap-3">
                 <AgentAvatar theme={theme} />
@@ -58,7 +58,7 @@ export function AgentChatMessage({ item, theme, user, onRejectTool, onApproveToo
     );
 }
 
-export function AgentPendingToolCard({ summary, detail, theme, onReject, onApprove }: { summary: string; detail?: unknown; theme: (typeof canvasThemes)[keyof typeof canvasThemes]; onReject?: () => void; onApprove?: () => void }) {
+export function AgentPendingToolCard({ title, summary, detail, theme, onReject, onApprove }: { title?: string; summary: string; detail?: unknown; theme: (typeof canvasThemes)[keyof typeof canvasThemes]; onReject?: () => void; onApprove?: () => void }) {
     return (
         <div className="flex items-start gap-3">
             <AgentAvatar theme={theme} />
@@ -71,7 +71,7 @@ export function AgentPendingToolCard({ summary, detail, theme, onReject, onAppro
                             </span>
                             <div className="min-w-0 flex-1">
                                 <div className="flex flex-wrap items-center gap-2 text-sm font-semibold leading-5">
-                                    <span>确认工具调用</span>
+                                    <span>{title || "确认工具调用"}</span>
                                     <span className="inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium" style={{ borderColor: "rgba(217,119,6,.22)", color: "#d97706", background: "rgba(217,119,6,.04)" }}>
                                         等待确认
                                     </span>

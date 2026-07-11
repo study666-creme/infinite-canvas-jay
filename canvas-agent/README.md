@@ -24,6 +24,19 @@ npm run dev
 
 只有画布任务才注入画布提示词和 MCP。普通代码对话不应自动获得画布状态。
 
+公开运行时提示只描述通用画布工具和确认边界，不包含维护者的知识包、短剧流程、创作方法或个人预设。
+
+## 可选私有扩展
+
+本机存在以下 Git 忽略文件时，Agent 会按私有说明文件头的 `triggers` / `excludes` 判断适用范围，并按卡片内容检索用户已确认的 `verified` 知识：
+
+```text
+web/knowledge/creative/agent-context.md
+web/knowledge/creative/creative-knowledge-report.json
+```
+
+公开包不包含这两个文件。设置 `CANVAS_AGENT_PRIVATE_CONTEXT=off` 可完全关闭；也可用 `CANVAS_AGENT_PRIVATE_INSTRUCTIONS` 和 `CANVAS_AGENT_PRIVATE_KNOWLEDGE_REPORT` 指向其他私有路径。受 token 保护的 `POST /agent/private-context/preview` 可检查本轮命中，不返回原始文件路径。
+
 ## 主要工具
 
 - 读取画布、选区与快照。
@@ -56,6 +69,9 @@ CANVAS_AGENT_PUBLIC_URL=
 CANVAS_AGENT_TOKEN=
 CANVAS_AGENT_WORKSPACE=
 CANVAS_AGENT_REPO_ROOTS=
+CANVAS_AGENT_PRIVATE_CONTEXT=auto
+CANVAS_AGENT_PRIVATE_INSTRUCTIONS=
+CANVAS_AGENT_PRIVATE_KNOWLEDGE_REPORT=
 ```
 
 运行时不会自动读取仓库根目录 `.env`，请通过 shell、进程管理器或 Node `--env-file` 注入。

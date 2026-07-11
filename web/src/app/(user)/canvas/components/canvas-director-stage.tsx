@@ -1,7 +1,7 @@
 "use client";
 
 import { App, Tooltip } from "antd";
-import { Camera, Clapperboard, Download, FileJson, Focus, ImagePlus, Images, RotateCcw, X } from "lucide-react";
+import { Camera, ChevronLeft, ChevronRight, Clapperboard, Download, FileJson, Focus, ImagePlus, Images, RotateCcw, SlidersHorizontal, X } from "lucide-react";
 import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState, type ReactNode } from "react";
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
@@ -26,6 +26,7 @@ type StageRuntime = {
     controls: OrbitControls;
     stageRoot: THREE.Group;
     entityObjects: Map<string, THREE.Object3D>;
+    selectionHelper: THREE.BoxHelper | null;
     resize: () => void;
 };
 
@@ -54,12 +55,16 @@ export const CanvasDirectorStage = forwardRef<
     const [activeShotId, setActiveShotId] = useState("");
     const [selected, setSelected] = useState<SelectedTransform | null>(null);
     const [capturing, setCapturing] = useState(false);
+    const [captureProgress, setCaptureProgress] = useState({ current: 0, total: 0 });
+    const [mobileInspectorOpen, setMobileInspectorOpen] = useState(false);
 
     const activeSlot = useMemo(() => packet?.slots.find((slot) => slot.shot_id === activeShotId) || packet?.slots[0] || null, [activeShotId, packet]);
+    const activeShotIndex = useMemo(() => packet?.slots.findIndex((slot) => slot.shot_id === activeSlot?.shot_id) ?? -1, [activeSlot?.shot_id, packet]);
 
     const setStageOpen = (next: boolean) => {
         openRef.current = next;
         setOpen(next);
+        if (!next) setMobileInspectorOpen(false);
     };
 
     const loadPacket = (value: unknown, shouldOpen = true) => {
@@ -96,10 +101,13 @@ export const CanvasDirectorStage = forwardRef<
         if (!slots.length) throw new Error("没有可截图的分镜槽位");
         setStageOpen(true);
         setCapturing(true);
+        setCaptureProgress({ current: 0, total: slots.length });
         try {
             const runtime = await waitForRuntime(runtimeRef);
             const captures: DirectorStageCapture[] = [];
-            for (const slot of slots) {
+            for (let index = 0; index < slots.length; index += 1) {
+                const slot = slots[index];
+                setCaptureProgress({ current: index + 1, total: slots.length });
                 applySlotToRuntime(slot.shot_id);
                 applyStageSlot(runtime, slot);
                 await settleFrames(2);
@@ -109,6 +117,7 @@ export const CanvasDirectorStage = forwardRef<
             return { ok: true, count: captures.length, shotIds: captures.map((item) => item.shotId), nodeIds };
         } finally {
             setCapturing(false);
+            setCaptureProgress({ current: 0, total: 0 });
         }
     };
 
@@ -182,6 +191,10 @@ export const CanvasDirectorStage = forwardRef<
             const hit = raycaster.intersectObjects(Array.from(runtime.entityObjects.values()), true)[0]?.object;
             const entityId = findEntityId(hit);
             if (entityId) selectRuntimeObject(runtime, entityId, setSelected);
+            else {
+                clearRuntimeSelection(runtime);
+                setSelected(null);
+            }
         };
         const persistCamera = () => {
             const currentPacket = packetRef.current;
@@ -228,6 +241,7 @@ export const CanvasDirectorStage = forwardRef<
         object.position.set(next.x, next.y, next.z);
         object.rotation.y = THREE.MathUtils.degToRad(next.rotationY);
         object.scale.setScalar(next.scale);
+        runtimeRef.current?.selectionHelper?.update();
         const currentPacket = packetRef.current;
         const shotId = activeShotIdRef.current;
         if (currentPacket && shotId) {
@@ -253,6 +267,23 @@ export const CanvasDirectorStage = forwardRef<
 
     const resetActiveShot = () => {
         if (activeShotIdRef.current) applySlotToRuntime(activeShotIdRef.current);
+    };
+
+    const moveShot = (offset: number) => {
+        const slots = packetRef.current?.slots;
+        if (!slots?.length) return;
+        const currentIndex = slots.findIndex((slot) => slot.shot_id === activeShotIdRef.current);
+        const nextIndex = Math.min(slots.length - 1, Math.max(0, (currentIndex < 0 ? 0 : currentIndex) + offset));
+        if (nextIndex !== currentIndex) applySlotToRuntime(slots[nextIndex].shot_id);
+    };
+
+    const captureFromUi = async (slots: DirectorStageSlot[]) => {
+        try {
+            const result = await captureSlots(slots);
+            message.success(`${result.count} 个分镜截图已加入画布`);
+        } catch (error) {
+            message.error(error instanceof Error ? `截图失败：${error.message}` : "截图失败，请稍后重试");
+        }
     };
 
     const downloadPacket = () => {
@@ -284,26 +315,27 @@ export const CanvasDirectorStage = forwardRef<
         <div className="fixed inset-0 z-[120] overflow-hidden bg-[#d9ddda] text-[#151918] dark:bg-[#101414] dark:text-[#f4f5f3]">
             <canvas ref={canvasRef} className="absolute inset-0 block size-full touch-none" />
 
-            <header className="pointer-events-none absolute inset-x-0 top-0 z-20 flex h-16 items-center justify-between border-b border-black/10 bg-white/72 px-3 backdrop-blur-xl dark:border-white/10 dark:bg-black/46 sm:px-5">
-                <div className="pointer-events-auto flex min-w-0 items-center gap-3">
-                    <span className="grid size-9 shrink-0 place-items-center rounded-md bg-[#151918] text-white dark:bg-white dark:text-black">
+            <header className="pointer-events-none absolute inset-x-0 top-0 z-20 flex h-16 items-center justify-between border-b border-black/10 bg-white/72 px-2.5 backdrop-blur-xl dark:border-white/10 dark:bg-black/46 sm:px-5">
+                <div className="pointer-events-auto flex min-w-0 items-center gap-2 sm:gap-3">
+                    <span className="grid size-8 shrink-0 place-items-center rounded-md bg-[#151918] text-white dark:bg-white dark:text-black sm:size-9">
                         <Clapperboard className="size-4.5" />
                     </span>
-                    <div className="hidden min-w-0 sm:block">
-                        <div className="truncate text-sm font-semibold">3D 导演台</div>
-                        <div className="truncate text-[11px] opacity-55">{packet?.global_visual_contract || "Stage Packet"}</div>
+                    <div className="min-w-0">
+                        <div className="truncate text-xs font-semibold sm:text-sm">3D 导演台</div>
+                        <div className="hidden truncate text-[11px] opacity-55 sm:block">{packet?.global_visual_contract || "Stage Packet"}</div>
                     </div>
                 </div>
-                <div className="pointer-events-auto flex items-center gap-1.5">
+                <div className="pointer-events-auto flex items-center gap-0.5 sm:gap-1.5">
                     <input ref={fileRef} className="hidden" type="file" accept="application/json,.json" onChange={(event) => void importPacketFile(event.target.files?.[0])} />
                     <StageIconButton label="导入分镜包" onClick={() => fileRef.current?.click()}><FileJson className="size-4" /></StageIconButton>
                     <span className="hidden sm:inline-flex"><StageIconButton label="导出分镜包" disabled={!packet} onClick={downloadPacket}><Download className="size-4" /></StageIconButton></span>
                     <span className="hidden sm:inline-flex"><StageIconButton label="恢复当前镜头" disabled={!activeSlot} onClick={resetActiveShot}><RotateCcw className="size-4" /></StageIconButton></span>
+                    <span className="md:hidden"><StageIconButton label={mobileInspectorOpen ? "收起场面调度" : "打开场面调度"} active={mobileInspectorOpen} onClick={() => setMobileInspectorOpen((value) => !value)}><SlidersHorizontal className="size-4" /></StageIconButton></span>
                     <button
                         type="button"
                         disabled={!activeSlot || capturing}
                         className="hidden h-9 items-center gap-2 rounded-md bg-[#151918] px-3 text-xs font-semibold text-white transition hover:bg-black disabled:opacity-40 dark:bg-white dark:text-black sm:inline-flex"
-                        onClick={() => activeSlot && void captureSlots([activeSlot]).then(() => message.success("分镜截图已加入画布"))}
+                        onClick={() => activeSlot && void captureFromUi([activeSlot])}
                     >
                         <ImagePlus className="size-4" />截取当前
                     </button>
@@ -311,7 +343,7 @@ export const CanvasDirectorStage = forwardRef<
                         type="button"
                         disabled={!packet?.slots.length || capturing}
                         className="inline-flex h-9 items-center gap-2 rounded-md bg-[#16776f] px-3 text-xs font-semibold text-white transition hover:bg-[#11675f] disabled:opacity-40"
-                        onClick={() => packet && void captureSlots(packet.slots).then(() => message.success("全部分镜截图已加入画布"))}
+                        onClick={() => packet && void captureFromUi(packet.slots)}
                     >
                         <Images className="size-4" /><span className="hidden sm:inline">全部截图</span>
                     </button>
@@ -320,14 +352,20 @@ export const CanvasDirectorStage = forwardRef<
             </header>
 
             {activeSlot ? (
-                <div className="pointer-events-none absolute left-3 top-20 z-10 max-w-[min(520px,calc(100vw-24px))] sm:left-5">
+                <div className="pointer-events-none absolute left-3 top-20 z-10 max-w-[min(520px,calc(100vw-24px))] md:max-w-[calc(100vw-350px)] sm:left-5">
                     <div className="text-[11px] font-semibold uppercase opacity-55">镜头 {String(activeSlot.slot).padStart(2, "0")} · {activeSlot.camera.shot_size} · {activeSlot.camera.angle}</div>
                     <div className="mt-1 text-base font-semibold sm:text-lg">{activeSlot.dramatic_function}</div>
                     {activeSlot.beat ? <div className="mt-1 line-clamp-2 text-xs opacity-60 sm:text-sm">{activeSlot.beat}</div> : null}
+                    <div className="pointer-events-auto mt-3 inline-flex h-9 items-center rounded-md border border-black/10 bg-white/68 px-1 backdrop-blur-xl dark:border-white/10 dark:bg-black/42">
+                        <StageIconButton label="上一个镜头" disabled={activeShotIndex <= 0} onClick={() => moveShot(-1)}><ChevronLeft className="size-4" /></StageIconButton>
+                        <span className="min-w-14 text-center text-[11px] font-semibold tabular-nums">{activeShotIndex + 1} / {packet?.slots.length || 0}</span>
+                        <StageIconButton label="下一个镜头" disabled={activeShotIndex < 0 || activeShotIndex >= (packet?.slots.length || 0) - 1} onClick={() => moveShot(1)}><ChevronRight className="size-4" /></StageIconButton>
+                    </div>
                 </div>
             ) : null}
 
-            <aside className="absolute bottom-20 right-4 top-20 z-10 hidden w-[286px] overflow-y-auto border-l border-black/10 bg-white/66 p-4 backdrop-blur-xl dark:border-white/10 dark:bg-black/42 md:block">
+            {mobileInspectorOpen ? <button type="button" aria-label="关闭场面调度" className="absolute inset-0 z-[9] bg-black/20 md:hidden" onClick={() => setMobileInspectorOpen(false)} /> : null}
+            <aside className={`absolute bottom-20 right-0 top-16 z-10 w-[min(320px,calc(100vw-24px))] overflow-y-auto border-l border-black/10 bg-white/86 p-4 shadow-[-18px_0_42px_rgba(0,0,0,.12)] backdrop-blur-xl transition-transform duration-200 dark:border-white/10 dark:bg-black/72 md:right-4 md:top-20 md:w-[286px] md:translate-x-0 md:pointer-events-auto md:bg-white/66 md:shadow-none dark:md:bg-black/42 ${mobileInspectorOpen ? "translate-x-0" : "pointer-events-none translate-x-full"}`}>
                 <div className="flex items-center gap-2 text-xs font-semibold uppercase opacity-55"><Camera className="size-3.5" />机位</div>
                 {activeSlot ? (
                     <div className="mt-3 grid grid-cols-2 gap-x-4 gap-y-3 text-xs">
@@ -349,6 +387,7 @@ export const CanvasDirectorStage = forwardRef<
                         <div className="flex items-center justify-between text-sm font-semibold"><span>{selected.label}</span><span className="text-[10px] opacity-45">{selected.kind}</span></div>
                         <div className="mt-4 grid gap-3">
                             <StageRange label="横向 X" value={selected.x} min={-8} max={8} step={0.1} onChange={(x) => updateSelected({ x })} />
+                            <StageRange label="高度 Y" value={selected.y} min={-2} max={8} step={0.1} onChange={(y) => updateSelected({ y })} />
                             <StageRange label="纵深 Z" value={selected.z} min={-8} max={8} step={0.1} onChange={(z) => updateSelected({ z })} />
                             <StageRange label="朝向" value={selected.rotationY} min={-180} max={180} step={1} suffix="°" onChange={(rotationY) => updateSelected({ rotationY })} />
                             <StageRange label="缩放" value={selected.scale} min={0.3} max={3} step={0.05} onChange={(scale) => updateSelected({ scale })} />
@@ -378,7 +417,7 @@ export const CanvasDirectorStage = forwardRef<
                 </div>
             </div>
 
-            {capturing ? <div className="pointer-events-none absolute inset-0 z-30 grid place-items-center bg-black/12 backdrop-blur-[1px]"><div className="rounded-md bg-black/78 px-4 py-2 text-xs font-semibold text-white">正在渲染分镜截图...</div></div> : null}
+            {capturing ? <div className="pointer-events-none absolute inset-0 z-30 grid place-items-center bg-black/12 backdrop-blur-[1px]"><div className="rounded-md bg-black/78 px-4 py-2 text-xs font-semibold text-white">正在渲染分镜 {captureProgress.current}/{captureProgress.total}</div></div> : null}
         </div>
     );
 });
@@ -447,10 +486,11 @@ function createStageRuntime(canvas: HTMLCanvasElement, dark: boolean): StageRunt
         camera.updateProjectionMatrix();
     };
     resize();
-    return { scene, camera, renderer, controls, stageRoot, entityObjects, resize };
+    return { scene, camera, renderer, controls, stageRoot, entityObjects, selectionHelper: null, resize };
 }
 
 function applyStageSlot(runtime: StageRuntime, slot: DirectorStageSlot) {
+    clearRuntimeSelection(runtime);
     clearGroup(runtime.stageRoot);
     runtime.entityObjects.clear();
 
@@ -594,8 +634,28 @@ function captureStage(runtime: StageRuntime, slot: DirectorStageSlot): DirectorS
 function selectRuntimeObject(runtime: StageRuntime, id: string, setSelected: (value: SelectedTransform | null) => void) {
     const object = runtime.entityObjects.get(id);
     if (!object) return;
+    setRuntimeSelection(runtime, object);
     const label = typeof object.userData.entityLabel === "string" ? object.userData.entityLabel : id.replace(/^(actor|prop):/, "");
     setSelected({ id, label, kind: id.startsWith("actor:") ? "角色" : "道具", x: object.position.x, y: object.position.y, z: object.position.z, rotationY: THREE.MathUtils.radToDeg(object.rotation.y), scale: object.scale.x });
+}
+
+function setRuntimeSelection(runtime: StageRuntime, object: THREE.Object3D) {
+    clearRuntimeSelection(runtime);
+    const helper = new THREE.BoxHelper(object, 0xff8a65);
+    helper.material.transparent = true;
+    helper.material.opacity = 0.92;
+    helper.material.depthTest = false;
+    helper.renderOrder = 20;
+    runtime.scene.add(helper);
+    runtime.selectionHelper = helper;
+}
+
+function clearRuntimeSelection(runtime: StageRuntime) {
+    if (!runtime.selectionHelper) return;
+    runtime.scene.remove(runtime.selectionHelper);
+    runtime.selectionHelper.geometry.dispose();
+    runtime.selectionHelper.material.dispose();
+    runtime.selectionHelper = null;
 }
 
 function findEntityId(object?: THREE.Object3D) {
@@ -620,6 +680,7 @@ function clearGroup(group: THREE.Group) {
 }
 
 function disposeStageRuntime(runtime: StageRuntime) {
+    clearRuntimeSelection(runtime);
     clearGroup(runtime.stageRoot);
     runtime.controls.dispose();
     runtime.renderer.dispose();
@@ -646,8 +707,21 @@ function settleFrames(count: number) {
     });
 }
 
-function StageIconButton({ label, disabled, onClick, children }: { label: string; disabled?: boolean; onClick: () => void; children: ReactNode }) {
-    return <Tooltip title={label}><button type="button" aria-label={label} disabled={disabled} className="grid size-9 place-items-center rounded-md transition hover:bg-black/8 disabled:opacity-35 dark:hover:bg-white/10" onClick={onClick}>{children}</button></Tooltip>;
+function StageIconButton({ label, disabled, active, onClick, children }: { label: string; disabled?: boolean; active?: boolean; onClick: () => void; children: ReactNode }) {
+    return (
+        <Tooltip title={label}>
+            <button
+                type="button"
+                aria-label={label}
+                aria-pressed={active}
+                disabled={disabled}
+                className={`grid size-9 place-items-center rounded-md transition hover:bg-black/8 disabled:opacity-35 dark:hover:bg-white/10 ${active ? "bg-black/10 dark:bg-white/12" : ""}`}
+                onClick={onClick}
+            >
+                {children}
+            </button>
+        </Tooltip>
+    );
 }
 
 function StageMetric({ label, value }: { label: string; value: string }) {
@@ -659,5 +733,52 @@ function EntityButton({ label, detail, selected, onClick }: { id: string; label:
 }
 
 function StageRange({ label, value, min, max, step, suffix = "", onChange }: { label: string; value: number; min: number; max: number; step: number; suffix?: string; onChange: (value: number) => void }) {
-    return <label className="grid gap-1.5"><span className="flex items-center justify-between text-[10px] opacity-55"><span>{label}</span><span className="tabular-nums">{value.toFixed(step < 1 ? 2 : 0)}{suffix}</span></span><input className="h-1.5 w-full accent-[#d56d57]" type="range" value={value} min={min} max={max} step={step} onChange={(event) => onChange(Number(event.target.value))} /></label>;
+    const precision = Math.max(0, (String(step).split(".")[1] || "").length);
+    const formatValue = (next: number) => next.toFixed(precision);
+    const [draft, setDraft] = useState(formatValue(value));
+
+    useEffect(() => setDraft(formatValue(value)), [precision, value]);
+
+    const commit = () => {
+        const parsed = Number(draft);
+        if (!Number.isFinite(parsed)) {
+            setDraft(formatValue(value));
+            return;
+        }
+        const clamped = Math.min(max, Math.max(min, parsed));
+        const snapped = Number((Math.round(clamped / step) * step).toFixed(precision));
+        onChange(snapped);
+        setDraft(formatValue(snapped));
+    };
+
+    return (
+        <label className="grid gap-1.5">
+            <span className="flex items-center justify-between gap-3 text-[10px] opacity-60">
+                <span>{label}</span>
+                <span className="inline-flex h-6 items-center border-b border-black/15 px-1.5 tabular-nums dark:border-white/20">
+                    <input
+                        aria-label={`${label}精确数值`}
+                        className="w-14 bg-transparent text-right text-[11px] font-medium outline-none"
+                        type="number"
+                        inputMode="decimal"
+                        value={draft}
+                        min={min}
+                        max={max}
+                        step={step}
+                        onChange={(event) => setDraft(event.target.value)}
+                        onBlur={commit}
+                        onKeyDown={(event) => {
+                            if (event.key === "Enter") event.currentTarget.blur();
+                            if (event.key === "Escape") {
+                                setDraft(formatValue(value));
+                                event.currentTarget.blur();
+                            }
+                        }}
+                    />
+                    {suffix ? <span className="ml-0.5">{suffix}</span> : null}
+                </span>
+            </span>
+            <input className="h-1.5 w-full accent-[#d56d57]" type="range" value={value} min={min} max={max} step={step} onChange={(event) => onChange(Number(event.target.value))} />
+        </label>
+    );
 }

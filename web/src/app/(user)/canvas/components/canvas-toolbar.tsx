@@ -99,7 +99,7 @@ export function CanvasToolbar({
                 <ToolbarButton id="tool-assets" label="我的资产" hovered={hovered} hoverStyle={hoverStyle} wrapRef={wrapRef} onTipX={setTipX} onHover={setHovered} onClick={onOpenMyAssets}>
                     <FolderOpen className="size-4.5" />
                 </ToolbarButton>
-                <ToolbarButton id="tool-director-stage" label="3D 导演台" hovered={hovered} hoverStyle={hoverStyle} wrapRef={wrapRef} onTipX={setTipX} onHover={setHovered} onClick={onOpenDirectorStage}>
+                <ToolbarButton id="tool-director-stage" label="3D 导演台" desktopLabel="3D 导演台" hovered={hovered} hoverStyle={hoverStyle} wrapRef={wrapRef} onTipX={setTipX} onHover={setHovered} onClick={onOpenDirectorStage}>
                     <Clapperboard className="size-4.5" />
                 </ToolbarButton>
                 <ToolbarButton
@@ -209,6 +209,7 @@ function ToolbarButton({
     onClick,
     disabled = false,
     danger = false,
+    desktopLabel,
     children,
 }: {
     id: string;
@@ -223,6 +224,7 @@ function ToolbarButton({
     onClick?: (event: ReactMouseEvent<HTMLElement>) => void;
     disabled?: boolean;
     danger?: boolean;
+    desktopLabel?: string;
     children: ReactNode;
 }) {
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
@@ -231,7 +233,7 @@ function ToolbarButton({
         <Button
             type="text"
             aria-label={label}
-            className="!h-10 !w-10 !min-w-10 !p-0 sm:!h-8 sm:!w-8 sm:!min-w-8"
+            className={desktopLabel ? "!h-10 !w-10 !min-w-10 !p-0 sm:!h-8 sm:!min-w-8 lg:!w-auto lg:!px-2.5" : "!h-10 !w-10 !min-w-10 !p-0 sm:!h-8 sm:!w-8 sm:!min-w-8"}
             disabled={disabled}
             style={active ? activeStyle : hovered === id && !disabled ? hoverStyle : { color: danger ? "#f87171" : theme.toolbar.item, opacity: disabled ? 0.35 : 1 }}
             icon={children}
@@ -241,7 +243,9 @@ function ToolbarButton({
             }}
             onMouseLeave={() => onHover(null)}
             onClick={onClick}
-        />
+        >
+            {desktopLabel ? <span className="hidden text-xs font-medium lg:inline">{desktopLabel}</span> : null}
+        </Button>
     );
 }
 
@@ -288,6 +292,7 @@ function toolLabel(id: string) {
     if (id === "tool-config") return "生成配置";
     if (id === "tool-upload") return "上传素材";
     if (id === "tool-assets") return "我的资产";
+    if (id === "tool-director-stage") return "3D 导演台";
     if (id === "tool-style") return "画布外观";
     if (id === "tool-delete") return "删除选中";
     if (id === "tool-clear") return "清空画布";

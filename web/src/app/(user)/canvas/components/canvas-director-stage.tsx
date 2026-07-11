@@ -1,7 +1,7 @@
 "use client";
 
-import { App, Tooltip } from "antd";
-import { Camera, ChevronLeft, ChevronRight, Clapperboard, Download, FileJson, Focus, ImagePlus, Images, RotateCcw, SlidersHorizontal, X } from "lucide-react";
+import { App, Dropdown, Tooltip } from "antd";
+import { Camera, ChevronLeft, ChevronRight, Clapperboard, CopyPlus, Download, FileJson, Focus, ImagePlus, Images, PackagePlus, RotateCcw, SlidersHorizontal, Trash2, UserPlus, X } from "lucide-react";
 import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState, type ReactNode } from "react";
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
@@ -14,8 +14,10 @@ import {
     normalizeDirectorStagePacket,
     type DirectorStageActionInput,
     type DirectorStageActionName,
+    type DirectorStageActorPose,
     type DirectorStageCapture,
     type DirectorStagePacket,
+    type DirectorStagePropPose,
     type DirectorStageSlot,
 } from "../utils/director-stage-types";
 
@@ -31,6 +33,8 @@ type StageRuntime = {
 };
 
 type SelectedTransform = { id: string; label: string; kind: "角色" | "道具"; x: number; y: number; z: number; rotationY: number; scale: number };
+type EntityTransform = Pick<SelectedTransform, "x" | "y" | "z" | "rotationY" | "scale">;
+type EntityDragState = { pointerId: number; entityId: string; plane: THREE.Plane; offset: THREE.Vector3 };
 
 export type CanvasDirectorStageHandle = {
     execute: (name: DirectorStageActionName, input?: DirectorStageActionInput) => Promise<unknown>;
@@ -50,6 +54,7 @@ export const CanvasDirectorStage = forwardRef<
     const packetRef = useRef<DirectorStagePacket | null>(null);
     const activeShotIdRef = useRef("");
     const openRef = useRef(false);
+    const persistEntityTransformRef = useRef<(id: string, transform: EntityTransform) => void>(() => undefined);
     const [open, setOpen] = useState(false);
     const [packet, setPacket] = useState<DirectorStagePacket | null>(null);
     const [activeShotId, setActiveShotId] = useState("");
@@ -57,6 +62,7 @@ export const CanvasDirectorStage = forwardRef<
     const [capturing, setCapturing] = useState(false);
     const [captureProgress, setCaptureProgress] = useState({ current: 0, total: 0 });
     const [mobileInspectorOpen, setMobileInspectorOpen] = useState(false);
+    const [draggingEntityId, setDraggingEntityId] = useState("");
 
     const activeSlot = useMemo(() => packet?.slots.find((slot) => slot.shot_id === activeShotId) || packet?.slots[0] || null, [activeShotId, packet]);
     const activeShotIndex = useMemo(() => packet?.slots.findIndex((slot) => slot.shot_id === activeSlot?.shot_id) ?? -1, [activeSlot?.shot_id, packet]);
@@ -121,6 +127,38 @@ export const CanvasDirectorStage = forwardRef<
         }
     };
 
+    const persistEntityTransform = (id: string, transform: EntityTransform) => {
+        const currentPacket = packetRef.current;
+        const shotId = activeShotIdRef.current;
+        const runtimeObject = runtimeRef.current?.entityObjects.get(id);
+        if (!currentPacket || !shotId) return;
+        const entityId = id.replace(/^(actor|prop):/, "");
+        const slot = currentPacket.slots.find((item) => item.shot_id === shotId);
+        const source = id.startsWith("actor:") ? slot?.subjects.find((item) => item.id === entityId) : slot?.props.find((item) => item.id === entityId);
+        const pose = { x: transform.x, y: transform.y, z: transform.z, rotation_y: transform.rotationY, scale: transform.scale };
+        const nextPacket = {
+            ...currentPacket,
+            slots: currentPacket.slots.map((item) =>
+                item.shot_id !== shotId
+                    ? item
+                    : {
+                          ...item,
+                          subjects: id.startsWith("actor:") ? item.subjects.map((actor) => (actor.id === entityId ? { ...actor, ...pose } : actor)) : item.subjects,
+                          props: id.startsWith("prop:") ? item.props.map((prop) => (prop.id === entityId ? { ...prop, ...pose } : prop)) : item.props,
+                      },
+            ),
+        };
+        packetRef.current = nextPacket;
+        setPacket(nextPacket);
+        setSelected({
+            id,
+            label: typeof runtimeObject?.userData.entityLabel === "string" ? runtimeObject.userData.entityLabel : source?.label || entityId,
+            kind: id.startsWith("actor:") ? "角色" : "道具",
+            ...transform,
+        });
+    };
+    persistEntityTransformRef.current = persistEntityTransform;
+
     useImperativeHandle(
         ref,
         () => ({
@@ -182,19 +220,64 @@ export const CanvasDirectorStage = forwardRef<
         const observer = new ResizeObserver(runtime.resize);
         observer.observe(canvasRef.current);
 
-        const pointerDown = (event: PointerEvent) => {
+        const raycaster = new THREE.Raycaster();
+        const pointer = new THREE.Vector2();
+        let dragState: EntityDragState | null = null;
+        const updateRay = (event: PointerEvent) => {
             const bounds = canvasRef.current?.getBoundingClientRect();
-            if (!bounds) return;
-            const pointer = new THREE.Vector2(((event.clientX - bounds.left) / bounds.width) * 2 - 1, -((event.clientY - bounds.top) / bounds.height) * 2 + 1);
-            const raycaster = new THREE.Raycaster();
+            if (!bounds) return false;
+            pointer.set(((event.clientX - bounds.left) / bounds.width) * 2 - 1, -((event.clientY - bounds.top) / bounds.height) * 2 + 1);
             raycaster.setFromCamera(pointer, runtime.camera);
+            return true;
+        };
+        const pointerDown = (event: PointerEvent) => {
+            if (event.button !== 0 || !updateRay(event)) return;
             const hit = raycaster.intersectObjects(Array.from(runtime.entityObjects.values()), true)[0]?.object;
             const entityId = findEntityId(hit);
-            if (entityId) selectRuntimeObject(runtime, entityId, setSelected);
-            else {
+            if (!entityId) {
                 clearRuntimeSelection(runtime);
                 setSelected(null);
+                return;
             }
+            const object = runtime.entityObjects.get(entityId);
+            if (!object) return;
+            selectRuntimeObject(runtime, entityId, setSelected);
+            const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -object.position.y);
+            const point = new THREE.Vector3();
+            if (!raycaster.ray.intersectPlane(plane, point)) return;
+            dragState = { pointerId: event.pointerId, entityId, plane, offset: point.sub(object.position) };
+            runtime.controls.enabled = false;
+            canvasRef.current?.setPointerCapture(event.pointerId);
+            setDraggingEntityId(entityId);
+            event.preventDefault();
+        };
+        const pointerMove = (event: PointerEvent) => {
+            if (!dragState || dragState.pointerId !== event.pointerId || !updateRay(event)) return;
+            const object = runtime.entityObjects.get(dragState.entityId);
+            if (!object) return;
+            const point = new THREE.Vector3();
+            if (!raycaster.ray.intersectPlane(dragState.plane, point)) return;
+            object.position.x = point.x - dragState.offset.x;
+            object.position.z = point.z - dragState.offset.z;
+            runtime.selectionHelper?.update();
+            event.preventDefault();
+        };
+        const endEntityDrag = (event: PointerEvent) => {
+            if (!dragState || dragState.pointerId !== event.pointerId) return;
+            const object = runtime.entityObjects.get(dragState.entityId);
+            if (object) {
+                persistEntityTransformRef.current(dragState.entityId, {
+                    x: object.position.x,
+                    y: object.position.y,
+                    z: object.position.z,
+                    rotationY: THREE.MathUtils.radToDeg(object.rotation.y),
+                    scale: object.scale.x,
+                });
+            }
+            if (canvasRef.current?.hasPointerCapture(event.pointerId)) canvasRef.current.releasePointerCapture(event.pointerId);
+            dragState = null;
+            runtime.controls.enabled = true;
+            setDraggingEntityId("");
         };
         const persistCamera = () => {
             const currentPacket = packetRef.current;
@@ -221,13 +304,21 @@ export const CanvasDirectorStage = forwardRef<
             setPacket(nextPacket);
         };
         canvasRef.current.addEventListener("pointerdown", pointerDown);
+        canvasRef.current.addEventListener("pointermove", pointerMove);
+        canvasRef.current.addEventListener("pointerup", endEntityDrag);
+        canvasRef.current.addEventListener("pointercancel", endEntityDrag);
         runtime.controls.addEventListener("end", persistCamera);
 
         return () => {
             cancelAnimationFrame(animationFrame);
             observer.disconnect();
             canvasRef.current?.removeEventListener("pointerdown", pointerDown);
+            canvasRef.current?.removeEventListener("pointermove", pointerMove);
+            canvasRef.current?.removeEventListener("pointerup", endEntityDrag);
+            canvasRef.current?.removeEventListener("pointercancel", endEntityDrag);
             runtime.controls.removeEventListener("end", persistCamera);
+            runtime.controls.enabled = true;
+            setDraggingEntityId("");
             disposeStageRuntime(runtime);
             runtimeRef.current = null;
         };
@@ -242,27 +333,83 @@ export const CanvasDirectorStage = forwardRef<
         object.rotation.y = THREE.MathUtils.degToRad(next.rotationY);
         object.scale.setScalar(next.scale);
         runtimeRef.current?.selectionHelper?.update();
+        persistEntityTransform(selected.id, next);
+    };
+
+    const commitActiveSlot = (nextSlot: DirectorStageSlot, nextSelectedId = "") => {
         const currentPacket = packetRef.current;
-        const shotId = activeShotIdRef.current;
-        if (currentPacket && shotId) {
-            const entityId = selected.id.replace(/^(actor|prop):/, "");
-            const pose = { x: next.x, y: next.y, z: next.z, rotation_y: next.rotationY, scale: next.scale };
-            const nextPacket = {
-                ...currentPacket,
-                slots: currentPacket.slots.map((slot) =>
-                    slot.shot_id !== shotId
-                        ? slot
-                        : {
-                              ...slot,
-                              subjects: selected.id.startsWith("actor:") ? slot.subjects.map((item) => (item.id === entityId ? { ...item, ...pose } : item)) : slot.subjects,
-                              props: selected.id.startsWith("prop:") ? slot.props.map((item) => (item.id === entityId ? { ...item, ...pose } : item)) : slot.props,
-                          },
-                ),
-            };
-            packetRef.current = nextPacket;
-            setPacket(nextPacket);
+        if (!currentPacket) return;
+        const nextPacket = { ...currentPacket, slots: currentPacket.slots.map((slot) => (slot.shot_id === nextSlot.shot_id ? nextSlot : slot)) };
+        packetRef.current = nextPacket;
+        setPacket(nextPacket);
+        const runtime = runtimeRef.current;
+        if (runtime) {
+            applyStageSlot(runtime, nextSlot);
+            if (nextSelectedId) selectRuntimeObject(runtime, nextSelectedId, setSelected);
+            else setSelected(null);
         }
-        setSelected(next);
+    };
+
+    const addActor = () => {
+        const slot = packetRef.current?.slots.find((item) => item.shot_id === activeShotIdRef.current);
+        if (!slot) return;
+        if (slot.subjects.length >= 12) {
+            message.warning("单个镜头最多放置 12 个人物");
+            return;
+        }
+        const id = nextEntityId("actor", slot);
+        const position = nextEntityPosition(slot.subjects.length);
+        const actor: DirectorStageActorPose = { id, label: `人物 ${slot.subjects.length + 1}`, x: position.x, y: 0, z: position.z, rotation_y: 0, scale: 1, action: "待调度" };
+        commitActiveSlot({ ...slot, subjects: [...slot.subjects, actor] }, `actor:${id}`);
+        message.success("人物已加入当前镜头");
+    };
+
+    const addProp = (label: string) => {
+        const slot = packetRef.current?.slots.find((item) => item.shot_id === activeShotIdRef.current);
+        if (!slot) return;
+        if (slot.props.length >= 20) {
+            message.warning("单个镜头最多放置 20 个道具");
+            return;
+        }
+        const id = nextEntityId("prop", slot);
+        const position = nextEntityPosition(slot.props.length + slot.subjects.length);
+        const prop: DirectorStagePropPose = { id, label, x: position.x, y: 0, z: position.z, rotation_y: 0, scale: 1 };
+        commitActiveSlot({ ...slot, props: [...slot.props, prop] }, `prop:${id}`);
+        message.success(`${label}已加入当前镜头`);
+    };
+
+    const duplicateSelected = () => {
+        if (!selected) return;
+        const slot = packetRef.current?.slots.find((item) => item.shot_id === activeShotIdRef.current);
+        if (!slot) return;
+        const sourceId = selected.id.replace(/^(actor|prop):/, "");
+        if (selected.id.startsWith("actor:")) {
+            const source = slot.subjects.find((item) => item.id === sourceId);
+            if (!source || slot.subjects.length >= 12) return;
+            const id = nextEntityId("actor", slot);
+            const actor = { ...source, id, label: `${source.label} 复制`, x: source.x + 0.65, z: source.z + 0.35 };
+            commitActiveSlot({ ...slot, subjects: [...slot.subjects, actor] }, `actor:${id}`);
+        } else {
+            const source = slot.props.find((item) => item.id === sourceId);
+            if (!source || slot.props.length >= 20) return;
+            const id = nextEntityId("prop", slot);
+            const prop = { ...source, id, label: `${source.label} 复制`, x: source.x + 0.65, z: source.z + 0.35 };
+            commitActiveSlot({ ...slot, props: [...slot.props, prop] }, `prop:${id}`);
+        }
+        message.success("已复制到当前镜头");
+    };
+
+    const removeSelected = () => {
+        if (!selected) return;
+        const slot = packetRef.current?.slots.find((item) => item.shot_id === activeShotIdRef.current);
+        if (!slot) return;
+        const sourceId = selected.id.replace(/^(actor|prop):/, "");
+        commitActiveSlot({
+            ...slot,
+            subjects: selected.id.startsWith("actor:") ? slot.subjects.filter((item) => item.id !== sourceId) : slot.subjects,
+            props: selected.id.startsWith("prop:") ? slot.props.filter((item) => item.id !== sourceId) : slot.props,
+        });
+        message.success(`${selected.label}已移除`);
     };
 
     const resetActiveShot = () => {
@@ -310,10 +457,18 @@ export const CanvasDirectorStage = forwardRef<
     };
 
     if (!open) return null;
+    const currentCaptureDisabled = !activeSlot || capturing;
+    const currentCaptureStyle = currentCaptureDisabled
+        ? themeName === "dark"
+            ? { background: "#242928", borderColor: "#39403e", color: "#929a97" }
+            : { background: "#d8dcda", borderColor: "#c3c8c5", color: "#626966" }
+        : themeName === "dark"
+          ? { background: "#303735", borderColor: "#4a5451", color: "#f4f5f3" }
+          : { background: "#151918", borderColor: "#151918", color: "#ffffff" };
 
     return (
         <div className="fixed inset-0 z-[120] overflow-hidden bg-[#d9ddda] text-[#151918] dark:bg-[#101414] dark:text-[#f4f5f3]">
-            <canvas ref={canvasRef} className="absolute inset-0 block size-full touch-none" />
+            <canvas ref={canvasRef} className={`absolute inset-0 block size-full touch-none ${draggingEntityId ? "cursor-grabbing" : "cursor-grab"}`} />
 
             <header className="pointer-events-none absolute inset-x-0 top-0 z-20 flex h-16 items-center justify-between border-b border-black/10 bg-white/72 px-2.5 backdrop-blur-xl dark:border-white/10 dark:bg-black/46 sm:px-5">
                 <div className="pointer-events-auto flex min-w-0 items-center gap-2 sm:gap-3">
@@ -333,8 +488,9 @@ export const CanvasDirectorStage = forwardRef<
                     <span className="md:hidden"><StageIconButton label={mobileInspectorOpen ? "收起场面调度" : "打开场面调度"} active={mobileInspectorOpen} onClick={() => setMobileInspectorOpen((value) => !value)}><SlidersHorizontal className="size-4" /></StageIconButton></span>
                     <button
                         type="button"
-                        disabled={!activeSlot || capturing}
-                        className="hidden h-9 items-center gap-2 rounded-md bg-[#151918] px-3 text-xs font-semibold text-white transition hover:bg-black disabled:opacity-40 dark:bg-white dark:text-black sm:inline-flex"
+                        disabled={currentCaptureDisabled}
+                        className="hidden h-9 items-center gap-2 rounded-md border px-3 text-xs font-semibold transition enabled:hover:brightness-110 disabled:cursor-not-allowed sm:inline-flex"
+                        style={currentCaptureStyle}
                         onClick={() => activeSlot && void captureFromUi([activeSlot])}
                     >
                         <ImagePlus className="size-4" />截取当前
@@ -377,6 +533,22 @@ export const CanvasDirectorStage = forwardRef<
                 ) : null}
 
                 <div className="mt-6 flex items-center gap-2 border-t border-black/10 pt-4 text-xs font-semibold uppercase opacity-55 dark:border-white/10"><Focus className="size-3.5" />场面调度</div>
+                <div className="mt-3 grid grid-cols-2 gap-1.5">
+                    <button type="button" className="inline-flex h-8 items-center justify-center gap-1.5 rounded-md border border-black/10 text-[11px] font-medium transition hover:bg-black/6 dark:border-white/12 dark:hover:bg-white/8" onClick={addActor}>
+                        <UserPlus className="size-3.5" />添加人物
+                    </button>
+                    <Dropdown
+                        trigger={["click"]}
+                        menu={{
+                            items: ["桌子", "椅子", "门", "方块道具"].map((label) => ({ key: label, label })),
+                            onClick: ({ key }) => addProp(key),
+                        }}
+                    >
+                        <button type="button" className="inline-flex h-8 items-center justify-center gap-1.5 rounded-md border border-black/10 text-[11px] font-medium transition hover:bg-black/6 dark:border-white/12 dark:hover:bg-white/8">
+                            <PackagePlus className="size-3.5" />添加道具
+                        </button>
+                    </Dropdown>
+                </div>
                 <div className="mt-3 grid gap-1.5">
                     {activeSlot?.subjects.map((item) => <EntityButton key={`actor:${item.id}`} id={`actor:${item.id}`} label={item.label} detail={item.action || "角色"} selected={selected?.id === `actor:${item.id}`} onClick={() => runtimeRef.current && selectRuntimeObject(runtimeRef.current, `actor:${item.id}`, setSelected)} />)}
                     {activeSlot?.props.map((item) => <EntityButton key={`prop:${item.id}`} id={`prop:${item.id}`} label={item.label} detail="道具" selected={selected?.id === `prop:${item.id}`} onClick={() => runtimeRef.current && selectRuntimeObject(runtimeRef.current, `prop:${item.id}`, setSelected)} />)}
@@ -384,10 +556,17 @@ export const CanvasDirectorStage = forwardRef<
 
                 {selected ? (
                     <div className="mt-5 border-t border-black/10 pt-4 dark:border-white/10">
-                        <div className="flex items-center justify-between text-sm font-semibold"><span>{selected.label}</span><span className="text-[10px] opacity-45">{selected.kind}</span></div>
+                        <div className="flex items-center justify-between gap-2 text-sm font-semibold">
+                            <span className="min-w-0 truncate">{selected.label}</span>
+                            <span className="flex shrink-0 items-center">
+                                <span className="mr-1 text-[10px] opacity-45">{selected.kind}</span>
+                                <StageIconButton label="复制当前对象" onClick={duplicateSelected}><CopyPlus className="size-3.5" /></StageIconButton>
+                                <StageIconButton label="移除当前对象" danger onClick={removeSelected}><Trash2 className="size-3.5" /></StageIconButton>
+                            </span>
+                        </div>
                         <div className="mt-4 grid gap-3">
                             <StageRange label="横向 X" value={selected.x} min={-8} max={8} step={0.1} onChange={(x) => updateSelected({ x })} />
-                            <StageRange label="高度 Y" value={selected.y} min={-2} max={8} step={0.1} onChange={(y) => updateSelected({ y })} />
+                            <StageRange label="高度 Y" value={selected.y} min={-2} max={8} step={0.1} softFloor={0} onSoftFloorBlocked={() => message.info({ key: "director-stage-floor", content: "已贴地；松开后再次向下可进入地下" })} onChange={(y) => updateSelected({ y })} />
                             <StageRange label="纵深 Z" value={selected.z} min={-8} max={8} step={0.1} onChange={(z) => updateSelected({ z })} />
                             <StageRange label="朝向" value={selected.rotationY} min={-180} max={180} step={1} suffix="°" onChange={(rotationY) => updateSelected({ rotationY })} />
                             <StageRange label="缩放" value={selected.scale} min={0.3} max={3} step={0.05} onChange={(scale) => updateSelected({ scale })} />
@@ -421,6 +600,31 @@ export const CanvasDirectorStage = forwardRef<
         </div>
     );
 });
+
+function nextEntityId(kind: "actor" | "prop", slot: DirectorStageSlot) {
+    const used = new Set((kind === "actor" ? slot.subjects : slot.props).map((item) => item.id));
+    for (let index = 1; index < 100; index += 1) {
+        const id = `${kind}-${index}`;
+        if (!used.has(id)) return id;
+    }
+    return `${kind}-${Date.now().toString(36)}`;
+}
+
+function nextEntityPosition(index: number) {
+    const positions = [
+        { x: -1.4, z: 0 },
+        { x: 1.4, z: 0 },
+        { x: 0, z: 1.35 },
+        { x: 0, z: -1.35 },
+        { x: -1.4, z: 1.35 },
+        { x: 1.4, z: 1.35 },
+        { x: -1.4, z: -1.35 },
+        { x: 1.4, z: -1.35 },
+    ];
+    const base = positions[index % positions.length];
+    const ring = Math.floor(index / positions.length);
+    return { x: base.x + ring * 0.45, z: base.z + ring * 0.45 };
+}
 
 function createStageRuntime(canvas: HTMLCanvasElement, dark: boolean): StageRuntime {
     const scene = new THREE.Scene();
@@ -707,7 +911,7 @@ function settleFrames(count: number) {
     });
 }
 
-function StageIconButton({ label, disabled, active, onClick, children }: { label: string; disabled?: boolean; active?: boolean; onClick: () => void; children: ReactNode }) {
+function StageIconButton({ label, disabled, active, danger, onClick, children }: { label: string; disabled?: boolean; active?: boolean; danger?: boolean; onClick: () => void; children: ReactNode }) {
     return (
         <Tooltip title={label}>
             <button
@@ -715,7 +919,7 @@ function StageIconButton({ label, disabled, active, onClick, children }: { label
                 aria-label={label}
                 aria-pressed={active}
                 disabled={disabled}
-                className={`grid size-9 place-items-center rounded-md transition hover:bg-black/8 disabled:opacity-35 dark:hover:bg-white/10 ${active ? "bg-black/10 dark:bg-white/12" : ""}`}
+                className={`grid size-9 place-items-center rounded-md transition hover:bg-black/8 disabled:opacity-35 dark:hover:bg-white/10 ${active ? "bg-black/10 dark:bg-white/12" : ""} ${danger ? "text-red-500 dark:text-red-400" : ""}`}
                 onClick={onClick}
             >
                 {children}
@@ -732,12 +936,52 @@ function EntityButton({ label, detail, selected, onClick }: { id: string; label:
     return <button type="button" className="flex items-center justify-between gap-3 border-l-2 px-3 py-2 text-left text-xs transition" style={{ borderColor: selected ? "#d56d57" : "transparent", background: selected ? "rgba(213,109,87,.09)" : "transparent" }} onClick={onClick}><span className="truncate font-medium">{label}</span><span className="max-w-[96px] truncate text-[10px] opacity-45">{detail}</span></button>;
 }
 
-function StageRange({ label, value, min, max, step, suffix = "", onChange }: { label: string; value: number; min: number; max: number; step: number; suffix?: string; onChange: (value: number) => void }) {
+function StageRange({ label, value, min, max, step, suffix = "", softFloor, onSoftFloorBlocked, onChange }: { label: string; value: number; min: number; max: number; step: number; suffix?: string; softFloor?: number; onSoftFloorBlocked?: () => void; onChange: (value: number) => void }) {
     const precision = Math.max(0, (String(step).split(".")[1] || "").length);
     const formatValue = (next: number) => next.toFixed(precision);
     const [draft, setDraft] = useState(formatValue(value));
+    const floorArmedRef = useRef(softFloor !== undefined && value < softFloor);
+    const floorUnlockedRef = useRef(softFloor !== undefined && value < softFloor);
+    const rangeGestureRef = useRef({ active: false, blocked: false });
 
-    useEffect(() => setDraft(formatValue(value)), [precision, value]);
+    useEffect(() => {
+        setDraft(formatValue(value));
+        if (softFloor === undefined) return;
+        if (value > softFloor) {
+            floorArmedRef.current = false;
+            floorUnlockedRef.current = false;
+        } else if (value < softFloor) {
+            floorUnlockedRef.current = true;
+        }
+    }, [precision, softFloor, value]);
+
+    const applyValue = (next: number) => {
+        if (softFloor === undefined || next >= softFloor) {
+            if (softFloor !== undefined && next > softFloor) {
+                floorArmedRef.current = false;
+                floorUnlockedRef.current = false;
+            }
+            onChange(next);
+            return next;
+        }
+        if (floorUnlockedRef.current || (floorArmedRef.current && !rangeGestureRef.current.blocked)) {
+            floorArmedRef.current = false;
+            floorUnlockedRef.current = true;
+            onChange(next);
+            return next;
+        }
+        const firstBlock = !rangeGestureRef.current.blocked;
+        if (rangeGestureRef.current.active) rangeGestureRef.current.blocked = true;
+        else floorArmedRef.current = true;
+        onChange(softFloor);
+        if (firstBlock) onSoftFloorBlocked?.();
+        return softFloor;
+    };
+
+    const endRangeGesture = () => {
+        if (rangeGestureRef.current.blocked) floorArmedRef.current = true;
+        rangeGestureRef.current = { active: false, blocked: false };
+    };
 
     const commit = () => {
         const parsed = Number(draft);
@@ -747,8 +991,8 @@ function StageRange({ label, value, min, max, step, suffix = "", onChange }: { l
         }
         const clamped = Math.min(max, Math.max(min, parsed));
         const snapped = Number((Math.round(clamped / step) * step).toFixed(precision));
-        onChange(snapped);
-        setDraft(formatValue(snapped));
+        const applied = applyValue(snapped);
+        setDraft(formatValue(applied));
     };
 
     return (
@@ -778,7 +1022,20 @@ function StageRange({ label, value, min, max, step, suffix = "", onChange }: { l
                     {suffix ? <span className="ml-0.5">{suffix}</span> : null}
                 </span>
             </span>
-            <input className="h-1.5 w-full accent-[#d56d57]" type="range" value={value} min={min} max={max} step={step} onChange={(event) => onChange(Number(event.target.value))} />
+            <input
+                className="h-1.5 w-full accent-[#d56d57]"
+                type="range"
+                value={value}
+                min={min}
+                max={max}
+                step={step}
+                onPointerDown={() => {
+                    rangeGestureRef.current = { active: true, blocked: false };
+                }}
+                onPointerUp={endRangeGesture}
+                onPointerCancel={endRangeGesture}
+                onChange={(event) => applyValue(Number(event.target.value))}
+            />
         </label>
     );
 }

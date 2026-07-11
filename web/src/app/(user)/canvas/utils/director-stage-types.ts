@@ -134,10 +134,16 @@ export function createDirectorStageStarterPacket(): DirectorStagePacket {
                 unit_id: "U01",
                 duration_max: 8,
                 dramatic_function: "建立人物与空间关系",
-                beat: "主角进入场景并停在画面左侧",
+                beat: "主角与对手隔桌形成对峙关系",
                 camera: { shot_size: "全景", angle: "平视", movement: "固定", x: 0, y: 1.6, z: 5.8, fov: 38 },
-                subjects: [{ id: "lead", label: "主角", x: -0.8, y: 0, z: 0, rotation_y: 10, scale: 1, action: "站定" }],
-                props: [{ id: "table", label: "桌子", x: 0.9, y: 0, z: -0.25, rotation_y: -8, scale: 1 }],
+                subjects: [
+                    { id: "lead", label: "主角", x: -1.25, y: 0, z: 0.25, rotation_y: 18, scale: 1, action: "面向对手" },
+                    { id: "rival", label: "对手", x: 1.25, y: 0, z: -0.2, rotation_y: -18, scale: 1, action: "保持对峙" },
+                ],
+                props: [
+                    { id: "table", label: "桌子", x: 0, y: 0, z: -0.55, rotation_y: 0, scale: 1 },
+                    { id: "chair", label: "椅子", x: 0.95, y: 0, z: -1.55, rotation_y: 8, scale: 1 },
+                ],
             },
         ],
     });

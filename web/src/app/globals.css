@@ -140,6 +140,11 @@
 }
 
 @layer utilities {
+    .dark :is(button, a).dark\:bg-white,
+    .dark :is(button, a).dark\:\!bg-white {
+        color: #161616 !important;
+    }
+
     .has-app-cursor,
     .has-app-cursor * {
         cursor: none !important;

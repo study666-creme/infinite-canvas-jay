@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode, type WheelEvent as ReactWheelEvent } from "react";
 import { App, Modal, Segmented, Tooltip } from "antd";
 import { Download, Ellipsis, FolderPlus, Image as ImageIcon, Info, Maximize2, MessageSquare, Minus, Music2, Pencil, Plus, RefreshCw, ScanLine, Settings2, Trash2, Upload, Video } from "lucide-react";
 
@@ -86,6 +86,9 @@ export function CanvasNodeHoverToolbar({
     const [draftImageToolIds, setDraftImageToolIds] = useState<ImageQuickToolId[]>(defaultImageQuickToolIds);
     const [draftShowImageToolLabels, setDraftShowImageToolLabels] = useState(false);
     const [imageToolSettingsOpen, setImageToolSettingsOpen] = useState(false);
+    const [toolbarWidth, setToolbarWidth] = useState(0);
+    const toolbarShellRef = useRef<HTMLDivElement>(null);
+    const toolbarScrollRef = useRef<HTMLDivElement>(null);
     const { message } = App.useApp();
     const copyText = useCopyText();
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
@@ -121,9 +124,27 @@ export function CanvasNodeHoverToolbar({
         return () => window.removeEventListener("pointerdown", close);
     }, [node, onClose]);
 
+    useEffect(() => {
+        const shell = toolbarShellRef.current;
+        if (!node || !shell) return;
+        const syncWidth = () => setToolbarWidth(shell.getBoundingClientRect().width);
+        const frame = window.requestAnimationFrame(syncWidth);
+        const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(syncWidth);
+        observer?.observe(shell);
+        window.addEventListener("resize", syncWidth);
+        return () => {
+            window.cancelAnimationFrame(frame);
+            observer?.disconnect();
+            window.removeEventListener("resize", syncWidth);
+        };
+    }, [node?.id, quickImageToolIds, showImageToolLabels]);
+
     if (!node) return null;
 
     const left = viewport.x + (node.position.x + node.width / 2) * viewport.k;
+    const viewportWidth = typeof window === "undefined" ? 1920 : window.innerWidth;
+    const halfToolbarWidth = Math.min(toolbarWidth / 2, Math.max(0, (viewportWidth - 24) / 2));
+    const clampedLeft = Math.min(viewportWidth - 12 - halfToolbarWidth, Math.max(12 + halfToolbarWidth, left));
     const toolbarBridgeHeight = 36;
     const toolbarVisualGap = 0;
     const top = viewport.y + node.position.y * viewport.k + toolbarBridgeHeight - toolbarVisualGap;
@@ -201,13 +222,23 @@ export function CanvasNodeHoverToolbar({
         closeImageToolSettings();
     };
 
+    const scrollToolbar = (event: ReactWheelEvent<HTMLDivElement>) => {
+        const toolbar = toolbarScrollRef.current;
+        if (!toolbar || toolbar.scrollWidth <= toolbar.clientWidth + 1) return;
+        const delta = Math.abs(event.deltaX) > Math.abs(event.deltaY) ? event.deltaX : event.deltaY;
+        if (!delta) return;
+        toolbar.scrollLeft += delta;
+        event.preventDefault();
+        event.stopPropagation();
+    };
+
     return (
         <>
             <div
                 data-canvas-node-toolbar
-                className="absolute z-[70] flex max-w-[96vw] -translate-x-1/2 -translate-y-full flex-col items-center"
+                className="absolute z-[70] flex -translate-x-1/2 -translate-y-full flex-col items-center"
                 style={{
-                    left,
+                    left: clampedLeft,
                     top,
                     color: theme.node.text,
                 }}
@@ -217,17 +248,24 @@ export function CanvasNodeHoverToolbar({
                 onPointerLeave={onPointerLeave}
             >
                 <div
-                    className="flex flex-nowrap items-center gap-0.5 rounded-full border px-1 py-0.5 backdrop-blur-md"
+                    ref={toolbarShellRef}
+                    className="flex max-w-[calc(100vw-24px)] min-w-0 items-center overflow-hidden rounded-full border backdrop-blur-md"
                     style={{
                         background: `${theme.toolbar.panel}f2`,
                         borderColor: `${theme.toolbar.border}88`,
                         boxShadow: "0 8px 24px rgba(0,0,0,.24)",
                     }}
                 >
-                    {toolbarTools.map((tool) => (
-                        <ToolbarAction key={tool.id} {...tool} showLabel={showImageToolLabels} theme={theme} />
-                    ))}
-                    {hasImage ? <ToolbarAction id="more" title="配置快捷工具" label="更多" icon={<Ellipsis className="size-4" />} active={imageToolSettingsOpen} suppressTooltip={imageToolSettingsOpen} onClick={openImageToolSettings} showLabel={showImageToolLabels} theme={theme} /> : null}
+                    <div ref={toolbarScrollRef} data-canvas-toolbar-scroll className="thin-scrollbar flex min-w-0 flex-1 flex-nowrap items-center gap-0.5 overflow-x-auto overscroll-x-contain px-1 py-0.5" onWheel={scrollToolbar}>
+                        {toolbarTools.map((tool) => (
+                            <ToolbarAction key={tool.id} {...tool} showLabel={showImageToolLabels} theme={theme} />
+                        ))}
+                    </div>
+                    {hasImage ? (
+                        <div className="shrink-0 border-l px-0.5 py-0.5" style={{ borderColor: `${theme.toolbar.border}88`, background: `${theme.toolbar.panel}f8` }}>
+                            <ToolbarAction id="more" title="配置快捷工具" label="更多" icon={<Ellipsis className="size-4" />} active={imageToolSettingsOpen} suppressTooltip={imageToolSettingsOpen} onClick={openImageToolSettings} showLabel theme={theme} />
+                        </div>
+                    ) : null}
                 </div>
                 <div aria-hidden className="h-9 w-full" />
             </div>

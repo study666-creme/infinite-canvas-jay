@@ -442,13 +442,14 @@ export function CanvasAssistantPanel({ nodes, selectedNodeIds, snapshot, session
 
     const continueOnlineToolLoop = async (sessionId: string, assistantId: string, messages: ResponseInputMessage[], result: { content: string; toolCalls: ResponseToolCall[] }, step: number, requestCreativeMode: CanvasAgentCreativeMode) => {
         const toolResults = await executeOnlineToolCalls(result.toolCalls);
+        const toolsSucceeded = toolResults.every((item) => item.result.ok);
         addOnlineLog("工具执行结果", toolResults);
         appendMessage(sessionId, {
             id: nanoid(),
             role: "tool",
-            title: "工具自动执行完成",
+            title: toolsSucceeded ? "工具自动执行完成" : "工具自动执行失败",
             text: toolResults.map((item) => toolResultText(item.result)).join("\n"),
-            detail: { status: "completed", step, toolCalls: result.toolCalls, results: toolResults },
+            detail: { status: toolsSucceeded ? "completed" : "failed", step, toolCalls: result.toolCalls, results: toolResults },
             creativeMode: requestCreativeMode,
         });
         await continueOnlineToolLoopAfterResults(sessionId, assistantId, messages, result.toolCalls, toolResults, step, requestCreativeMode);
@@ -564,9 +565,10 @@ export function CanvasAssistantPanel({ nodes, selectedNodeIds, snapshot, session
             setIsRunning(true);
             markCreativeAction(pendingContext?.creativeActionId, "approved");
             const results = await executeOnlineToolCalls(toolCalls);
-            if (results.every((item) => item.result.ok)) markCreativeAction(pendingContext?.creativeActionId, "executed");
+            const toolsSucceeded = results.every((item) => item.result.ok);
+            if (toolsSucceeded) markCreativeAction(pendingContext?.creativeActionId, "executed");
             addOnlineLog("工具执行结果", results);
-            upsertMessage(session.id, { id: messageId, role: "tool", title: "工具执行完成", text: results.map((item) => toolResultText(item.result)).join("\n"), detail: { ...detail, results, status: "completed" }, creativeMode: requestCreativeMode });
+            upsertMessage(session.id, { id: messageId, role: "tool", title: toolsSucceeded ? "工具执行完成" : "工具执行失败", text: results.map((item) => toolResultText(item.result)).join("\n"), detail: { ...detail, results, status: toolsSucceeded ? "completed" : "failed" }, creativeMode: requestCreativeMode });
             pendingToolContextRef.current.delete(messageId);
             await continueOnlineToolLoopAfterResults(session.id, assistantId, previousMessages, toolCalls, results, pendingContext?.step || Number(detail.step) || 1, requestCreativeMode);
         } catch (error) {
@@ -1120,13 +1122,23 @@ function describeCanvasSnapshot(snapshot: CanvasAgentSnapshot) {
 }
 
 function parseToolArguments(value: string) {
-    try {
-        const parsed = JSON.parse(value || "{}");
-        if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("工具参数必须是 JSON 对象");
-        return parsed as Record<string, unknown>;
-    } catch {
-        throw new Error("工具参数不是合法 JSON 对象");
+    const raw = String(value || "{}").trim() || "{}";
+    const unfenced = raw.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "").trim();
+    const candidates = new Set([raw, unfenced]);
+    const objectStart = unfenced.indexOf("{");
+    const objectEnd = unfenced.lastIndexOf("}");
+    if (objectStart >= 0 && objectEnd > objectStart) candidates.add(unfenced.slice(objectStart, objectEnd + 1));
+
+    for (const candidate of candidates) {
+        try {
+            let parsed: unknown = JSON.parse(candidate);
+            if (typeof parsed === "string") parsed = JSON.parse(parsed);
+            if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) return parsed as Record<string, unknown>;
+        } catch {
+            // Try the next safe representation before reporting the model error.
+        }
     }
+    throw new Error("工具参数不是合法 JSON 对象");
 }
 
 function onlineToolToOps(name: string, input: Record<string, unknown>, snapshot: CanvasAgentSnapshot, config: AiConfig): CanvasAgentOp[] {
@@ -1320,7 +1332,7 @@ function toolCallLabel(name: string) {
 }
 
 function toolResultText(result: OnlineToolResult) {
-    return result.message;
+    return result.ok ? result.message : `失败：${result.message}`;
 }
 
 function requireStringArray(value: unknown, field: string): string[] {

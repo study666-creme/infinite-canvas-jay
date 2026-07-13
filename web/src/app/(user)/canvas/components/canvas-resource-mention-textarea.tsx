@@ -170,6 +170,7 @@ export const CanvasResourceMentionTextarea = forwardRef<CanvasResourceMentionTex
         }
 
         if (event.key === "Backspace" || event.key === "Delete") {
+            event.stopPropagation();
             const removed = removeAdjacentMentionChip(editorRef.current, event.key === "Backspace");
             if (removed) {
                 event.preventDefault();

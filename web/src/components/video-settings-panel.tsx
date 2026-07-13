@@ -9,6 +9,8 @@ import { canvasVideoDurationOptions } from "@/lib/video-duration-options";
 import { boolConfig, isSeedanceFastModel, isSeedanceVideoConfig, normalizeSeedanceDuration, normalizeSeedanceRatio, normalizeSeedanceResolution, seedancePixelLabel, seedanceRatioOptions, seedanceResolutionOptions } from "@/lib/seedance-video";
 import { type CanvasTheme } from "@/lib/canvas-theme";
 import { modelOptionName, type AiConfig } from "@/stores/use-config-store";
+import { normalizePromptHubVideoRatio, parsePromptHubModelId, promptHubVideoAspectRatios, promptHubVideoResolutions } from "@/services/prompt-hub-models";
+import { usePromptHubStore } from "@/stores/use-prompt-hub-store";
 
 const resolutionOptions = [
     { value: "720", label: "720p" },
@@ -37,6 +39,14 @@ type VideoSettingsPanelProps = {
 };
 
 export function VideoSettingsPanel({ config, onConfigChange, theme, showTitle = true, className = "w-[320px] space-y-4 rounded-2xl px-1 py-0.5", variant = "default", sections = "all" }: VideoSettingsPanelProps) {
+    const promptHubModelId = parsePromptHubModelId(config.model || config.videoModel);
+    const promptHubCatalog = usePromptHubStore((state) => state.models);
+    const promptHubModel = promptHubModelId ? promptHubCatalog.find((model) => model.id === promptHubModelId) || null : null;
+
+    if (promptHubModelId) {
+        return <PromptHubVideoSettingsPanel config={config} modelId={promptHubModelId} model={promptHubModel} onConfigChange={onConfigChange} theme={theme} showTitle={showTitle} className={className} sections={sections} />;
+    }
+
     if (isSeedanceVideoConfig(config)) {
         return <SeedanceVideoSettingsPanel config={config} onConfigChange={onConfigChange} theme={theme} showTitle={showTitle} className={className} variant={variant} sections={sections} />;
     }
@@ -101,6 +111,64 @@ export function VideoSettingsPanel({ config, onConfigChange, theme, showTitle = 
                         <NumberInput value={seconds} min={1} max={20} theme={theme} onChange={(value) => onConfigChange("videoSeconds", value)} />
                     </div>
                 </SettingGroup>
+            </div>
+        </ImageSettingsTheme>
+    );
+}
+
+function PromptHubVideoSettingsPanel({ config, modelId, model, onConfigChange, theme, showTitle, className, sections }: VideoSettingsPanelProps & { modelId: string; model: ReturnType<typeof usePromptHubStore.getState>["models"][number] | null }) {
+    const ratios = promptHubVideoAspectRatios(model, modelId);
+    const resolutions = promptHubVideoResolutions(model, modelId);
+    const selectedRatio = normalizePromptHubVideoRatio(config.size, ratios);
+    const selectedResolution = `${normalizeVideoResolutionValue(config.vquality)}p`;
+    const durationParameter = model?.parameters?.find((parameter) => parameter.name === "duration");
+    const minDuration = Math.max(1, Math.floor(Number(durationParameter?.min) || 5));
+    const maxDuration = Math.max(minDuration, Math.floor(Number(durationParameter?.max) || 15));
+    const duration = String(Math.max(minDuration, Math.min(maxDuration, Math.floor(Number(config.videoSeconds) || minDuration))));
+    const durationOptions = [5, 6, 8, 10, 12, 15].filter((value) => value >= minDuration && value <= maxDuration);
+    const showRatioResolution = sections === "all" || sections === "ratio-resolution";
+    const showDuration = sections === "all" || sections === "duration";
+
+    return (
+        <ImageSettingsTheme theme={theme}>
+            <div className={className} style={{ color: theme.node.text }} onMouseDown={(event) => event.stopPropagation()}>
+                {showTitle ? <div className="text-lg font-semibold">视频设置</div> : null}
+                {showRatioResolution ? (
+                    <div className="space-y-3">
+                        <JimengSectionTitle color={theme.node.muted}>选择比例</JimengSectionTitle>
+                        <JimengRatioGrid
+                            options={ratios.map((value) => ({ value, ...ratioPreviewSize(value) }))}
+                            value={selectedRatio}
+                            theme={theme}
+                            columns={Math.min(7, Math.max(3, ratios.length))}
+                            onChange={(value) => onConfigChange("size", value)}
+                        />
+                    </div>
+                ) : null}
+                {showRatioResolution ? (
+                    <div className="space-y-3">
+                        <JimengSectionTitle color={theme.node.muted}>选择分辨率</JimengSectionTitle>
+                        <JimengPillRow
+                            options={resolutions.map((value) => ({ value, label: value.toUpperCase() }))}
+                            value={resolutions.includes(selectedResolution) ? selectedResolution : resolutions[0]}
+                            theme={theme}
+                            columns={Math.min(3, Math.max(1, resolutions.length))}
+                            onChange={(value) => onConfigChange("vquality", value)}
+                        />
+                    </div>
+                ) : null}
+                {showDuration ? (
+                    <SettingGroup title="秒数" color={theme.node.muted}>
+                        <div className="grid grid-cols-3 gap-2.5">
+                            {durationOptions.map((value) => (
+                                <OptionPill key={value} selected={duration === String(value)} theme={theme} onClick={() => onConfigChange("videoSeconds", String(value))}>
+                                    {value}s
+                                </OptionPill>
+                            ))}
+                            <NumberInput value={duration} min={minDuration} max={maxDuration} theme={theme} onChange={(value) => onConfigChange("videoSeconds", value)} />
+                        </div>
+                    </SettingGroup>
+                ) : null}
             </div>
         </ImageSettingsTheme>
     );
@@ -208,16 +276,33 @@ export function videoJimengResolutionLabel(value: string, config: AiConfig) {
 }
 
 export function videoJimengRatioLabel(value: string) {
+    const exact = videoRatioLabel(value);
+    if (exact) return exact;
     const ratio = normalizeSeedanceRatio(value);
     return ratioPreviewSize(ratio).label;
 }
 
 export function videoSizeLabel(value: string) {
+    const exact = videoRatioLabel(value);
+    if (exact) return exact;
     const ratio = normalizeSeedanceRatio(value);
     if (value === "adaptive" || value === "auto") return "自适应";
     if (ratio === value) return seedanceRatioOptions.find((item) => item.value === ratio)?.label || ratio;
     const size = normalizeVideoSizeValue(value);
     return sizeOptions.find((item) => item.value === size)?.label || size;
+}
+
+function videoRatioLabel(value: string) {
+    return ({
+        "16:9": "横屏",
+        "9:16": "竖屏",
+        "1:1": "方形",
+        "4:3": "标准横屏",
+        "3:4": "标准竖屏",
+        "3:2": "摄影横屏",
+        "2:3": "摄影竖屏",
+        "21:9": "宽银幕",
+    } as Record<string, string>)[value] || "";
 }
 
 export function videoSecondsLabel(value: string) {

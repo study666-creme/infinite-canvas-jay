@@ -8,7 +8,7 @@ import { nanoid } from "nanoid";
 import { saveAs } from "file-saver";
 
 import { AssetPickerModal, type InsertAssetPayload } from "@/app/(user)/canvas/components/asset-picker-modal";
-import { ModelPicker } from "@/components/model-picker";
+import { PromptHubAwareModelPicker } from "@/components/prompt-hub-model-picker";
 import { PromptSelectDialog } from "@/components/prompts/prompt-select-dialog";
 import { VideoSettingsPanel, normalizeVideoResolutionValue, normalizeVideoSizeValue, videoSizeLabel } from "@/components/video-settings-panel";
 import { canvasThemes } from "@/lib/canvas-theme";
@@ -18,6 +18,9 @@ import { deleteStoredMedia, resolveMediaUrl, uploadMediaFile } from "@/services/
 import { resolveImageUrl, uploadImage } from "@/services/image-storage";
 import { createVideoGenerationTask, pollVideoGenerationTask, storeGeneratedVideo, type VideoGenerationTask } from "@/services/api/video";
 import { useAssetStore } from "@/stores/use-asset-store";
+import { isPromptHubModelValue, normalizePromptHubVideoRatio, parsePromptHubModelId, promptHubVideoAspectRatios } from "@/services/prompt-hub-models";
+import { requestPromptHubCanvasVideo } from "@/services/prompt-hub-video";
+import { usePromptHubStore } from "@/stores/use-prompt-hub-store";
 import { modelOptionLabel, useConfigStore, useEffectiveConfig, type AiConfig } from "@/stores/use-config-store";
 import { useThemeStore } from "@/stores/use-theme-store";
 import type { ReferenceImage } from "@/types/image";
@@ -78,6 +81,7 @@ export default function VideoPage() {
     const updateConfig = useConfigStore((state) => state.updateConfig);
     const isAiConfigReady = useConfigStore((state) => state.isAiConfigReady);
     const openConfigDialog = useConfigStore((state) => state.openConfigDialog);
+    const promptHubSession = usePromptHubStore((state) => state.session);
     const addAsset = useAssetStore((state) => state.addAsset);
     const [prompt, setPrompt] = useState("");
     const [references, setReferences] = useState<ReferenceImage[]>([]);
@@ -176,6 +180,41 @@ export default function VideoPage() {
         const batchStartedAt = performance.now();
         setStartedAt(batchStartedAt);
         try {
+            if (isPromptHubModelValue(model)) {
+                const modelId = parsePromptHubModelId(model);
+                if (!promptHubSession?.access_token || !modelId) throw new Error("卡藏登录已失效，请重新登录");
+                const promptHub = usePromptHubStore.getState();
+                const result = await requestPromptHubCanvasVideo({
+                    session: promptHubSession,
+                    apiBase: promptHub.apiBase,
+                    model: modelId,
+                    prompt: snapshot.text,
+                    duration: promptHubVideoDuration(snapshot.config),
+                    ratio: promptHubVideoRatio(snapshot.config),
+                    resolution: promptHubVideoResolution(snapshot.config),
+                    referenceImages: snapshot.references,
+                    referenceVideos: snapshot.videoReferences,
+                    referenceAudios: snapshot.audioReferences,
+                });
+                const stored = await storeGeneratedVideo({ blob: result.blob, taskId: result.job.jobId, provider: "openai", model }, snapshot.config);
+                const nextVideo: GeneratedVideo = {
+                    id: nanoid(),
+                    url: stored.url,
+                    storageKey: stored.storageKey,
+                    durationMs: performance.now() - batchStartedAt,
+                    width: stored.width || 1280,
+                    height: stored.height || 720,
+                    bytes: stored.bytes,
+                    mimeType: stored.mimeType,
+                };
+                setResults([{ id: nextVideo.id, status: "success", video: nextVideo }]);
+                await saveLog(buildLog({ prompt: snapshot.text, model, config: snapshot.config, references: snapshot.references, videoReferences: snapshot.videoReferences, audioReferences: snapshot.audioReferences, durationMs: nextVideo.durationMs, status: "成功", video: nextVideo }));
+                message.success("视频已生成");
+                void promptHub.refreshGenerationAccount();
+                setRunning(false);
+                setStartedAt(0);
+                return;
+            }
             const task = await createVideoGenerationTask(snapshot.config, snapshot.text, snapshot.references, snapshot.videoReferences, snapshot.audioReferences);
             const log = buildLog({ prompt: snapshot.text, model, config: snapshot.config, references: snapshot.references, videoReferences: snapshot.videoReferences, audioReferences: snapshot.audioReferences, durationMs: 0, status: "生成中", task });
             await saveLog(log);
@@ -195,7 +234,11 @@ export default function VideoPage() {
             message.error("请输入视频提示词");
             return null;
         }
-        if (!isAiConfigReady(effectiveConfig, model)) {
+        if (isPromptHubModelValue(model) && !promptHubSession?.access_token) {
+            message.warning("请先登录卡藏账号");
+            return null;
+        }
+        if (!isPromptHubModelValue(model) && !isAiConfigReady(effectiveConfig, model)) {
             message.warning("请先完成配置");
             openConfigDialog(true);
             return null;
@@ -533,7 +576,7 @@ function GenerationSettings({ config, model, updateConfig, openConfigDialog }: {
         <>
             <label className="col-span-2 block min-w-0 sm:col-span-1">
                 <span className="mb-1.5 block text-sm font-semibold sm:mb-2 sm:text-base">模型</span>
-                <ModelPicker config={config} value={model} onChange={(value) => updateConfig("videoModel", value)} capability="video" fullWidth onMissingConfig={() => openConfigDialog(false)} />
+                <PromptHubAwareModelPicker config={config} value={model} onChange={(value) => updateConfig("videoModel", value)} capability="video" fullWidth onMissingConfig={() => openConfigDialog(false)} />
             </label>
             <div className="col-span-2">
                 <VideoSettingsPanel config={config} onConfigChange={(key, value) => updateConfig(key, value)} theme={theme} variant="jimeng" showTitle={false} className="space-y-4" />
@@ -840,6 +883,25 @@ function buildVideoConfig(config: AiConfig, model: string): AiConfig {
         videoGenerateAudio: String(boolConfig(config.videoGenerateAudio, true)),
         videoWatermark: String(boolConfig(config.videoWatermark, false)),
     };
+}
+
+function promptHubVideoDuration(config: AiConfig) {
+    const seconds = Math.round(Number(config.videoSeconds) || 0);
+    return seconds > 0 ? Math.min(60, seconds) : 5;
+}
+
+function promptHubVideoRatio(config: AiConfig) {
+    const modelId = parsePromptHubModelId(config.videoModel || config.model);
+    const model = modelId ? usePromptHubStore.getState().models.find((candidate) => candidate.id === modelId) : null;
+    return normalizePromptHubVideoRatio(config.size, promptHubVideoAspectRatios(model, modelId));
+}
+
+function promptHubVideoResolution(config: AiConfig) {
+    const value = String(config.vquality || "").trim().toLowerCase();
+    if (value.includes("4k")) return "4k";
+    if (value.includes("1080")) return "1080p";
+    if (value.includes("480")) return "480p";
+    return "720p";
 }
 
 function normalizeVideoSeconds(value: string) {

@@ -935,8 +935,11 @@
         border: 1px solid rgba(255, 255, 255, 0.12);
         border-radius: 30px;
         display: flex;
+        height: clamp(440px, 54vh, 560px);
         min-height: clamp(440px, 54vh, 560px);
+        max-height: calc(100vh - 80px);
         flex-direction: column;
+        overflow: hidden;
         padding: 30px 38px 24px;
         backdrop-filter: blur(32px) saturate(1.18);
         -webkit-backdrop-filter: blur(32px) saturate(1.18);
@@ -979,15 +982,21 @@
         display: flex;
         min-height: 0;
         flex: 1 1 auto;
+        overflow: hidden;
     }
 
     .canvas-composer-input {
-        min-height: 240px;
+        height: 100%;
+        min-height: 0;
+        max-height: 100%;
         flex: 1 1 auto;
         font-size: 32px;
         line-height: 1.36;
         overflow-y: auto;
+        overflow-wrap: anywhere;
+        overscroll-behavior: contain;
         padding-right: 44px !important;
+        scrollbar-gutter: stable;
     }
 
     .canvas-composer-input::placeholder {
@@ -1126,13 +1135,15 @@
         }
 
         .canvas-composer-shell {
-            min-height: min(520px, calc(100vh - 96px));
+            height: min(520px, calc(100vh - 96px));
+            min-height: min(400px, calc(100vh - 96px));
+            max-height: calc(100vh - 96px);
             border-radius: 24px;
             padding: 22px 20px 16px;
         }
 
         .canvas-composer-input {
-            min-height: 220px;
+            min-height: 0;
             font-size: 24px;
         }
     }

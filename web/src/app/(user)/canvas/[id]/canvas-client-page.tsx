@@ -22,7 +22,7 @@ import {
 import { requestPromptHubCanvasImages } from "@/services/prompt-hub-generation";
 import { requestPromptHubCanvasVideo } from "@/services/prompt-hub-video";
 import { requestPromptHubText } from "@/services/prompt-hub-text";
-import { parsePromptHubModelId, promptHubImageCountRange, promptHubImageMaxReferences } from "@/services/prompt-hub-models";
+import { normalizePromptHubVideoRatio, parsePromptHubModelId, promptHubImageCountRange, promptHubImageMaxReferences, promptHubVideoAspectRatios } from "@/services/prompt-hub-models";
 import { usePromptHubStore } from "@/stores/use-prompt-hub-store";
 import { resolveMediaUrl, uploadMediaFile, type UploadedFile } from "@/services/file-storage";
 import { nanoid } from "nanoid";
@@ -38,7 +38,7 @@ import { NODE_DEFAULT_SIZE, getNodeSpec } from "../constants";
 import { ActiveConnectionPath, ConnectionPath } from "../components/canvas-connections";
 import { CanvasConfigComposer } from "../components/canvas-config-composer";
 import { CanvasConfigNodePanel } from "../components/canvas-config-node-panel";
-import { CANVAS_AGENT_PANEL_MOTION_MS, CanvasAssistantPanel } from "../components/canvas-assistant-panel";
+import { CanvasAssistantPanel } from "../components/canvas-assistant-panel";
 import { CanvasNodeContextMenu } from "../components/canvas-context-menu";
 import { CanvasReferenceHoverPreviewHost } from "../components/canvas-reference-hover-preview";
 import { CanvasNodeAngleDialog, type CanvasImageAngleParams } from "../components/canvas-node-angle-dialog";
@@ -138,6 +138,9 @@ type CanvasGenerationRequest = {
 
 const VIDEO_NODE_MAX_WIDTH = 640;
 const VIDEO_NODE_MAX_HEIGHT = 640;
+const WHEEL_RESIZE_MIN_WIDTH = 160;
+const WHEEL_RESIZE_MIN_HEIGHT = 90;
+const WHEEL_RESIZE_MAX_EDGE = 4096;
 const CONNECTION_HANDLE_HIT_RADIUS = 52;
 const CONNECTION_HANDLE_SCREEN_OFFSET = 48;
 const CONNECTION_NODE_HIT_PADDING = 32;
@@ -398,7 +401,6 @@ function InfiniteCanvasPage() {
     const connectingParamsRef = useRef(connectingParams);
     const connectionTargetNodeIdRef = useRef(connectionTargetNodeId);
     const selectionBoxRef = useRef(selectionBox);
-    const agentCloseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const pendingConnectionCreateRef = useRef(pendingConnectionCreate);
     const generationRequestsRef = useRef(new Map<string, CanvasGenerationRequest>());
     const projectMetaRef = useRef({ chatSessions, activeChatId, backgroundMode, showImageInfo });
@@ -582,13 +584,6 @@ function InfiniteCanvasPage() {
             }
         };
     }, [activeChatId, backgroundMode, chatSessions, connections, createHistoryEntry, creativeProjectState, nodes, projectLoaded, showImageInfo]);
-
-    useEffect(
-        () => () => {
-            if (agentCloseTimerRef.current) clearTimeout(agentCloseTimerRef.current);
-        },
-        [],
-    );
 
     useEffect(() => {
         if (!projectLoaded || applyingHistoryRef.current || historyPausedRef.current) return;
@@ -1514,14 +1509,8 @@ function InfiniteCanvasPage() {
 
     const closeAssistantPanel = useCallback(() => {
         if (!assistantMounted || assistantClosing) return;
-        if (agentCloseTimerRef.current) clearTimeout(agentCloseTimerRef.current);
         setAssistantCollapsed(true);
         setAssistantClosing(true);
-        agentCloseTimerRef.current = setTimeout(() => {
-            agentCloseTimerRef.current = null;
-            setAssistantMounted(false);
-            setAssistantClosing(false);
-        }, CANVAS_AGENT_PANEL_MOTION_MS);
     }, [assistantClosing, assistantMounted]);
 
     const closeCanvasSidebars = useCallback(() => {
@@ -1560,7 +1549,7 @@ function InfiniteCanvasPage() {
         [cancelPendingConnectionCreate, closeCanvasSidebars, screenToCanvas],
     );
 
-    const startNodeDrag = useCallback((event: ReactMouseEvent, dragIds: Set<string>, selectedIds: Set<string>) => {
+    const startNodeDrag = useCallback((event: ReactMouseEvent | ReactPointerEvent, dragIds: Set<string>, selectedIds: Set<string>) => {
         const currentNodes = nodesRef.current;
         const initialSelectedNodes = currentNodes.filter((node) => dragIds.has(node.id)).map((node) => ({ id: node.id, x: node.position.x, y: node.position.y }));
         setSelectedNodeIds(selectedIds);
@@ -1592,7 +1581,7 @@ function InfiniteCanvasPage() {
         [keepGroupToolbar, startNodeDrag],
     );
 
-    const handleNodeMouseDown = useCallback((event: ReactMouseEvent, nodeId: string) => {
+    const handleNodeMouseDown = useCallback((event: ReactMouseEvent | ReactPointerEvent, nodeId: string) => {
         if (nodeResizingRef.current) return;
         if ((event.target as HTMLElement).closest("[data-resize-handle]")) return;
         event.stopPropagation();
@@ -1803,12 +1792,14 @@ function InfiniteCanvasPage() {
     const handleGlobalPointerMove = useCallback(
         (event: PointerEvent) => {
             lastPointerPointRef.current = { clientX: event.clientX, clientY: event.clientY };
-            if (!dragRef.current.isDraggingNode) {
-                trackConnectionPointer(event.clientX, event.clientY);
+            if (dragRef.current.isDraggingNode) {
+                applyNodeDragMove(event.clientX, event.clientY);
+                return;
             }
+            trackConnectionPointer(event.clientX, event.clientY);
             handleCanvasPointerMove(event as unknown as ReactPointerEvent<HTMLDivElement>);
         },
-        [handleCanvasPointerMove, trackConnectionPointer],
+        [applyNodeDragMove, handleCanvasPointerMove, trackConnectionPointer],
     );
 
     const handleGlobalMouseUp = useCallback(
@@ -1831,11 +1822,13 @@ function InfiniteCanvasPage() {
             finishConnectionDrag(event.clientX, event.clientY);
         };
         const cancelNodeDrag = () => finishNodeDrag();
+        const switchNodeDragToPinch = () => finishNodeDrag();
         window.addEventListener("mousemove", handleGlobalMouseMove);
         window.addEventListener("mouseup", handleGlobalMouseUp);
         window.addEventListener("pointerup", handlePointerUp);
         window.addEventListener("pointercancel", cancelNodeDrag);
         window.addEventListener("blur", cancelNodeDrag);
+        window.addEventListener("canvas-touch-pinch-start", switchNodeDragToPinch);
         window.addEventListener("pointermove", handleGlobalPointerMove);
         return () => {
             window.removeEventListener("mousemove", handleGlobalMouseMove);
@@ -1843,6 +1836,7 @@ function InfiniteCanvasPage() {
             window.removeEventListener("pointerup", handlePointerUp);
             window.removeEventListener("pointercancel", cancelNodeDrag);
             window.removeEventListener("blur", cancelNodeDrag);
+            window.removeEventListener("canvas-touch-pinch-start", switchNodeDragToPinch);
             window.removeEventListener("pointermove", handleGlobalPointerMove);
         };
     }, [finishConnectionDrag, finishNodeDrag, handleGlobalMouseMove, handleGlobalMouseUp, handleGlobalPointerMove]);
@@ -2056,6 +2050,32 @@ function InfiniteCanvasPage() {
             if (nodeGeometryMatches(node, width, height, nextPosition)) return prev;
             return prev.map((item) => (item.id === nodeId ? { ...item, width, height, position: nextPosition } : item));
         });
+    }, []);
+
+    const handleSelectedNodeWheelResize = useCallback((nodeId: string, deltaY: number) => {
+        if (!selectedNodeIdsRef.current.has(nodeId)) return false;
+        const requestedFactor = Math.pow(1.1, -deltaY / 100);
+        setNodes((prev) =>
+            prev.map((node) => {
+                if (node.id !== nodeId) return node;
+                const minFactor = Math.max(WHEEL_RESIZE_MIN_WIDTH / node.width, WHEEL_RESIZE_MIN_HEIGHT / node.height);
+                const maxFactor = Math.min(WHEEL_RESIZE_MAX_EDGE / node.width, WHEEL_RESIZE_MAX_EDGE / node.height);
+                const factor = Math.min(maxFactor, Math.max(minFactor, requestedFactor));
+                if (!Number.isFinite(factor) || Math.abs(factor - 1) < 0.0001) return node;
+                const width = node.width * factor;
+                const height = node.height * factor;
+                return {
+                    ...node,
+                    width,
+                    height,
+                    position: {
+                        x: node.position.x + (node.width - width) / 2,
+                        y: node.position.y + (node.height - height) / 2,
+                    },
+                };
+            }),
+        );
+        return true;
     }, []);
 
     const toggleNodeFreeResize = useCallback((nodeId: string) => {
@@ -2650,15 +2670,6 @@ function InfiniteCanvasPage() {
             void (isAudioFile(file) ? createAudioFileNode(file, pos) : file.type.startsWith("video/") ? createVideoFileNode(file, pos) : createImageFileNode(file, pos));
         },
         [createAudioFileNode, createImageFileNode, createVideoFileNode, screenToCanvas],
-    );
-
-    const pasteAssistantImage = useCallback(
-        (file: File) => {
-            const position = screenToCanvas((containerRef.current?.getBoundingClientRect().left || 0) + size.width / 2, (containerRef.current?.getBoundingClientRect().top || 0) + size.height / 2);
-            void createImageFileNode(file, position);
-            message.success("已从剪切板添加图片");
-        },
-        [createImageFileNode, message, screenToCanvas, size.height, size.width],
     );
 
     const handleAssistantSessionsChange = useCallback((sessions: CanvasAssistantSession[], activeId: string | null) => {
@@ -3752,10 +3763,6 @@ function InfiniteCanvasPage() {
 
     const assistantOpen = assistantMounted && !assistantCollapsed;
     const openAgent = (mode: CanvasAgentMode = agentMode) => {
-        if (agentCloseTimerRef.current) {
-            clearTimeout(agentCloseTimerRef.current);
-            agentCloseTimerRef.current = null;
-        }
         setAgentMode(mode);
         setAssistantMounted(true);
         setAssistantClosing(false);
@@ -3807,6 +3814,7 @@ function InfiniteCanvasPage() {
                     onCanvasMouseDown={handleCanvasMouseDown}
                     onCanvasPointerMove={handleCanvasPointerMove}
                     onCanvasDeselect={deselectCanvas}
+                    onNodeWheelResize={handleSelectedNodeWheelResize}
                     onContextMenu={preventCanvasContextMenu}
                     onDrop={handleDrop}
                 >
@@ -4259,10 +4267,11 @@ function InfiniteCanvasPage() {
 
                 <CanvasAssetDrawer open={assetDrawerOpen} onInsert={handleAssetInsert} onClose={() => setAssetDrawerOpen(false)} />
                 <CanvasDirectorStage ref={directorStageRef} onCapture={addDirectorStageCaptures} />
-                {codexCompactAgent && !assistantMounted ? <CanvasLocalAgentPanel headless snapshot={agentSnapshot} canUndoOps={Boolean(agentUndoSnapshot)} onApplyOps={applyAgentOps} onUndoOps={undoAgentOps} onDirectorAction={executeDirectorStageAction} autoConnect={codexAutoConnect} /> : null}
+                {codexCompactAgent && (!assistantMounted || (assistantClosing && agentMode !== "local")) ? <CanvasLocalAgentPanel headless snapshot={agentSnapshot} canUndoOps={Boolean(agentUndoSnapshot)} onApplyOps={applyAgentOps} onUndoOps={undoAgentOps} onDirectorAction={executeDirectorStageAction} autoConnect={codexAutoConnect} /> : null}
             </section>
             {assistantMounted ? (
                 <CanvasAssistantPanel
+                    key={projectId}
                     nodes={nodes}
                     selectedNodeIds={selectedNodeIds}
                     snapshot={agentSnapshot}
@@ -4274,7 +4283,6 @@ function InfiniteCanvasPage() {
                     canUndoOps={Boolean(agentUndoSnapshot)}
                     onUndoOps={undoAgentOps}
                     onDirectorAction={executeDirectorStageAction}
-                    onPasteImage={pasteAssistantImage}
                     agentMode={agentMode}
                     onAgentModeChange={setAgentMode}
                     autoConnectLocal={codexAutoConnect}
@@ -4769,8 +4777,9 @@ function promptHubVideoDuration(config: AiConfig) {
 }
 
 function promptHubVideoRatio(config: AiConfig) {
-    const value = String(config.size || "").trim();
-    return ["16:9", "9:16", "1:1"].includes(value) ? value : "16:9";
+    const modelId = parsePromptHubModelId(config.model || config.videoModel);
+    const model = modelId ? usePromptHubStore.getState().models.find((candidate) => candidate.id === modelId) : null;
+    return normalizePromptHubVideoRatio(config.size, promptHubVideoAspectRatios(model, modelId));
 }
 
 function promptHubVideoResolution(config: AiConfig) {

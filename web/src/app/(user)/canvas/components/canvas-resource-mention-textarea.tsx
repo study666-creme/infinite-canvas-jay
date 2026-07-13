@@ -139,6 +139,13 @@ export const CanvasResourceMentionTextarea = forwardRef<CanvasResourceMentionTex
     };
 
     const handleKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+        if ((event.ctrlKey || event.metaKey) && !event.altKey && event.key.toLowerCase() === "a") {
+            event.preventDefault();
+            event.stopPropagation();
+            selectEditorContents(editorRef.current);
+            return;
+        }
+
         if (mention && candidates.length) {
             if (event.key === "ArrowDown") {
                 event.preventDefault();
@@ -394,6 +401,16 @@ export function placeCaretAtEnd(element: HTMLElement) {
     const range = document.createRange();
     range.selectNodeContents(element);
     range.collapse(false);
+    const selection = window.getSelection();
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+}
+
+function selectEditorContents(element: HTMLElement | null) {
+    if (!element) return;
+    element.focus();
+    const range = document.createRange();
+    range.selectNodeContents(element);
     const selection = window.getSelection();
     selection?.removeAllRanges();
     selection?.addRange(range);

@@ -11,7 +11,7 @@ type CursorMode = "default" | "link" | "drag" | "pan" | "text";
 
 function cursorModeFromTarget(target: EventTarget | null): CursorMode {
     if (!(target instanceof Element)) return "default";
-    if (target.closest("input, textarea, [contenteditable='true'], [role='textbox'], .cm-editor")) return "text";
+    if (target.closest("input, textarea, [contenteditable]:not([contenteditable='false']), [role='textbox'], .cm-editor")) return "text";
     if (target.closest("[data-resize-handle], [data-group-frame-body], [class*='cursor-grab'], [class*='cursor-grabbing'], [class*='cursor-move'], [class*='cursor-crosshair'], [class*='cursor-ew-resize'], [class*='cursor-ns-resize'], [class*='cursor-col-resize'], [class*='cursor-row-resize'], [class*='cursor-nwse-resize'], [class*='cursor-nesw-resize']")) return "drag";
     if (target.closest("button:not(:disabled), a[href], summary, select, [role='button'], [data-connection-handle], [data-canvas-interactive], .ant-btn:not(.ant-btn-disabled), .ant-select:not(.ant-select-disabled), .ant-dropdown-trigger, .ant-tabs-tab, .canvas-asset-card")) return "link";
     return "default";
@@ -60,9 +60,18 @@ export function AppCursor() {
         let lastTarget: EventTarget | null = null;
         let currentMode: CursorMode = "default";
         let spacePanActive = false;
+        let visible = false;
 
-        const show = () => root.classList.add("is-visible");
-        const hide = () => root.classList.remove("is-visible");
+        const show = () => {
+            if (visible) return;
+            visible = true;
+            root.classList.add("is-visible");
+        };
+        const hide = () => {
+            if (!visible) return;
+            visible = false;
+            root.classList.remove("is-visible");
+        };
         const setMode = (mode: CursorMode) => {
             if (mode === currentMode) return;
             currentMode = mode;

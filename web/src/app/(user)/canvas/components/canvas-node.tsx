@@ -41,7 +41,7 @@ type CanvasNodeProps = {
     batchOpening?: boolean;
     batchRecovering?: boolean;
     batchMotion?: { x: number; y: number; index: number };
-    onMouseDown: (event: React.MouseEvent, nodeId: string) => void;
+    onMouseDown: (event: React.MouseEvent | React.PointerEvent, nodeId: string) => void;
     onHoverStart: (nodeId: string) => void;
     onHoverEnd: (nodeId: string) => void;
     onConnectStart: (event: React.MouseEvent, nodeId: string, handleType: "source" | "target") => void;
@@ -368,14 +368,18 @@ export const CanvasNode = React.memo(function CanvasNode({
                           : undefined,
                 }}
                 onPointerDown={(event) => {
+                    if (event.button !== 0) return;
+                    if (event.pointerType === "mouse" && event.currentTarget.closest("[data-canvas-surface][data-space-pan-active='true']")) return;
                     const target = event.target as HTMLElement;
+                    if (event.pointerType !== "mouse" && !event.isPrimary) return;
                     if (target.closest("button")) return;
                     if (target.closest("[data-canvas-interactive]")) return;
                     if (target.closest("[data-resize-handle]")) {
                         event.stopPropagation();
                         return;
                     }
-                    onMouseDown(event as unknown as React.MouseEvent, data.id);
+                    if (event.pointerType !== "mouse") event.currentTarget.setPointerCapture(event.pointerId);
+                    onMouseDown(event, data.id);
                 }}
                 onDoubleClick={(event) => {
                     if (isBatchRoot) {

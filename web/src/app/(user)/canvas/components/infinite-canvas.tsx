@@ -6,6 +6,10 @@ import { canvasThemes, type CanvasBackgroundMode } from "@/lib/canvas-theme";
 import { useThemeStore } from "@/stores/use-theme-store";
 import type { ViewportTransform } from "../types";
 
+const VIEWPORT_PARENT_SYNC_INTERVAL_MS = 240;
+const VIEWPORT_IDLE_COMMIT_MS = 120;
+const CANVAS_OVERLAY_SELECTOR = ".ant-modal,.ant-popover,.ant-dropdown,.ant-select-dropdown,.ant-picker-dropdown,.canvas-prompt-library-modal,.canvas-asset-drawer,.canvas-assistant-panel,[data-canvas-scroll]";
+
 type InfiniteCanvasProps = {
     containerRef: React.RefObject<HTMLDivElement | null>;
     worldLayerRef?: React.RefObject<HTMLDivElement | null>;
@@ -13,8 +17,8 @@ type InfiniteCanvasProps = {
     backgroundMode?: CanvasBackgroundMode;
     onViewportChange: (viewport: ViewportTransform) => void;
     onCanvasMouseDown?: (event: React.PointerEvent<HTMLDivElement>) => void;
-    onCanvasPointerMove?: (event: React.PointerEvent<HTMLDivElement>) => void;
     onCanvasDeselect?: () => void;
+    onNodeWheelResize?: (nodeId: string, deltaY: number) => boolean;
     onContextMenu?: (event: React.MouseEvent) => void;
     onDrop?: (event: React.DragEvent<HTMLDivElement>) => void;
     children: React.ReactNode;
@@ -32,7 +36,7 @@ type TouchPinchState = {
     worldCenterY: number;
 };
 
-export function InfiniteCanvas({ containerRef, worldLayerRef, viewport, backgroundMode = "lines", onViewportChange, onCanvasMouseDown, onCanvasPointerMove, onCanvasDeselect, onContextMenu, onDrop, children }: InfiniteCanvasProps) {
+export function InfiniteCanvas({ containerRef, worldLayerRef, viewport, backgroundMode = "lines", onViewportChange, onCanvasMouseDown, onCanvasDeselect, onNodeWheelResize, onContextMenu, onDrop, children }: InfiniteCanvasProps) {
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const panState = useRef({
         isPanning: false,
@@ -47,8 +51,13 @@ export function InfiniteCanvas({ containerRef, worldLayerRef, viewport, backgrou
     const viewportRef = useRef(viewport);
     const frameRef = useRef<number | null>(null);
     const nextViewportRef = useRef<ViewportTransform | null>(null);
+    const idleCommitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const lastParentSyncAtRef = useRef(0);
+    const lastEmittedViewportRef = useRef<ViewportTransform | null>(null);
+    const internalViewportActiveRef = useRef(false);
     const touchPointersRef = useRef(new Map<number, TouchCanvasPointer>());
     const touchPinchRef = useRef<TouchPinchState | null>(null);
+    const [renderedViewport, setRenderedViewport] = useState(viewport);
     const [isSpacePressed, setIsSpacePressed] = useState(false);
     const [isPanning, setIsPanning] = useState(false);
 
@@ -68,33 +77,76 @@ export function InfiniteCanvas({ containerRef, worldLayerRef, viewport, backgrou
     );
 
     useEffect(() => {
+        const isInternalAcknowledgement = viewportMatches(viewport, lastEmittedViewportRef.current);
+        if (internalViewportActiveRef.current && isInternalAcknowledgement) return;
+        internalViewportActiveRef.current = false;
+        nextViewportRef.current = null;
+        if (idleCommitTimerRef.current) {
+            clearTimeout(idleCommitTimerRef.current);
+            idleCommitTimerRef.current = null;
+        }
         scaleRef.current = viewport.k;
         viewportRef.current = viewport;
+        setRenderedViewport((current) => (viewportMatches(current, viewport) ? current : viewport));
     }, [viewport]);
 
     useEffect(
         () => () => {
             if (frameRef.current) cancelAnimationFrame(frameRef.current);
+            if (idleCommitTimerRef.current) clearTimeout(idleCommitTimerRef.current);
             touchPointersRef.current.clear();
             touchPinchRef.current = null;
         },
         [],
     );
 
+    const emitViewportChange = useCallback(
+        (next: ViewportTransform, final: boolean) => {
+            lastEmittedViewportRef.current = next;
+            lastParentSyncAtRef.current = performance.now();
+            if (final) internalViewportActiveRef.current = false;
+            onViewportChange(next);
+        },
+        [onViewportChange],
+    );
+
+    const flushViewportChange = useCallback(() => {
+        if (!internalViewportActiveRef.current && !nextViewportRef.current) return;
+        if (frameRef.current) {
+            cancelAnimationFrame(frameRef.current);
+            frameRef.current = null;
+        }
+        if (idleCommitTimerRef.current) {
+            clearTimeout(idleCommitTimerRef.current);
+            idleCommitTimerRef.current = null;
+        }
+        const next = nextViewportRef.current || viewportRef.current;
+        nextViewportRef.current = null;
+        setRenderedViewport((current) => (viewportMatches(current, next) ? current : next));
+        emitViewportChange(next, true);
+    }, [emitViewportChange]);
+
     const queueViewportChange = useCallback(
         (next: ViewportTransform) => {
+            const startingInteraction = !internalViewportActiveRef.current;
+            internalViewportActiveRef.current = true;
+            if (startingInteraction) lastParentSyncAtRef.current = performance.now();
             nextViewportRef.current = next;
             viewportRef.current = next;
             scaleRef.current = next.k;
+            if (idleCommitTimerRef.current) clearTimeout(idleCommitTimerRef.current);
+            idleCommitTimerRef.current = setTimeout(flushViewportChange, VIEWPORT_IDLE_COMMIT_MS);
             if (frameRef.current) return;
             frameRef.current = requestAnimationFrame(() => {
                 frameRef.current = null;
                 const pending = nextViewportRef.current;
                 nextViewportRef.current = null;
-                if (pending) onViewportChange(pending);
+                if (!pending) return;
+                setRenderedViewport((current) => (viewportMatches(current, pending) ? current : pending));
+                if (performance.now() - lastParentSyncAtRef.current >= VIEWPORT_PARENT_SYNC_INTERVAL_MS) emitViewportChange(pending, false);
             });
         },
-        [onViewportChange],
+        [emitViewportChange, flushViewportChange],
     );
 
     const startTouchPinch = useCallback(() => {
@@ -139,6 +191,7 @@ export function InfiniteCanvas({ containerRef, worldLayerRef, viewport, backgrou
 
     const stopPanning = useCallback(
         (options?: { deselectIfClick?: boolean }) => {
+            flushViewportChange();
             if (!panState.current.isPanning) {
                 document.body.style.cursor = "";
                 setIsPanning(false);
@@ -167,7 +220,7 @@ export function InfiniteCanvas({ containerRef, worldLayerRef, viewport, backgrou
             document.body.style.cursor = "";
             setIsPanning(false);
         },
-        [containerRef, onCanvasDeselect],
+        [containerRef, flushViewportChange, onCanvasDeselect],
     );
 
     useEffect(() => {
@@ -206,20 +259,45 @@ export function InfiniteCanvas({ containerRef, worldLayerRef, viewport, backgrou
 
     const shouldIgnoreCanvasPointer = useCallback((target: Element | null) => {
         if (!target) return true;
-        return Boolean(
-            target.closest(
-                ".ant-modal,.ant-popover,.ant-dropdown,.ant-select-dropdown,.ant-picker-dropdown,.canvas-prompt-library-modal,.canvas-asset-drawer,.canvas-assistant-panel,[data-canvas-scroll],[data-canvas-no-zoom]",
-            ),
-        );
+        return Boolean(target.closest(`${CANVAS_OVERLAY_SELECTOR},[data-canvas-no-zoom]`));
     }, []);
 
     const shouldIgnoreCanvasWheelZoom = shouldIgnoreCanvasPointer;
+
+    useEffect(() => {
+        const handleTouchPointerDown = (event: PointerEvent) => {
+            if (event.pointerType === "mouse" || event.button !== 0) return;
+            const target = event.target instanceof Element ? event.target : null;
+            if (target?.closest(CANVAS_OVERLAY_SELECTOR)) return;
+            if (target?.closest("button,input,textarea,select,[contenteditable]:not([contenteditable='false']),[role='textbox'],[data-canvas-interactive],[data-resize-handle]")) return;
+
+            if (event.isPrimary) {
+                touchPointersRef.current.clear();
+                touchPinchRef.current = null;
+                stopPanning();
+            }
+            touchPointersRef.current.set(event.pointerId, { clientX: event.clientX, clientY: event.clientY });
+            if (touchPointersRef.current.size < 2) return;
+
+            window.dispatchEvent(new CustomEvent("canvas-touch-pinch-start"));
+            startTouchPinch();
+        };
+
+        window.addEventListener("pointerdown", handleTouchPointerDown, true);
+        return () => window.removeEventListener("pointerdown", handleTouchPointerDown, true);
+    }, [startTouchPinch, stopPanning]);
 
     const applyCanvasWheel = useCallback(
         (event: WheelEvent) => {
             const target = event.target instanceof Element ? event.target : null;
             if (!target) return false;
             const isZoomGesture = event.ctrlKey || event.metaKey;
+            const nodeId = isZoomGesture ? target.closest<HTMLElement>("[data-node-id]")?.dataset.nodeId : undefined;
+            if (nodeId && onNodeWheelResize?.(nodeId, event.deltaY)) {
+                event.preventDefault();
+                event.stopPropagation();
+                return true;
+            }
             if (!isZoomGesture && shouldIgnoreCanvasWheelZoom(target)) return false;
 
             event.preventDefault();
@@ -253,7 +331,7 @@ export function InfiniteCanvas({ containerRef, worldLayerRef, viewport, backgrou
             });
             return true;
         },
-        [containerRef, queueViewportChange, shouldIgnoreCanvasWheelZoom],
+        [containerRef, onNodeWheelResize, queueViewportChange, shouldIgnoreCanvasWheelZoom],
     );
 
     useEffect(() => {
@@ -271,31 +349,21 @@ export function InfiniteCanvas({ containerRef, worldLayerRef, viewport, backgrou
     const handlePointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
         const target = event.target instanceof Element ? event.target : null;
         const isSpaceMousePan = event.pointerType === "mouse" && event.button === 0 && isSpacePressed;
-        if (!isSpaceMousePan && shouldIgnoreCanvasPointer(target)) return;
-        if (!isSpaceMousePan && target?.closest("[data-connection-create-menu],[data-connection-handle]")) return;
+        const isCanvasPanGesture = event.button === 1 || isSpaceMousePan;
+        if (!isCanvasPanGesture && shouldIgnoreCanvasPointer(target)) return;
+        if (!isCanvasPanGesture && target?.closest("[data-connection-create-menu],[data-connection-handle]")) return;
         const isBackgroundClick = !target?.closest("[data-node-id],[data-connection-id],[data-group-frame]");
 
         if (event.pointerType !== "mouse" && event.button === 0 && isBackgroundClick) {
             event.preventDefault();
-            event.currentTarget.setPointerCapture(event.pointerId);
-            touchPointersRef.current.set(event.pointerId, { clientX: event.clientX, clientY: event.clientY });
 
             if (touchPointersRef.current.size >= 2) {
-                startTouchPinch();
                 return;
             }
 
             touchPinchRef.current = null;
-            panState.current = {
-                isPanning: true,
-                pointerId: event.pointerId,
-                startX: event.clientX,
-                startY: event.clientY,
-                initialX: viewportRef.current.x,
-                initialY: viewportRef.current.y,
-                hasMoved: false,
-            };
-            setIsPanning(true);
+            panState.current.isPanning = false;
+            panState.current.pointerId = null;
             return;
         }
 
@@ -306,7 +374,7 @@ export function InfiniteCanvas({ containerRef, worldLayerRef, viewport, backgrou
             return;
         }
 
-        if (event.button === 1 || isSpaceMousePan) {
+        if (isCanvasPanGesture) {
             event.preventDefault();
             event.stopPropagation();
             event.currentTarget.setPointerCapture(event.pointerId);
@@ -347,18 +415,8 @@ export function InfiniteCanvas({ containerRef, worldLayerRef, viewport, backgrou
             }
 
             if (touchPointersRef.current.size === 1) {
-                const [[pointerId, point]] = Array.from(touchPointersRef.current.entries());
                 touchPinchRef.current = null;
-                panState.current = {
-                    isPanning: true,
-                    pointerId,
-                    startX: point.clientX,
-                    startY: point.clientY,
-                    initialX: viewportRef.current.x,
-                    initialY: viewportRef.current.y,
-                    hasMoved: true,
-                };
-                setIsPanning(true);
+                stopPanning();
                 return true;
             }
 
@@ -426,10 +484,10 @@ export function InfiniteCanvas({ containerRef, worldLayerRef, viewport, backgrou
         <div
             ref={containerRef}
             data-canvas-surface="true"
+            data-space-pan-active={isSpacePressed ? "true" : undefined}
             className={`relative h-full w-full select-none overflow-hidden ${isPanning ? "cursor-grabbing" : isSpacePressed ? "cursor-grab" : "cursor-default"}`}
             style={{ background: theme.canvas.background, touchAction: "none" }}
             onPointerDown={handlePointerDown}
-            onPointerMove={(event) => onCanvasPointerMove?.(event)}
             onPointerLeave={(event) => {
                 if (event.pointerType !== "mouse") return;
                 if (!panState.current.isPanning) return;
@@ -444,12 +502,12 @@ export function InfiniteCanvas({ containerRef, worldLayerRef, viewport, backgrou
             onDragOver={(event) => event.preventDefault()}
             onDrop={onDrop}
         >
-            <CanvasGrid viewport={viewport} mode={backgroundMode} />
+            <CanvasGrid viewport={renderedViewport} mode={backgroundMode} />
             <div
                 ref={worldLayerRef}
                 className="absolute left-0 top-0 origin-top-left"
                 style={{
-                    transform: `translate3d(${viewport.x}px, ${viewport.y}px, 0) scale(${viewport.k})`,
+                    transform: `translate3d(${renderedViewport.x}px, ${renderedViewport.y}px, 0) scale(${renderedViewport.k})`,
                     willChange: "transform",
                 }}
             >
@@ -459,7 +517,7 @@ export function InfiniteCanvas({ containerRef, worldLayerRef, viewport, backgrou
     );
 }
 
-function CanvasGrid({ viewport, mode }: { viewport: ViewportTransform; mode: CanvasBackgroundMode }) {
+const CanvasGrid = React.memo(function CanvasGrid({ viewport, mode }: { viewport: ViewportTransform; mode: CanvasBackgroundMode }) {
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     if (mode === "blank") return null;
 
@@ -480,4 +538,8 @@ function CanvasGrid({ viewport, mode }: { viewport: ViewportTransform; mode: Can
             }}
         />
     );
+});
+
+function viewportMatches(a: ViewportTransform | null | undefined, b: ViewportTransform | null | undefined) {
+    return Boolean(a && b && a.x === b.x && a.y === b.y && a.k === b.k);
 }

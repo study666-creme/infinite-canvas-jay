@@ -24,9 +24,11 @@ export const CANVAS_SHORTCUT_SECTIONS: ShortcutSection[] = [
         rows: [
             { keys: ["拖动空白"], value: "框选多个节点" },
             { keys: ["空格", "拖动"], value: "平移画布" },
-            { keys: ["滚轮"], value: "缩放画布" },
+            { keys: ["滚轮 / 触控板"], value: "平移画布" },
+            { keys: ["Ctrl / Cmd", "滚轮"], value: "缩放画布；悬停选中节点时等比缩放节点" },
+            { keys: ["双指"], value: "手机和平板上平移、缩放画布" },
             { keys: ["缩放滑杆"], value: "精确调整缩放" },
-            { keys: ["重置视图"], value: "回到默认缩放与居中" },
+            { keys: ["重置视图"], value: "适配并居中全部节点" },
         ],
     },
     {

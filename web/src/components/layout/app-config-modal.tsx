@@ -1,7 +1,7 @@
 "use client";
 
 import { App, Button, Form, Input, Modal, Progress, Segmented, Select, Tabs } from "antd";
-import { CircleAlert, Cloud, Plus, RefreshCw, Trash2, Wifi } from "lucide-react";
+import { CircleAlert, Cloud, Plus, RefreshCw, Sparkles, Trash2, Wifi } from "lucide-react";
 import { useEffect, useState } from "react";
 
 import { PromptHubAwareModelPicker } from "@/components/prompt-hub-model-picker";
@@ -265,6 +265,20 @@ export function AppConfigModal() {
                                     </div>
                                 </div>
                                 <div className="space-y-3">
+                                    <section className="rounded-lg border border-amber-300/70 bg-amber-50/55 p-3 dark:border-amber-700/55 dark:bg-amber-950/15">
+                                        <div className="flex items-center justify-between gap-3">
+                                            <div className="flex min-w-0 items-center gap-3">
+                                                <span className="flex size-9 shrink-0 items-center justify-center rounded-lg border border-amber-300/80 bg-white/70 text-amber-600 dark:border-amber-700/70 dark:bg-black/10 dark:text-amber-400">
+                                                    <Sparkles className="size-4" />
+                                                </span>
+                                                <div className="min-w-0">
+                                                    <div className="truncate text-sm font-semibold">卡藏</div>
+                                                    <div className="mt-1 text-xs text-stone-500">内置渠道 · 使用当前账号积分</div>
+                                                </div>
+                                            </div>
+                                            <span className="shrink-0 rounded-full border border-amber-300/80 px-2 py-1 text-[11px] font-medium text-amber-700 dark:border-amber-700/70 dark:text-amber-300">固定</span>
+                                        </div>
+                                    </section>
                                     {config.channels.map((channel) => (
                                         <section key={channel.id} className="rounded-lg border border-stone-200 p-3 dark:border-stone-800">
                                             <div className="mb-3 flex items-center justify-between gap-3">

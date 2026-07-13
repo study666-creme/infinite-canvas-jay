@@ -1,10 +1,12 @@
 "use client";
 
 import type { ReactNode } from "react";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { App } from "antd";
 
-import { createModelChannel, useConfigStore } from "@/stores/use-config-store";
+import { createModelChannel, defaultConfig, useConfigStore, type ModelChannel } from "@/stores/use-config-store";
+
+const obsoleteJimengChannelCleanupKey = "infinite-canvas:obsolete_jimeng_channel_cleanup_v1";
 
 export function ClientRootInit({ children }: { children: ReactNode }) {
     const { message } = App.useApp();
@@ -12,6 +14,43 @@ export function ClientRootInit({ children }: { children: ReactNode }) {
     const updateConfig = useConfigStore((state) => state.updateConfig);
     const config = useConfigStore((state) => state.config);
     const openConfigDialog = useConfigStore((state) => state.openConfigDialog);
+    const [configHydrated, setConfigHydrated] = useState(false);
+
+    useEffect(() => {
+        const persist = useConfigStore.persist;
+        if (!persist) {
+            setConfigHydrated(true);
+            return;
+        }
+        setConfigHydrated(persist.hasHydrated());
+        return persist.onFinishHydration(() => setConfigHydrated(true));
+    }, []);
+
+    useEffect(() => {
+        if (!configHydrated) return;
+        if (localStorage.getItem(obsoleteJimengChannelCleanupKey)) return;
+
+        const obsoleteChannels = config.channels.filter(isObsoleteJimengSampleChannel);
+        if (!obsoleteChannels.length) {
+            localStorage.setItem(obsoleteJimengChannelCleanupKey, "1");
+            return;
+        }
+
+        const channels = config.channels.filter((channel) => !isObsoleteJimengSampleChannel(channel));
+        updateConfig("channels", channels);
+
+        const activeChannelWasRemoved = obsoleteChannels.some((channel) => normalizeChannelBaseUrl(channel.baseUrl) === normalizeChannelBaseUrl(config.baseUrl));
+        if (activeChannelWasRemoved) {
+            const replacement = channels[0];
+            updateConfig("baseUrl", replacement?.baseUrl || defaultConfig.baseUrl);
+            updateConfig("apiKey", replacement?.apiKey || "");
+            updateConfig("apiFormat", replacement?.apiFormat || defaultConfig.apiFormat);
+            updateConfig("models", replacement?.models || []);
+        }
+
+        localStorage.setItem(obsoleteJimengChannelCleanupKey, "1");
+        message.success("已移除旧的本地示例渠道");
+    }, [config, configHydrated, message, updateConfig]);
 
     useEffect(() => {
         if (handledConfigParams.current) return;
@@ -50,4 +89,13 @@ export function ClientRootInit({ children }: { children: ReactNode }) {
     }, [config.channels, message, openConfigDialog, updateConfig]);
 
     return <>{children}</>;
+}
+
+function isObsoleteJimengSampleChannel(channel: ModelChannel) {
+    const baseUrl = normalizeChannelBaseUrl(channel.baseUrl);
+    return channel.name.trim() === "即梦" && (baseUrl === "http://127.0.0.1:8000/v1" || baseUrl === "http://localhost:8000/v1");
+}
+
+function normalizeChannelBaseUrl(value: string) {
+    return value.trim().replace(/\/+$/, "").toLowerCase();
 }

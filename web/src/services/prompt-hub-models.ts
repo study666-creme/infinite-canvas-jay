@@ -63,13 +63,17 @@ function parameterValues(model: PromptHubCatalogModel | null | undefined, names:
 export function promptHubVideoAspectRatios(model: PromptHubCatalogModel | null | undefined, modelId?: string | null) {
     const declared = parameterValues(model, ["ratio", "aspect_ratio"]);
     if (declared.length) return declared;
-    return modelId === "motion-video" || modelId === "motion-video-1-5" ? [...GROK_VIDEO_ASPECT_RATIOS] : [];
+    if (modelId === "motion-video" || modelId === "motion-video-1-5") return [...GROK_VIDEO_ASPECT_RATIOS];
+    return modelId?.startsWith("sd") ? ["16:9", "9:16", "1:1"] : [];
 }
 
 export function promptHubVideoResolutions(model: PromptHubCatalogModel | null | undefined, modelId?: string | null) {
     const declared = parameterValues(model, ["resolution"]);
     if (declared.length) return declared.map(normalizeVideoResolutionToken);
-    return modelId === "motion-video" || modelId === "motion-video-1-5" ? ["480p", "720p"] : [];
+    if (modelId === "motion-video" || modelId === "motion-video-1-5") return ["480p", "720p"];
+    if (modelId === "sd1080-4k") return ["1080p", "4k"];
+    if (modelId?.includes("四图版")) return ["720p"];
+    return modelId?.startsWith("sd") ? ["480p", "720p"] : [];
 }
 
 export function normalizePromptHubVideoRatio(value: string | null | undefined, allowedRatios: readonly string[]) {

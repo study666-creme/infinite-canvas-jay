@@ -199,7 +199,7 @@ export const CanvasVideoPlayer = forwardRef<CanvasVideoPlayerHandle, CanvasVideo
         pendingFileRef.current = null;
         if (retryCountRef.current >= 1) {
             setPhase("error");
-            setError("浏览器无法播放该视频，请确认 jimeng 服务已重启并包含 /v1/media/fetch");
+            setError("浏览器无法播放这个视频，文件可能已失效或当前格式不受支持");
             revokeObjectUrl();
             setPlayUrl("");
             return;

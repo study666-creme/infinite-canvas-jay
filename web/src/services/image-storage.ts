@@ -2,7 +2,6 @@
 
 import localforage from "localforage";
 
-import { readImageMeta } from "@/lib/image-utils";
 import {
     hasLocalMediaFolder,
     isLocalMediaKey,
@@ -14,6 +13,7 @@ import {
     type LocalMediaSource,
 } from "@/services/local-media-store";
 import { shouldUseLocalMedia } from "@/services/local-media-policy";
+import { validateImageBlob } from "@/services/media-validation";
 import { nanoid } from "nanoid";
 
 export type UploadedImage = {
@@ -33,21 +33,20 @@ const store = localforage.createInstance({ name: "infinite-canvas", storeName: "
 const objectUrls = new Map<string, string>();
 
 export async function uploadImage(input: string | Blob, options: UploadImageOptions = {}): Promise<UploadedImage> {
-    const blob = await sourceToBlob(input);
+    const validated = await validateImageBlob(await sourceToBlob(input));
+    const blob = validated.blob;
     const source = options.source ?? "generated";
 
     if (await shouldUseLocalMedia("image")) {
         const saved = await writeLocalMedia("image", blob, source);
-        const meta = await readImageMeta(saved.url);
-        return { url: saved.url, storageKey: saved.storageKey, width: meta.width, height: meta.height, bytes: saved.bytes, mimeType: saved.mimeType || meta.mimeType };
+        return { url: saved.url, storageKey: saved.storageKey, width: validated.width, height: validated.height, bytes: saved.bytes, mimeType: saved.mimeType || validated.mimeType };
     }
 
     const storageKey = `image:${nanoid()}`;
     await store.setItem(storageKey, blob);
     const url = URL.createObjectURL(blob);
     objectUrls.set(storageKey, url);
-    const meta = await readImageMeta(url);
-    return { url, storageKey, width: meta.width, height: meta.height, bytes: blob.size, mimeType: blob.type || meta.mimeType };
+    return { url, storageKey, width: validated.width, height: validated.height, bytes: blob.size, mimeType: validated.mimeType };
 }
 
 export async function resolveImageUrl(storageKey?: string, fallback = "") {
@@ -77,6 +76,8 @@ export async function getImageBlob(storageKey: string) {
 }
 
 export async function setImageBlob(storageKey: string, blob: Blob) {
+    const validated = await validateImageBlob(blob);
+    blob = validated.blob;
     if (isLocalMediaKey(storageKey)) {
         const saved = await writeLocalMedia("image", blob, "generated");
         return saved.url;
@@ -90,7 +91,9 @@ export async function setImageBlob(storageKey: string, blob: Blob) {
 export async function imageToDataUrl(image: { url?: string; dataUrl?: string; storageKey?: string }) {
     const url = image.dataUrl || (await resolveImageUrl(image.storageKey, image.url || ""));
     if (!url || url.startsWith("data:")) return url;
-    return blobToDataUrl(await (await fetch(url)).blob());
+    const response = await fetch(url);
+    if (!response.ok) throw new Error(`读取参考图失败（${response.status}）`);
+    return blobToDataUrl((await validateImageBlob(await response.blob())).blob);
 }
 
 export async function deleteStoredImages(keys: Iterable<string>) {

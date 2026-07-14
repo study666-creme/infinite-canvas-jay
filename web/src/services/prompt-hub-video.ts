@@ -3,6 +3,7 @@
 import { nanoid } from "nanoid";
 
 import { getMediaBlob } from "@/services/file-storage";
+import { validateMediaBlob } from "@/services/media-validation";
 import { uploadPromptHubReferenceImages, type PromptHubCanvasGenerationStage } from "@/services/prompt-hub-generation";
 import {
     downloadPromptHubVideo,
@@ -27,6 +28,12 @@ type PromptHubVideoOptions = {
     referenceAudios?: ReferenceAudio[];
     signal?: AbortSignal;
     onStage?: (stage: PromptHubCanvasGenerationStage) => void;
+    onSubmitted?: (jobId: string) => void;
+};
+
+type PromptHubVideoResumeOptions = Pick<PromptHubVideoOptions, "session" | "apiBase" | "signal" | "onStage"> & {
+    jobId: string;
+    initialJob?: Awaited<ReturnType<typeof fetchPromptHubVideoJob>>;
 };
 
 function apiBase(value?: string) {
@@ -140,6 +147,19 @@ export async function requestPromptHubCanvasVideo(opts: PromptHubVideoOptions) {
         apiBase: opts.apiBase,
         signal: opts.signal,
     });
+    opts.onSubmitted?.(job.jobId);
+    return resumePromptHubCanvasVideo({
+        session: opts.session,
+        apiBase: opts.apiBase,
+        jobId: job.jobId,
+        signal: opts.signal,
+        onStage: opts.onStage,
+        initialJob: job,
+    });
+}
+
+export async function resumePromptHubCanvasVideo(opts: PromptHubVideoResumeOptions) {
+    let job = opts.initialJob || (await fetchPromptHubVideoJob(opts.session, opts.jobId, { apiBase: opts.apiBase, signal: opts.signal }));
     for (let attempt = 0; attempt < 120 && job.status === "processing"; attempt += 1) {
         await waitForPollingDelay(attempt < 4 ? 2500 : 5000, opts.signal);
         job = await fetchPromptHubVideoJob(opts.session, job.jobId, { apiBase: opts.apiBase, signal: opts.signal });
@@ -148,10 +168,26 @@ export async function requestPromptHubCanvasVideo(opts: PromptHubVideoOptions) {
             stage: job.progress ? `视频生成中 ${job.progress}%` : "视频生成中",
         });
     }
-    if (job.status === "failed") throw new Error(job.errorMessage || "视频生成失败");
+    if (job.status === "failed") throw new Error(`视频任务失败：${job.errorMessage || "生成失败"}`);
     if (job.status !== "completed") throw new Error("视频生成超时，请稍后重试");
     opts.onStage?.({ progress: 96, stage: "下载视频" });
-    const blob = await downloadPromptHubVideo(opts.session, job.jobId, { apiBase: opts.apiBase, signal: opts.signal });
+    const blob = await downloadCompletedVideoWithRetry(opts.session, job.jobId, opts);
     if (!blob.size) throw new Error("视频内容为空");
     return { blob, job };
+}
+
+async function downloadCompletedVideoWithRetry(session: PromptHubSession, jobId: string, opts: Pick<PromptHubVideoOptions, "apiBase" | "signal" | "onStage">) {
+    const delays = [0, 1200, 2500, 5000, 8000, 12_000];
+    let lastError: unknown;
+    for (let attempt = 0; attempt < delays.length; attempt += 1) {
+        if (delays[attempt]) await waitForPollingDelay(delays[attempt], opts.signal);
+        try {
+            const blob = await downloadPromptHubVideo(session, jobId, { apiBase: opts.apiBase, signal: opts.signal });
+            return (await validateMediaBlob(blob, "video")).blob;
+        } catch (error) {
+            lastError = error;
+            opts.onStage?.({ progress: 96, stage: "结果正在归档，自动重试" });
+        }
+    }
+    throw lastError instanceof Error ? lastError : new Error("视频结果暂时无法下载");
 }

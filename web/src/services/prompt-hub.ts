@@ -456,6 +456,7 @@ export async function pollPromptHubGenerationJob(
     opts: { apiBase?: string; signal?: AbortSignal; onPoll?: (attempt: number, job: PromptHubGenerationJob) => void } = {},
 ): Promise<PromptHubGenerationJob> {
     const apiBase = normalizeApiBase(opts.apiBase || PROMPT_HUB_DEFAULTS.apiBase);
+    let completedWithoutUrls = 0;
     for (let i = 0; i < 90; i += 1) {
         if (opts.signal?.aborted) throw new Error("已取消生成");
         const delay = i < 2 ? 1500 : i < 8 ? 2500 : i < 20 ? 4000 : 6000;
@@ -473,6 +474,12 @@ export async function pollPromptHubGenerationJob(
         const urls = collectPromptHubJobImageUrls(job);
         if (job.status === "completed" && urls.length) {
             return { ...job, imageUrl: urls[0], extraImageUrls: urls.slice(1) };
+        }
+        if (job.status === "completed") {
+            completedWithoutUrls += 1;
+            if (completedWithoutUrls >= 3) return job;
+        } else {
+            completedWithoutUrls = 0;
         }
     }
     throw new Error("卡藏生图超时，请到 Prompt Hub 生图页查看是否已完成");

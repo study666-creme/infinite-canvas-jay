@@ -7,6 +7,7 @@ import { nanoid } from "nanoid";
 import { dataUrlToFile } from "@/lib/image-utils";
 import { buildImageReferencePromptText } from "@/lib/image-reference-prompt";
 import { imageToDataUrl } from "@/services/image-storage";
+import { validateImageBlob } from "@/services/media-validation";
 import type { ReferenceImage } from "@/types/image";
 
 export type AiTextMessage = {
@@ -253,6 +254,66 @@ function parseImagePayload(payload: ImageApiResponse) {
     }
 
     return images;
+}
+
+async function materializeImageResults(config: AiConfig, images: Array<{ id: string; dataUrl: string }>, options?: RequestOptions) {
+    return Promise.all(
+        images.map(async (image) => {
+            if (!/^https?:\/\//i.test(image.dataUrl)) return image;
+            const blob = await downloadGeneratedImage(config, image.dataUrl, options?.signal);
+            return { ...image, dataUrl: await blobToDataUrl(blob) };
+        }),
+    );
+}
+
+async function downloadGeneratedImage(config: AiConfig, url: string, signal?: AbortSignal) {
+    const delays = [0, 1000, 2500, 5000];
+    let lastError: unknown;
+    for (let attempt = 0; attempt < delays.length; attempt += 1) {
+        if (delays[attempt]) await waitForMediaRetry(delays[attempt], signal);
+        for (const request of [
+            () => fetch(url, { credentials: "omit", signal }),
+            () => fetch(aiApiUrl(config, `/media/fetch?url=${encodeURIComponent(url)}`), { headers: aiHeaders(config), signal }),
+        ]) {
+            try {
+                const response = await request();
+                if (!response.ok) throw new Error(`图片下载失败（${response.status}）`);
+                return (await validateImageBlob(await response.blob())).blob;
+            } catch (error) {
+                if (signal?.aborted) throw error;
+                lastError = error;
+            }
+        }
+    }
+    const details = lastError instanceof Error ? lastError.message : "图片地址暂时不可读取";
+    throw new Error(`图片已生成，但保存到画布失败：${details}`);
+}
+
+function blobToDataUrl(blob: Blob) {
+    return new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(String(reader.result || ""));
+        reader.onerror = () => reject(new Error("读取图片失败"));
+        reader.readAsDataURL(blob);
+    });
+}
+
+function waitForMediaRetry(ms: number, signal?: AbortSignal) {
+    return new Promise<void>((resolve, reject) => {
+        if (signal?.aborted) {
+            reject(new DOMException("Aborted", "AbortError"));
+            return;
+        }
+        const timer = window.setTimeout(() => {
+            signal?.removeEventListener("abort", onAbort);
+            resolve();
+        }, ms);
+        const onAbort = () => {
+            window.clearTimeout(timer);
+            reject(new DOMException("Aborted", "AbortError"));
+        };
+        signal?.addEventListener("abort", onAbort, { once: true });
+    });
 }
 
 function readAxiosError(error: unknown, fallback: string) {
@@ -668,7 +729,7 @@ export async function requestGeneration(config: AiConfig, prompt: string, option
     const n = Math.max(1, Math.min(15, Math.floor(Math.abs(Number(config.count)) || 1)));
     if (requestConfig.apiFormat === "gemini") {
         try {
-            return await requestGeminiImages(requestConfig, prompt, [], n, options);
+            return await materializeImageResults(requestConfig, await requestGeminiImages(requestConfig, prompt, [], n, options), options);
         } catch (error) {
             throw new Error(readAxiosError(error, "请求失败"));
         }
@@ -692,8 +753,7 @@ export async function requestGeneration(config: AiConfig, prompt: string, option
                 signal: options?.signal,
             },
         );
-        const images = parseImagePayload(response.data);
-        return images;
+        return await materializeImageResults(requestConfig, parseImagePayload(response.data), options);
     } catch (error) {
         throw new Error(readAxiosError(error, "请求失败"));
     }
@@ -706,7 +766,7 @@ export async function requestEdit(config: AiConfig, prompt: string, references: 
     if (requestConfig.apiFormat === "gemini") {
         if (mask) throw new Error("Gemini 调用格式暂不支持蒙版编辑");
         try {
-            return await requestGeminiImages(requestConfig, requestPrompt, references, n, options);
+            return await materializeImageResults(requestConfig, await requestGeminiImages(requestConfig, requestPrompt, references, n, options), options);
         } catch (error) {
             throw new Error(readAxiosError(error, "请求失败"));
         }
@@ -731,8 +791,7 @@ export async function requestEdit(config: AiConfig, prompt: string, references: 
 
     try {
         const response = await axios.post<ImageApiResponse>(aiApiUrl(requestConfig, "/images/edits"), formData, { headers: aiHeaders(requestConfig), signal: options?.signal });
-        const images = parseImagePayload(response.data);
-        return images;
+        return await materializeImageResults(requestConfig, parseImagePayload(response.data), options);
     } catch (error) {
         throw new Error(readAxiosError(error, "请求失败"));
     }

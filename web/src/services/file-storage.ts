@@ -12,9 +12,9 @@ import {
     revokeLocalMediaUrl,
     sourceToBlob,
     writeLocalMedia,
-    type LocalMediaKind,
     type LocalMediaSource,
 } from "@/services/local-media-store";
+import { validateMediaBlob } from "@/services/media-validation";
 
 export type UploadedFile = { url: string; storageKey?: string; bytes: number; mimeType: string; width?: number; height?: number; durationMs?: number };
 
@@ -25,28 +25,27 @@ type UploadMediaOptions = {
 const store = localforage.createInstance({ name: "infinite-canvas", storeName: "media_files" });
 const objectUrls = new Map<string, string>();
 
-function prefixToKind(prefix: string): LocalMediaKind {
+function prefixToKind(prefix: string): "video" | "audio" {
     if (prefix.startsWith("audio")) return "audio";
     return "video";
 }
 
 export async function uploadMediaFile(input: string | Blob, prefix = "file", options: UploadMediaOptions = {}): Promise<UploadedFile> {
-    const blob = await sourceToBlob(input);
     const kind = prefixToKind(prefix);
+    const validated = await validateMediaBlob(await sourceToBlob(input), kind);
+    const blob = validated.blob;
     const source = options.source ?? "generated";
 
     if (await shouldUseLocalMedia(kind)) {
         const saved = await writeLocalMedia(kind, blob, source);
-        const meta = blob.type.startsWith("video/") ? await readVideoMeta(saved.url) : blob.type.startsWith("audio/") ? await readAudioMeta(saved.url) : {};
-        return { url: saved.url, storageKey: saved.storageKey, bytes: saved.bytes, mimeType: saved.mimeType, ...meta };
+        return { url: saved.url, storageKey: saved.storageKey, bytes: saved.bytes, mimeType: saved.mimeType || validated.mimeType, width: validated.width, height: validated.height, durationMs: validated.durationMs };
     }
 
     const storageKey = `${prefix}:${nanoid()}`;
     await store.setItem(storageKey, blob);
     const url = URL.createObjectURL(blob);
     objectUrls.set(storageKey, url);
-    const meta = blob.type.startsWith("video/") ? await readVideoMeta(url) : blob.type.startsWith("audio/") ? await readAudioMeta(url) : {};
-    return { url, storageKey, bytes: blob.size, mimeType: blob.type || "application/octet-stream", ...meta };
+    return { url, storageKey, bytes: blob.size, mimeType: validated.mimeType, width: validated.width, height: validated.height, durationMs: validated.durationMs };
 }
 
 export async function resolveMediaUrl(storageKey?: string, fallback = "") {
@@ -77,6 +76,9 @@ export async function getMediaBlob(storageKey: string) {
 }
 
 export async function setMediaBlob(storageKey: string, blob: Blob) {
+    const kind = storageKey.startsWith("audio:") || storageKey.startsWith("local:audio:") ? "audio" : "video";
+    const validated = await validateMediaBlob(blob, kind);
+    blob = validated.blob;
     if (isLocalMediaKey(storageKey)) {
         const parsed = parseLocalMediaKey(storageKey);
         if (!parsed) throw new Error("无效的本地文件引用");
@@ -118,24 +120,4 @@ export function collectMediaStorageKeys(value: unknown, keys = new Set<string>()
     if ("storageKey" in value && typeof value.storageKey === "string" && (value.storageKey.includes(":") || value.storageKey.startsWith("local:"))) keys.add(value.storageKey);
     Object.values(value).forEach((item) => (Array.isArray(item) ? item.forEach((child) => collectMediaStorageKeys(child, keys)) : collectMediaStorageKeys(item, keys)));
     return keys;
-}
-
-function readVideoMeta(url: string) {
-    return new Promise<{ width: number; height: number; durationMs?: number }>((resolve) => {
-        const video = document.createElement("video");
-        const done = () => resolve({ width: video.videoWidth || 1280, height: video.videoHeight || 720, durationMs: Number.isFinite(video.duration) ? Math.round(video.duration * 1000) : undefined });
-        video.onloadedmetadata = done;
-        video.onerror = done;
-        video.src = url;
-    });
-}
-
-function readAudioMeta(url: string) {
-    return new Promise<{ durationMs?: number }>((resolve) => {
-        const audio = document.createElement("audio");
-        const done = () => resolve({ durationMs: Number.isFinite(audio.duration) ? Math.round(audio.duration * 1000) : undefined });
-        audio.onloadedmetadata = done;
-        audio.onerror = done;
-        audio.src = url;
-    });
 }

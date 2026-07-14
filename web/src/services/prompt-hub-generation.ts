@@ -8,6 +8,7 @@ import { nanoid } from "nanoid";
 
 import { getDataUrlByteSize } from "@/lib/image-utils";
 import { imageToDataUrl } from "@/services/image-storage";
+import { validateImageBlob } from "@/services/media-validation";
 
 import type { ReferenceImage } from "@/types/image";
 
@@ -426,15 +427,18 @@ async function downloadImageAsDataUrl(url: string, signal?: AbortSignal) {
 
     let lastError: unknown;
 
-    for (let attempt = 0; attempt < 2; attempt += 1) {
+    const delays = [0, 1000, 2500, 5000];
+    for (let attempt = 0; attempt < delays.length; attempt += 1) {
 
         try {
+
+            if (delays[attempt]) await waitForRetryDelay(delays[attempt], signal);
 
             const res = await fetch(url, { mode: "cors", credentials: "omit", signal });
 
             if (!res.ok) throw new Error(`下载卡藏生成图失败 (${res.status})`);
 
-            return await blobToDataUrl(await res.blob());
+            return await validatedImageDataUrl(await res.blob());
 
         } catch (error) {
 
@@ -496,7 +500,7 @@ async function downloadJobImageAsDataUrl(
 
             }
 
-            return await blobToDataUrl(await res.blob());
+            return await validatedImageDataUrl(await res.blob());
 
         } catch (error) {
 
@@ -531,8 +535,10 @@ async function downloadJobImageByIndex(
     const apiBase = normalizeApiBase(opts.apiBase);
     const suffix = index > 0 ? `?index=${index}` : "";
     let lastError: unknown;
-    for (let attempt = 0; attempt < 2; attempt += 1) {
+    const delays = [0, 1000, 2500, 5000, 8000];
+    for (let attempt = 0; attempt < delays.length; attempt += 1) {
         try {
+            if (delays[attempt]) await waitForRetryDelay(delays[attempt], opts.signal);
             const res = await fetch(`${apiBase}/api/v1/generate/jobs/${encodeURIComponent(jobId)}/image${suffix}`, {
                 headers: { Authorization: `Bearer ${session.access_token}` },
                 signal: opts.signal,
@@ -541,7 +547,7 @@ async function downloadJobImageByIndex(
                 const hint = res.status === 404 ? "（图片可能尚未归档到 R2）" : "";
                 throw new Error(`下载卡藏生成图失败 (${res.status})${hint}`);
             }
-            return await blobToDataUrl(await res.blob());
+            return await validatedImageDataUrl(await res.blob());
         } catch (error) {
             lastError = error;
             if (opts.signal?.aborted) throw error;
@@ -558,16 +564,16 @@ async function downloadAllJobImages(
     session: PromptHubSession,
     jobId: string,
     job: PromptHubGenerationJob,
-    opts: { apiBase?: string; signal?: AbortSignal; onStage?: (stage: PromptHubCanvasGenerationStage) => void },
+    opts: { apiBase?: string; signal?: AbortSignal; onStage?: (stage: PromptHubCanvasGenerationStage) => void; expectedCount?: number },
 ) {
     const urls = collectPromptHubJobImageUrls(job);
-    if (!urls.length) throw new Error("卡藏接口没有返回图片");
+    const resultCount = Math.max(urls.length, Math.max(1, opts.expectedCount || 1));
 
     const items: PromptHubCanvasImageItem[] = [];
     const errors: string[] = [];
-    for (let index = 0; index < urls.length; index += 1) {
+    for (let index = 0; index < resultCount; index += 1) {
         if (opts.signal?.aborted) throw new Error("已取消生成");
-        opts.onStage?.({ progress: Math.min(94, 84 + Math.round((index / Math.max(urls.length, 1)) * 10)), stage: `下载结果 ${index + 1}/${urls.length}` });
+        opts.onStage?.({ progress: Math.min(94, 84 + Math.round((index / resultCount) * 10)), stage: `下载结果 ${index + 1}/${resultCount}` });
         try {
             const dataUrl = await downloadJobImageByIndex(session, jobId, index, {
                 apiBase: opts.apiBase,
@@ -575,7 +581,7 @@ async function downloadAllJobImages(
                 fallbackUrl: urls[index],
             });
             items.push({ id: nanoid(), dataUrl });
-            opts.onStage?.({ progress: Math.min(96, 84 + Math.round(((index + 1) / Math.max(urls.length, 1)) * 10)), stage: `结果已下载 ${items.length}/${urls.length}` });
+            opts.onStage?.({ progress: Math.min(96, 84 + Math.round(((index + 1) / resultCount) * 10)), stage: `结果已下载 ${items.length}/${resultCount}` });
         } catch (error) {
             errors.push(formatFetchError(error, `第 ${index + 1} 张`));
         }
@@ -614,6 +620,7 @@ async function runOnePromptHubJob(opts: PromptHubCanvasGenerateOpts, refImageUrl
         apiBase: opts.apiBase,
         signal: opts.signal,
         onStage: opts.onStage,
+        expectedCount: jobCount,
     });
     return {
         items,
@@ -727,5 +734,27 @@ export async function quotePromptHubGenerationCost(
 
     return Number(data?.credits ?? data?.cost ?? 0);
 
+}
+
+async function validatedImageDataUrl(blob: Blob) {
+    return blobToDataUrl((await validateImageBlob(blob)).blob);
+}
+
+function waitForRetryDelay(ms: number, signal?: AbortSignal) {
+    return new Promise<void>((resolve, reject) => {
+        if (signal?.aborted) {
+            reject(new DOMException("Aborted", "AbortError"));
+            return;
+        }
+        const timer = window.setTimeout(() => {
+            signal?.removeEventListener("abort", onAbort);
+            resolve();
+        }, ms);
+        const onAbort = () => {
+            window.clearTimeout(timer);
+            reject(new DOMException("Aborted", "AbortError"));
+        };
+        signal?.addEventListener("abort", onAbort, { once: true });
+    });
 }
 

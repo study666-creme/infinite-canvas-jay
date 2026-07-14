@@ -3,6 +3,7 @@ import axios from "axios";
 import { dataUrlToFile } from "@/lib/image-utils";
 import { deleteStoredMedia, getMediaBlob, resolveMediaUrl, uploadMediaFile, type UploadedFile } from "@/services/file-storage";
 import { imageToDataUrl } from "@/services/image-storage";
+import { validateMediaBlob } from "@/services/media-validation";
 import { boolConfig, buildSeedancePromptText, isSeedanceVideoConfig, normalizeSeedanceDuration, normalizeSeedanceRatio, normalizeSeedanceResolution, seedanceVideoReferenceError, SEEDANCE_REFERENCE_LIMITS } from "@/lib/seedance-video";
 import { buildApiUrl, modelOptionName, resolveModelRequestConfig, type AiConfig } from "@/stores/use-config-store";
 import type { ReferenceImage } from "@/types/image";
@@ -25,7 +26,7 @@ type SeedanceTask = {
     content?: { video_url?: string; last_frame_url?: string } | null;
 };
 type ApiEnvelope<T> = T | { code?: number; data?: T | null; msg?: string };
-type RequestOptions = { signal?: AbortSignal; onProgress?: (progress: VideoGenerationProgress) => void };
+type RequestOptions = { signal?: AbortSignal; onProgress?: (progress: VideoGenerationProgress) => void; onTask?: (task: VideoGenerationTask) => void };
 
 const VIDEO_REQUEST_TIMEOUT_MS = 300_000;
 
@@ -56,21 +57,40 @@ export async function requestVideoGeneration(config: AiConfig, prompt: string, r
     options?.onProgress?.({ phase: "creating", percent: 6, message: "提交任务" });
     const started = await createVideoGenerationStart(config, prompt, references, videoReferences, audioReferences, options);
     if (started.status === "completed") {
+        if (started.result.taskId && started.result.provider && started.result.model) {
+            options?.onTask?.({ id: started.result.taskId, provider: started.result.provider, model: started.result.model });
+        }
         options?.onProgress?.({ phase: "downloading", percent: 96, message: "保存视频" });
         return started.result;
     }
     const task = started.task;
+    options?.onTask?.(task);
+    return waitForVideoGenerationTask(config, task, options);
+}
+
+export async function waitForVideoGenerationTask(config: AiConfig, task: VideoGenerationTask, options?: RequestOptions): Promise<VideoGenerationResult> {
     options?.onProgress?.({ phase: "queued", percent: 12, message: "排队中" });
     const delayMs = task.provider === "seedance" ? 5000 : 2500;
     const maxAttempts = 120;
+    let consecutivePollErrors = 0;
     for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
         if (options?.signal?.aborted) throw new DOMException("Aborted", "AbortError");
-        const state = await pollVideoGenerationTask(config, task, options);
+        let state: VideoGenerationTaskState;
+        try {
+            state = await pollVideoGenerationTask(config, task, options);
+            consecutivePollErrors = 0;
+        } catch (error) {
+            consecutivePollErrors += 1;
+            if (consecutivePollErrors > 6 || !isRetryablePollingError(error)) throw error;
+            options?.onProgress?.({ phase: "processing", percent: Math.min(90, 12 + Math.round(((attempt + 1) / maxAttempts) * 78)), message: "连接波动，正在恢复" });
+            await delay(Math.min(15_000, delayMs * consecutivePollErrors), options?.signal);
+            continue;
+        }
         if (state.status === "completed") {
             options?.onProgress?.({ phase: "downloading", percent: 96, message: "保存视频" });
             return state.result;
         }
-        if (state.status === "failed") throw new Error(state.error);
+        if (state.status === "failed") throw new Error(`视频任务失败：${state.error}`);
         if (attempt === maxAttempts - 1) throw new Error(`${task.provider === "seedance" ? "Seedance " : ""}视频生成超时，请稍后重试`);
         const percent = Math.min(92, 12 + Math.round(((attempt + 1) / maxAttempts) * 80));
         options?.onProgress?.({ phase: "processing", percent, message: task.provider === "seedance" ? "Seedance 生成中" : "视频生成中" });
@@ -117,42 +137,38 @@ export async function pollVideoGenerationTask(config: AiConfig, task: VideoGener
 
 export async function storeGeneratedVideo(result: VideoGenerationResult, config?: AiConfig): Promise<UploadedFile> {
     const mimeType = result.mimeType || "video/mp4";
+    const errors: string[] = [];
 
     if (result.blob?.size) {
-        return uploadMediaFile(normalizeVideoBlob(result.blob, mimeType), "video");
+        try {
+            return await uploadMediaFile(normalizeVideoBlob(result.blob, mimeType), "video");
+        } catch (error) {
+            if (isPermanentStorageError(error)) throw error;
+            errors.push(errorMessage(error));
+        }
     }
 
-    if (config?.baseUrl.trim() && config.apiKey.trim()) {
+    const requestConfig = config && result.model ? resolveModelRequestConfig(config, result.model) : config;
+    if (requestConfig?.baseUrl.trim() && requestConfig.apiKey.trim()) {
         if (result.taskId && result.provider && result.model) {
-            for (let attempt = 0; attempt < 3; attempt += 1) {
-                try {
-                    const blob = normalizeVideoBlob(await downloadTaskContentBlob(config, { id: result.taskId, provider: result.provider, model: result.model }), mimeType);
-                    if (blob.size) return uploadMediaFile(blob, "video");
-                } catch {
-                    if (attempt === 2) break;
-                    await delay(1200);
-                }
+            try {
+                return await retryVideoPersistence(async () => normalizeVideoBlob(await downloadTaskContentBlob(requestConfig, { id: result.taskId!, provider: result.provider!, model: result.model! }), mimeType));
+            } catch (error) {
+                errors.push(errorMessage(error));
             }
         }
 
         if (result.url) {
-            for (let attempt = 0; attempt < 3; attempt += 1) {
-                try {
-                    const blob = normalizeVideoBlob(await downloadRemoteVideoBlob(config, result.url), mimeType);
-                    if (blob.size) return uploadMediaFile(blob, "video");
-                } catch {
-                    if (attempt === 2) break;
-                    await delay(1200);
-                }
+            try {
+                return await retryVideoPersistence(async () => normalizeVideoBlob(await downloadRemoteVideoBlob(requestConfig, result.url!), mimeType));
+            } catch (error) {
+                errors.push(errorMessage(error));
             }
         }
     }
 
-    if (result.url) {
-        return { url: result.url, storageKey: "", bytes: 0, mimeType, width: 1280, height: 720 };
-    }
-
-    throw new Error("视频接口没有返回可播放的视频");
+    const details = errors.filter(Boolean).at(-1);
+    throw new Error(details ? `视频已生成，但保存到画布失败：${details}` : "视频接口没有返回可保存的视频");
 }
 
 export type VideoPlaybackResult = { kind: "url"; url: string } | { kind: "file"; url: string; file: UploadedFile } | { kind: "error"; message: string };
@@ -169,12 +185,12 @@ export type VideoPlaybackInput = {
 };
 
 async function isPlayableMediaUrl(url: string) {
-    if (!url.startsWith("blob:") && !url.startsWith("data:")) return true;
+    if (/^https?:\/\//i.test(url)) return canPlayRemoteVideo(url);
     try {
         const response = await fetch(url);
         if (!response.ok) return false;
-        const blob = await response.blob();
-        return blob.size > 0;
+        await validateMediaBlob(await response.blob(), "video");
+        return true;
     } catch {
         return false;
     }
@@ -188,10 +204,12 @@ export async function resolveVideoPlayback(input: VideoPlaybackInput): Promise<V
     if (storageKey && !ignoreStorageKey) {
         const blob = await getMediaBlob(storageKey);
         if (blob?.size) {
-            if (await looksLikeVideoBlob(blob)) {
-                return { kind: "url", url: URL.createObjectURL(normalizeVideoBlob(blob, mimeType)) };
+            try {
+                const validated = await validateMediaBlob(normalizeVideoBlob(blob, mimeType), "video");
+                return { kind: "url", url: URL.createObjectURL(validated.blob) };
+            } catch {
+                await deleteStoredMedia([storageKey]);
             }
-            await deleteStoredMedia([storageKey]);
         } else {
             const resolved = await resolveMediaUrl(storageKey, "");
             if (resolved && !/^https?:\/\//i.test(resolved)) {
@@ -243,7 +261,7 @@ export async function resolveVideoPlayback(input: VideoPlaybackInput): Promise<V
             return { kind: "file", url: file.url, file };
         } catch (error) {
             const message = error instanceof Error ? error.message : "视频代理下载失败";
-            if (/404|405|not found|not allowed/i.test(message)) {
+            if (await isPlayableMediaUrl(content)) {
                 return { kind: "url", url: content };
             }
             if (/failed to fetch|network error/i.test(message)) {
@@ -254,7 +272,7 @@ export async function resolveVideoPlayback(input: VideoPlaybackInput): Promise<V
     }
 
     if (content) {
-        return { kind: "error", message: "无法播放远程视频，请检查 API 配置或重启 jimeng 服务" };
+        return { kind: "error", message: "无法读取这个视频，原文件可能已失效或格式不受浏览器支持" };
     }
 
     return { kind: "error", message: "没有可播放的视频地址" };
@@ -274,13 +292,15 @@ async function blobFromDataUrl(dataUrl: string) {
 }
 
 export async function downloadTaskContentBlob(config: AiConfig, task: VideoGenerationTask, options?: RequestOptions) {
+    const requestConfig = resolveModelRequestConfig(config, task.model);
+    assertVideoConfig(requestConfig, requestConfig.model);
     if (task.provider === "xai") {
-        const state = await pollXaiVideoTask(config, task, options);
+        const state = await pollXaiVideoTask(requestConfig, task, options);
         if (state.status !== "completed" || !state.result.url) throw new Error("Grok 视频任务尚未返回可下载地址");
-        return downloadRemoteVideoBlob(config, state.result.url, options);
+        return downloadRemoteVideoBlob(requestConfig, state.result.url, options);
     }
-    const url = task.provider === "seedance" ? seedanceContentApiUrl(config, task.id) : aiApiUrl(config, `/videos/${task.id}/content`);
-    const response = await axios.get<Blob>(url, { headers: aiHeaders(config), responseType: "blob", signal: options?.signal, timeout: VIDEO_REQUEST_TIMEOUT_MS });
+    const url = task.provider === "seedance" ? seedanceContentApiUrl(requestConfig, task.id) : aiApiUrl(requestConfig, `/videos/${task.id}/content`);
+    const response = await axios.get<Blob>(url, { headers: aiHeaders(requestConfig), responseType: "blob", signal: options?.signal, timeout: VIDEO_REQUEST_TIMEOUT_MS });
     await assertVideoBlob(response.data);
     if (!response.data.size) throw new Error("视频内容为空，请稍后重试");
     return response.data;
@@ -684,7 +704,7 @@ async function assertVideoBlob(blob: Blob) {
                 if (error instanceof Error && error.message !== "Unexpected token") throw error;
             }
         }
-        throw new Error("下载内容不是有效视频文件，请确认 jimeng 服务已重启");
+        throw new Error("下载内容不是有效视频文件，请稍后重试");
     }
 }
 
@@ -701,6 +721,59 @@ async function looksLikeVideoBlob(blob: Blob) {
 
 function isPublicMediaUrl(value: string) {
     return /^https?:\/\//i.test(value || "");
+}
+
+async function retryVideoPersistence(load: () => Promise<Blob>) {
+    const delays = [0, 1200, 2500, 5000, 8000, 12_000];
+    let lastError: unknown;
+    for (let attempt = 0; attempt < delays.length; attempt += 1) {
+        if (delays[attempt]) await delay(delays[attempt]);
+        try {
+            const blob = await load();
+            return await uploadMediaFile(blob, "video");
+        } catch (error) {
+            if (isPermanentStorageError(error)) throw error;
+            lastError = error;
+        }
+    }
+    throw lastError instanceof Error ? lastError : new Error("视频文件暂时无法保存");
+}
+
+function canPlayRemoteVideo(url: string) {
+    return new Promise<boolean>((resolve) => {
+        const video = document.createElement("video");
+        let settled = false;
+        const finish = (playable: boolean) => {
+            if (settled) return;
+            settled = true;
+            window.clearTimeout(timer);
+            video.onloadedmetadata = null;
+            video.onerror = null;
+            video.removeAttribute("src");
+            video.load();
+            resolve(playable);
+        };
+        const timer = window.setTimeout(() => finish(false), 12_000);
+        video.preload = "metadata";
+        video.onloadedmetadata = () => finish(video.videoWidth > 0 && video.videoHeight > 0);
+        video.onerror = () => finish(false);
+        video.src = url;
+        video.load();
+    });
+}
+
+function isRetryablePollingError(error: unknown) {
+    const message = errorMessage(error).toLowerCase();
+    if (/鉴权|api key|base url|不支持|参数|余额|额度不足/.test(message)) return false;
+    return /timeout|超时|network|网络|连接|查询失败|fetch|429|限流|404|408|425|500|502|503|504/.test(message);
+}
+
+function errorMessage(error: unknown) {
+    return error instanceof Error ? error.message : String(error || "");
+}
+
+function isPermanentStorageError(error: unknown) {
+    return /权限|文件夹|quota|存储空间|磁盘空间|notallowederror|quotaexceedederror/i.test(errorMessage(error));
 }
 
 function delay(ms: number, signal?: AbortSignal) {

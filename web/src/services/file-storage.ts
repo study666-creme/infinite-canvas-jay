@@ -20,6 +20,8 @@ export type UploadedFile = { url: string; storageKey?: string; bytes: number; mi
 
 type UploadMediaOptions = {
     source?: LocalMediaSource;
+    allowMetadataTimeout?: boolean;
+    metadataTimeoutMs?: number;
 };
 
 const store = localforage.createInstance({ name: "infinite-canvas", storeName: "media_files" });
@@ -32,7 +34,10 @@ function prefixToKind(prefix: string): "video" | "audio" {
 
 export async function uploadMediaFile(input: string | Blob, prefix = "file", options: UploadMediaOptions = {}): Promise<UploadedFile> {
     const kind = prefixToKind(prefix);
-    const validated = await validateMediaBlob(await sourceToBlob(input), kind);
+    const validated = await validateMediaBlob(await sourceToBlob(input), kind, {
+        allowMetadataTimeout: options.allowMetadataTimeout,
+        metadataTimeoutMs: options.metadataTimeoutMs,
+    });
     const blob = validated.blob;
     const source = options.source ?? "generated";
 

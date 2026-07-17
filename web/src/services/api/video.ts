@@ -141,7 +141,7 @@ export async function storeGeneratedVideo(result: VideoGenerationResult, config?
 
     if (result.blob?.size) {
         try {
-            return await uploadMediaFile(normalizeVideoBlob(result.blob, mimeType), "video");
+            return await persistGeneratedVideoBlob(normalizeVideoBlob(result.blob, mimeType));
         } catch (error) {
             if (isPermanentStorageError(error)) throw error;
             errors.push(errorMessage(error));
@@ -730,13 +730,17 @@ async function retryVideoPersistence(load: () => Promise<Blob>) {
         if (delays[attempt]) await delay(delays[attempt]);
         try {
             const blob = await load();
-            return await uploadMediaFile(blob, "video");
+            return await persistGeneratedVideoBlob(blob);
         } catch (error) {
             if (isPermanentStorageError(error)) throw error;
             lastError = error;
         }
     }
     throw lastError instanceof Error ? lastError : new Error("视频文件暂时无法保存");
+}
+
+function persistGeneratedVideoBlob(blob: Blob) {
+    return uploadMediaFile(blob, "video", { allowMetadataTimeout: true, metadataTimeoutMs: 5_000 });
 }
 
 function canPlayRemoteVideo(url: string) {

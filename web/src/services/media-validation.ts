@@ -10,19 +10,36 @@ export type ValidatedMedia = {
     durationMs?: number;
 };
 
+export type MediaValidationOptions = {
+    allowMetadataTimeout?: boolean;
+    metadataTimeoutMs?: number;
+};
+
 const MEDIA_TIMEOUT_MS = 15_000;
 const TEXT_PREVIEW_BYTES = 768;
 
+class MediaMetadataTimeoutError extends Error {}
+
 export async function validateImageBlob(input: Blob): Promise<ValidatedMedia & { width: number; height: number }> {
-    const blob = await normalizeAndValidatePayload(input, "image");
+    const { blob, mimeType } = await validateMediaPayload(input, "image");
     const dimensions = await readImageDimensions(blob);
-    return { blob, mimeType: blob.type || "image/png", ...dimensions };
+    return { blob, mimeType, ...dimensions };
 }
 
-export async function validateMediaBlob(input: Blob, kind: "video" | "audio"): Promise<ValidatedMedia> {
+export async function validateMediaBlob(input: Blob, kind: "video" | "audio", options: MediaValidationOptions = {}): Promise<ValidatedMedia> {
+    const validated = await validateMediaPayload(input, kind);
+    let metadata: Omit<ValidatedMedia, "blob" | "mimeType"> = {};
+    try {
+        metadata = await readMediaMetadata(validated.blob, kind, options.metadataTimeoutMs);
+    } catch (error) {
+        if (!options.allowMetadataTimeout || !(error instanceof MediaMetadataTimeoutError)) throw error;
+    }
+    return { ...validated, ...metadata };
+}
+
+export async function validateMediaPayload(input: Blob, kind: MediaKind): Promise<Pick<ValidatedMedia, "blob" | "mimeType">> {
     const blob = await normalizeAndValidatePayload(input, kind);
-    const metadata = await readMediaMetadata(blob, kind);
-    return { blob, mimeType: blob.type || fallbackMimeType(kind), ...metadata };
+    return { blob, mimeType: blob.type || fallbackMimeType(kind) };
 }
 
 export async function isValidMediaBlob(input: Blob, kind: MediaKind) {
@@ -141,7 +158,7 @@ function readImageDimensions(blob: Blob) {
     });
 }
 
-function readMediaMetadata(blob: Blob, kind: "video" | "audio") {
+function readMediaMetadata(blob: Blob, kind: "video" | "audio", timeoutMs = MEDIA_TIMEOUT_MS) {
     return new Promise<{ width?: number; height?: number; durationMs?: number }>((resolve, reject) => {
         const url = URL.createObjectURL(blob);
         const media = document.createElement(kind);
@@ -164,7 +181,7 @@ function readMediaMetadata(blob: Blob, kind: "video" | "audio") {
             if (error) reject(error);
             else resolve({ width, height, durationMs });
         };
-        const timer = window.setTimeout(() => finish(new Error(`${mediaLabel(kind)}读取超时，请稍后重试`)), MEDIA_TIMEOUT_MS);
+        const timer = window.setTimeout(() => finish(new MediaMetadataTimeoutError(`${mediaLabel(kind)}读取超时，请稍后重试`)), timeoutMs);
         media.preload = "metadata";
         media.onloadedmetadata = () => {
             if (kind === "video" && (!(media as HTMLVideoElement).videoWidth || !(media as HTMLVideoElement).videoHeight)) {

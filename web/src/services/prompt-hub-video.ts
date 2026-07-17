@@ -3,7 +3,7 @@
 import { nanoid } from "nanoid";
 
 import { getMediaBlob } from "@/services/file-storage";
-import { validateMediaBlob } from "@/services/media-validation";
+import { validateMediaPayload } from "@/services/media-validation";
 import { uploadPromptHubReferenceImages, type PromptHubCanvasGenerationStage } from "@/services/prompt-hub-generation";
 import {
     downloadPromptHubVideo,
@@ -183,7 +183,7 @@ async function downloadCompletedVideoWithRetry(session: PromptHubSession, jobId:
         if (delays[attempt]) await waitForPollingDelay(delays[attempt], opts.signal);
         try {
             const blob = await downloadPromptHubVideo(session, jobId, { apiBase: opts.apiBase, signal: opts.signal });
-            return (await validateMediaBlob(blob, "video")).blob;
+            return (await validateMediaPayload(blob, "video")).blob;
         } catch (error) {
             lastError = error;
             opts.onStage?.({ progress: 96, stage: "结果正在归档，自动重试" });

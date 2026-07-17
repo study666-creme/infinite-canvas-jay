@@ -6,6 +6,7 @@ export const LEGACY_KACHANG_API_MODEL_PREFIX = "kachang-api:";
 export const LEGACY_PROMPT_HUB_MODEL_PREFIX = "ph-hub:";
 export const PH_HUB_MODEL_PREFIX = KAZHANG_API_MODEL_PREFIX;
 export const GROK_VIDEO_ASPECT_RATIOS = ["1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3"] as const;
+const PROMPT_HUB_SCOPED_MODEL_PATTERN = /^_sf-[A-Za-z0-9_-]+::\S+$/;
 
 const PROMPT_HUB_MODEL_LABELS: Record<string, string> = {
     "creative-5-5": "全能模型5.5",
@@ -32,17 +33,20 @@ export function toPromptHubModelValue(modelId: string) {
 }
 
 export function isPromptHubModelValue(value?: string | null) {
-    return typeof value === "string" && (value.startsWith(KAZHANG_API_MODEL_PREFIX) || value.startsWith(LEGACY_KACHANG_API_MODEL_PREFIX) || value.startsWith(LEGACY_PROMPT_HUB_MODEL_PREFIX));
+    const normalized = String(value || "").trim();
+    return Boolean(normalized) && (normalized.startsWith(KAZHANG_API_MODEL_PREFIX) || normalized.startsWith(LEGACY_KACHANG_API_MODEL_PREFIX) || normalized.startsWith(LEGACY_PROMPT_HUB_MODEL_PREFIX) || PROMPT_HUB_SCOPED_MODEL_PATTERN.test(normalized));
 }
 
 export function parsePromptHubModelId(value?: string | null) {
-    if (!isPromptHubModelValue(value)) return null;
-    const prefix = value!.startsWith(KAZHANG_API_MODEL_PREFIX)
+    const normalized = String(value || "").trim();
+    if (!isPromptHubModelValue(normalized)) return null;
+    if (PROMPT_HUB_SCOPED_MODEL_PATTERN.test(normalized)) return normalized;
+    const prefix = normalized.startsWith(KAZHANG_API_MODEL_PREFIX)
         ? KAZHANG_API_MODEL_PREFIX
-        : value!.startsWith(LEGACY_KACHANG_API_MODEL_PREFIX)
+        : normalized.startsWith(LEGACY_KACHANG_API_MODEL_PREFIX)
           ? LEGACY_KACHANG_API_MODEL_PREFIX
           : LEGACY_PROMPT_HUB_MODEL_PREFIX;
-    return value!.slice(prefix.length) || null;
+    return normalized.slice(prefix.length) || null;
 }
 
 export function promptHubModelPickerLabel(modelId: string, label?: string) {

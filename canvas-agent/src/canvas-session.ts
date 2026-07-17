@@ -197,7 +197,7 @@ function configNodeOp(id: string, input: Record<string, unknown>, x: number, y: 
             composerContent: prompt,
             prompt,
             status: "idle",
-            model: input.model,
+            model: normalizeGenerationModel(input.model),
             size: input.size,
             quality: input.quality,
             count: input.count,
@@ -211,6 +211,11 @@ function configNodeOp(id: string, input: Record<string, unknown>, x: number, y: 
             audioInstructions: input.audioInstructions,
         }),
     };
+}
+
+function normalizeGenerationModel(value: unknown) {
+    const model = String(value || "").trim();
+    return /^_sf-[A-Za-z0-9_-]+::\S+$/.test(model) ? `kazhang-api:${model}` : model;
 }
 
 function generationFlowOps(input: Record<string, unknown>, state: CanvasSnapshot | null) {

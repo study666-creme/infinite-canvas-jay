@@ -1441,7 +1441,8 @@ function defaultGenerationModel(config: AiConfig, mode: "text" | "image" | "vide
 }
 
 function resolveGenerationModel(config: AiConfig, mode: "text" | "image" | "video" | "audio", model?: string) {
-    const normalized = normalizeModelOptionValue(model, config.channels);
+    const promptHubModelId = parsePromptHubModelId(model);
+    const normalized = normalizeModelOptionValue(promptHubModelId ? toPromptHubModelValue(promptHubModelId) : model, config.channels);
     return normalized && selectableModelsByCapability(config, mode).includes(normalized) ? normalized : defaultGenerationModel(config, mode);
 }
 

@@ -74,9 +74,9 @@ const PROMPT_HUB_DEFAULT_IMAGE_MODEL = "ph-hub:image2";
 const PROMPT_HUB_DEFAULT_VIDEO_MODEL = "ph-hub:sd2.0";
 const PROMPT_HUB_DEFAULT_TEXT_MODEL = "ph-hub:creative-5-5";
 const PROMPT_HUB_MODEL_PREFIX = "ph-hub:";
-const CATALOG_MODEL_SELECTION_VERSION = 2;
+const CATALOG_MODEL_SELECTION_VERSION = 4;
 export const DEFAULT_PROMPT_HUB_MODEL_SELECTIONS: Record<ModelCapability, string[]> = {
-    image: ["ph-hub:image2", "ph-hub:image2-pro", "ph-hub:image2-hd", "ph-hub:lingtu-fast"],
+    image: ["ph-hub:image2-economy", "ph-hub:image2", "ph-hub:image2-4k-fast", "ph-hub:image2-pro", "ph-hub:image2-hd", "ph-hub:lingtu-fast"],
     video: ["ph-hub:sd2.0", "ph-hub:sd2.0-fast", "ph-hub:sd2.0-mini", "ph-hub:sd2.0四图版", "ph-hub:sd2.0fast四图版", "ph-hub:sd1080-4k", "ph-hub:motion-video", "ph-hub:motion-video-1-5"],
     text: ["ph-hub:creative-5-5", "ph-hub:creative-5-6", "ph-hub:deepseek-v4-pro", "ph-hub:glm-5.1", "ph-hub:grok4.5pro"],
     audio: [],

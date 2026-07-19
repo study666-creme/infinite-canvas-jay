@@ -5,8 +5,10 @@ const DEFAULT_NEW_API_BASE_URL = "https://newapi.prompt-hubs.com";
 const FALLBACK_ALIASES: Record<string, { id: string; label: string; description: string }> = {
     "gpt-5.5": { id: "creative-5-5", label: "全能模型5.5", description: "通用创作与推理模型，最高 xhigh 思考。" },
     "gpt-5.6-sol": { id: "creative-5-6", label: "全能模型5.6", description: "旗舰创作与推理模型，最高 ultra 思考。" },
+    "gpt-image-2-1k": { id: "image2-economy", label: "全能模型2 · 特价 1K", description: "特价 1K 生图模型，支持参考图。" },
     "gpt-image-2": { id: "image2", label: "全能模型2 · 1K", description: "标准生图模型，固定 1K。" },
-    "gpt-image-2-ext": { id: "image2-pro", label: "全能模型2 · 高质量 2K/4K", description: "高质量生图模型，支持 2K/4K。" },
+    "gpt-image-2-4k-fast": { id: "image2-4k-fast", label: "全能模型2 · 极速 4K", description: "固定 4K 的快速生图模型，支持多种画面比例。" },
+    "gpt-image-2-ext": { id: "image2-pro", label: "全能模型2 · 高质量 1K/2K/4K", description: "高质量生图模型，支持 1K/2K/4K。" },
     image2k4k: { id: "image2-hd", label: "全能模型2 · 经济 2K/4K", description: "高分辨率经济模型，支持 2K/4K。" },
     "nano-banana-fast": { id: "lingtu-fast", label: "香蕉 · 极速 1K", description: "快速生图模型，固定 1K。" },
     "nano-banana-2": { id: "lingtu-2", label: "香蕉 · 2代 1K/2K/4K", description: "通用生图模型，支持 1K/2K/4K。" },

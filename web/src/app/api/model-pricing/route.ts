@@ -29,7 +29,9 @@ const CREDITS_PER_YUAN = 100;
 const PUBLIC_MODEL_IDS: Record<string, string> = {
     "gpt-5.5": "creative-5-5",
     "gpt-5.6-sol": "creative-5-6",
+    "gpt-image-2-1k": "image2-economy",
     "gpt-image-2": "image2",
+    "gpt-image-2-4k-fast": "image2-4k-fast",
     "gpt-image-2-ext": "image2-pro",
     image2k4k: "image2-hd",
     "nano-banana-fast": "lingtu-fast",
